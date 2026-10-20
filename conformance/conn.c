@@ -123,6 +123,14 @@ static int client(Handle stranger)
             CHECK(Signal(server, 1ULL << 20) == ERR_BADHANDLE);
             CHECK(ShareArea((Handle)area, server, AREAR_READ) == 0);
             CHECK(FreeArea((Handle)area) == 0);
+
+            /* W^X holds across the two processes too (review M4). */
+            area = AllocArea(4096, AREAF_EXEC, &mine);
+            CHECK(area > 0);
+            CHECK(ShareArea((Handle)area, server, AREAR_READ | AREAR_EXEC) == ERR_RIGHTS);
+            CHECK(ShareArea((Handle)area, server, AREAR_READ | AREAR_WRITE) == 0);
+            CHECK(ProtectArea((Handle)area, AREAR_READ | AREAR_EXEC) == ERR_RIGHTS);
+            CHECK(FreeArea((Handle)area) == 0);
             CHECK(QueryArea(a, &info) == 0 && info.ai_Sharers == 2);
             CHECK(OpenPort("conn2", sig, 0, 0, &a2) > 0);
             CHECK(a2->ca_Closed == 0);

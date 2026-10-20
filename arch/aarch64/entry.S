@@ -40,7 +40,7 @@
 
 /* Block descriptors: valid block, AttrIndx, SH, AF, PXN/UXN. */
 #define BLOCK_DEVICE    0x0060000000000405  /* AttrIndx 1, AF, PXN, UXN */
-#define BLOCK_NORMAL    0x000000000000070d  /* AttrIndx 3, SH inner, AF; global */
+#define BLOCK_NORMAL    0x004000000000070d  /* AttrIndx 3, SH inner, AF, UXN; global */
 #define TABLE           0x3
 
 #define KERNEL_VOFFSET  0xffff000000000000

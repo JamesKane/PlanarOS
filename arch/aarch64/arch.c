@@ -22,7 +22,7 @@ extern char _kernel_start[], _kernel_end[];     /* link.ld */
 constexpr uint64_t DESC_VALID_MASK = 3;
 constexpr uint64_t DESC_BLOCK      = 1;
 constexpr uint64_t DESC_TABLE      = 3;
-constexpr uint64_t BLOCK_NORMAL    = 0x000000000000070d;
+constexpr uint64_t BLOCK_NORMAL    = 0x004000000000070d;     /* UXN: never user code */
 constexpr uint64_t GIB             = 1ULL << 30;
 constexpr uint64_t MIB2            = 1ULL << 21;
 

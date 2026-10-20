@@ -23,6 +23,12 @@
 #include "sched.h"
 #include "selftest.h"
 
+/* Harmless anywhere: kexec calls it from user mode, which must fault. */
+[[gnu::noinline]] static uint64_t kernel_forty_two(void)
+{
+    return 42;
+}
+
 [[noreturn]] static void fail(const char *test, const char *why)
 {
     kprintf("%s FAIL: %s\n", test, why);
@@ -701,8 +707,11 @@ static void expect_fault(const char *name, uint64_t arg, enum fault kind, uint64
 
     if (!atomic_load(&p->dead))
         fail("V1.4 fault", "faulting process never ended");
-    if (p->fault != kind)
+    if (p->fault != kind) {
+        kprintf("%s: fault %d, exit %lld; wanted fault %d\n", name, p->fault,
+                (long long)p->exit_code, kind);
         fail("V1.4 fault", "wrong kind of fault");
+    }
     if (addr && p->fault_addr != addr)
         fail("V1.4 fault", "wrong fault address");
     process_free(p);
@@ -799,8 +808,10 @@ void selftest_user(void)
     expect_fault("peek", (uint64_t)(uintptr_t)phys_to_virt(kernel_page), FAULT_READ,
                  (uint64_t)(uintptr_t)phys_to_virt(kernel_page));
     pmm_free(kernel_page);
-    kprintf("V1.4 fault ok: wild write, write to code, read of the kernel each ended "
-            "only their process\n");
+    expect_fault("kexec", (uint64_t)(uintptr_t)kernel_forty_two, FAULT_EXEC,
+                 (uint64_t)(uintptr_t)kernel_forty_two);
+    kprintf("V1.4 fault ok: wild write, write to code, read of the kernel, a call into "
+            "the kernel each ended only their process\n");
 
     spin_us = expect_killed("spin");
     wait_us = expect_killed("waiter");
@@ -895,7 +906,9 @@ void selftest_areas(void)
             (void *)p->fault_addr, (void *)p->stack_base);
     process_free(p);
     expect_fault("rofault", 0, FAULT_WRITE, 0);
-    kprintf("V1.5 rights ok: a write to a read-only Area faulted\n");
+    expect_fault("protrace", 0, FAULT_WRITE, 0);
+    kprintf("V1.5 rights ok: a write to a read-only Area faulted, and a write on another "
+            "CPU just after ProtectArea took write away\n");
 
     test_share();
 

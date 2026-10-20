@@ -205,6 +205,12 @@ bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
     bits |= flags & MAP_WRITE ? PTE_W : 0;
     bits |= flags & MAP_EXEC ? PTE_X : 0;
     bits |= flags & MAP_USER ? PTE_U : 0;
+    if (*pte & PTE_V) {
+        /* Changing a live mapping: every hart may cache the old one, so
+         * take it away everywhere before the new one goes in (review H2). */
+        *pte = 0;
+        fence_all(d->asid, va, PAGE_SIZE);
+    }
     *pte = (pa >> PAGE_SHIFT) << 10 | bits;
     __asm__ volatile("sfence.vma %0, %1" : : "r"(va), "r"((uint64_t)d->asid) : "memory");
     return true;

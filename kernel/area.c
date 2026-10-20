@@ -258,6 +258,25 @@ static void unlink_mapping(struct mapping *m)
     m->area->sharers--;
 }
 
+/*
+ * W^X over the whole Area, not each mapping (review M4): unless it's
+ * AREAF_RWX, no domain may write it while any domain may execute it.
+ * 'except' is the mapping about to change. Lock held.
+ */
+static bool wx_conflict(const struct area *a, const struct mapping *except, uint32_t rights)
+{
+    if (a->flags & AREAF_RWX)
+        return false;
+    for (const struct mapping *m = a->maps; m; m = m->next_in_area) {
+        uint32_t r = m->rights | (m->exec_bytes ? AREAR_EXEC : 0);
+
+        if (m != except && (((rights & AREAR_WRITE) && (r & AREAR_EXEC)) ||
+                            ((rights & AREAR_EXEC) && (r & AREAR_WRITE))))
+            return true;
+    }
+    return false;
+}
+
 /* Map 'a' into 'p'. With 'handle', only while that handle still names
  * 'a' (a racing FreeArea makes it ERR_BADHANDLE). Never into a process
  * being reclaimed. */
@@ -274,10 +293,12 @@ static int64_t map_into(struct area *a, struct process *p, uint32_t rights, uint
         kfree(m);
         return handle && a->handle != handle ? ERR_BADHANDLE : ERR_NOTFOUND;
     }
-    if (find(a, p)) {
+    if (find(a, p) || wx_conflict(a, nullptr, rights)) {
+        bool exists = find(a, p) != nullptr;
+
         spin_unlock_irqrestore(&lock, was);
         kfree(m);
-        return ERR_EXISTS;
+        return exists ? ERR_EXISTS : ERR_RIGHTS;
     }
     *m = (struct mapping){ .area = a, .proc = p, .rights = rights, .exec_bytes = exec_bytes,
                            .next_in_area = a->maps, .next_in_proc = p->maps };
@@ -570,6 +591,11 @@ int64_t area_protect_call(uint32_t h, uint32_t rights)
     }
     unsigned long was = spin_lock_irqsave(&lock);
     if (a->handle == h && (m = find(a, p))) {
+        if (wx_conflict(a, m, rights)) {
+            spin_unlock_irqrestore(&lock, was);
+            put_area(a);
+            return ERR_RIGHTS;
+        }
         m->rights = rights;
         map_pages(m);               /* remaps every page: arch_map breaks before making */
     }
