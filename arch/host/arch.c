@@ -158,6 +158,11 @@ uint64_t arch_unmap(struct arch_domain *, uint64_t)
     return 0;
 }
 
+bool arch_allows(struct arch_domain *, uint64_t, uint32_t)
+{
+    return false;
+}
+
 uint64_t arch_lookup(struct arch_domain *, uint64_t)
 {
     return 0;

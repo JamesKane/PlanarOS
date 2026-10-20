@@ -2,6 +2,7 @@
  * arch/rv64/trap.c -- S-mode trap handling
  */
 #include "arch.h"
+#include "area.h"
 #include "cpu.h"
 #include "irq.h"
 #include "kprintf.h"
@@ -75,7 +76,9 @@ static void user_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
         arch_irq_disable();
         return;
     }
-    if ((scause == 12 || scause == 13 || scause == 15) && riscv_fault_spurious(stval, scause))
+    if ((scause == 12 || scause == 13 || scause == 15) &&
+        (riscv_fault_spurious(stval, scause) ||
+         area_fault_retry(stval, scause == 12 ? MAP_EXEC : scause == 15 ? MAP_WRITE : MAP_READ)))
         return;
     if (scause == 2 && riscv_lazy_first_use(&f->sstatus, user_insn(f->sepc, stval),
                                             &task_self()->ctx))

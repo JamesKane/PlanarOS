@@ -241,6 +241,21 @@ uint64_t arch_lookup(struct arch_domain *d, uint64_t va)
  * that was invalid before another hart mapped the page: if the domain
  * now allows the access, fence locally and say so (the access is retried).
  */
+bool arch_allows(struct arch_domain *d, uint64_t va, uint32_t flags)
+{
+    pte_t *pte, need = PTE_V | PTE_U;
+
+    if (va >= ARCH_USER_TOP)
+        return false;
+    need |= flags & MAP_READ ? PTE_R : 0;
+    need |= flags & MAP_WRITE ? PTE_W : 0;
+    need |= flags & MAP_EXEC ? PTE_X : 0;
+    if (!(pte = walk(d, va, false)) || (*pte & need) != need)
+        return false;
+    __asm__ volatile("sfence.vma %0, %1" : : "r"(va), "r"((uint64_t)d->asid) : "memory");
+    return true;
+}
+
 bool riscv_fault_spurious(uint64_t va, uint64_t scause)
 {
     const struct arch_domain *d = this_cpu()->loaded_domain;

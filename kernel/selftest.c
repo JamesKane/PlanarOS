@@ -1006,8 +1006,9 @@ void selftest_areas(void)
     process_free(p);
     expect_fault("rofault", 0, FAULT_WRITE, 0);
     expect_fault("protrace", 0, FAULT_WRITE, 0);
+    expect_exit("protflip", 0);
     kprintf("V1.5 rights ok: a write to a read-only Area faulted, and a write on another "
-            "CPU just after ProtectArea took write away\n");
+            "CPU just after ProtectArea took write away; a reader lived through 2000 rights changes\n");
 
     test_share();
 

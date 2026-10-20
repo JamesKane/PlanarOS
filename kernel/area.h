@@ -58,6 +58,12 @@ void area_copy_in(struct area *a, uint64_t offset, const void *src, uint64_t len
 bool area_map_domain(struct area *a, struct arch_domain *d);
 void area_unmap_domain(struct area *a, struct arch_domain *d);
 
+/* A user fault at 'va': is the access (MAP_READ/WRITE/EXEC) allowed after
+ * all, now that no mapping is part way through changing? A page being
+ * remapped is briefly absent (break before make); a task touching it
+ * then retries rather than dying (review M6). */
+bool area_fault_retry(uint64_t va, uint32_t flags);
+
 /* Areas in existence, for leak checks. */
 unsigned area_count(void);
 

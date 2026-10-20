@@ -186,6 +186,17 @@ uint64_t arch_unmap(struct arch_domain *d, uint64_t va)
     return pa;
 }
 
+bool arch_allows(struct arch_domain *d, uint64_t va, uint32_t flags)
+{
+    desc_t *e, v;
+
+    if (va >= ARCH_USER_TOP || !(e = walk(d, va, false)))
+        return false;
+    v = __atomic_load_n(e, __ATOMIC_RELAXED);
+    return (v & DESC_VALID) && (v & AP_EL0) && !((flags & MAP_WRITE) && (v & AP_RO)) &&
+           !((flags & MAP_EXEC) && (v & UXN));
+}
+
 uint64_t arch_lookup(struct arch_domain *d, uint64_t va)
 {
     desc_t *e = walk(d, va, false);

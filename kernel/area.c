@@ -408,6 +408,19 @@ void area_copy_in(struct area *a, uint64_t offset, const void *src, uint64_t len
     }
 }
 
+bool area_fault_retry(uint64_t va, uint32_t flags)
+{
+    struct task *self = task_self();
+    bool ok;
+
+    if (!self->domain)
+        return false;
+    unsigned long was = spin_lock_irqsave(&lock);
+    ok = arch_allows(self->domain, va, flags);   /* no change part way through now */
+    spin_unlock_irqrestore(&lock, was);
+    return ok;
+}
+
 /* --- The kernel calls. --- */
 
 /* Under the handle table's lock, so the Area can't go first. */

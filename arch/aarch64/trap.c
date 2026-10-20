@@ -7,6 +7,7 @@
  */
 #include "aarch64.h"
 #include "arch.h"
+#include "area.h"
 #include "irq.h"
 #include "kprintf.h"
 #include "process.h"
@@ -92,8 +93,12 @@ void trap_el0_sync(struct trap_frame *f, uint64_t)
         arch_irq_disable();
         break;
     case EC_DABT_LOWER:
+        if (area_fault_retry(far, esr & (1u << 6) ? MAP_WRITE : MAP_READ))
+            break;
         process_fault(esr & (1u << 6) ? FAULT_WRITE : FAULT_READ, f->elr, far);
     case EC_IABT_LOWER:
+        if (area_fault_retry(far, MAP_EXEC))
+            break;
         process_fault(FAULT_EXEC, f->elr, far);
     case EC_PC_ALIGN:
     case EC_SP_ALIGN:
