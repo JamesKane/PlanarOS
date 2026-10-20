@@ -36,8 +36,12 @@ trap_entry:
     j       saved                   /* sscratch is 0 again already */
 from_user:
     addi    sp, sp, -FRAME_SIZE
+    sd      t0, 5*8(sp)
+    csrr    t0, scause
+    addi    t0, t0, -8              /* an ecall from U-mode: a kernel call */
+    beqz    t0, ecall_entry
     sd      x1, 1*8(sp)
-    .irp    n, 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+    .irp    n, 3,4,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
     sd      x\n, \n*8(sp)
     .endr
     csrrw   t0, sscratch, zero      /* the user sp; the kernel runs with 0 there */
@@ -84,6 +88,50 @@ to_kernel:
     ld      x\n, \n*8(sp)
     .endr
     ld      sp, 2*8(sp)
+    sret
+
+/*
+ * A kernel call. The user stub is an ordinary C call (syscalls.S), so the
+ * caller already expects t0-t6 and a1-a7 to be clobbered, and the kernel's
+ * C code keeps s0-s11 as the calling convention says, across switches
+ * too. So only what the stub itself needs back is saved (ra, gp, tp, sp),
+ * with the arguments and the call number for syscall_dispatch; the rest
+ * of the frame is never read. On the way out the clobberable registers
+ * are zeroed, so no kernel value reaches user mode.
+ */
+ecall_entry:
+    sd      ra, 1*8(sp)
+    sd      gp, 3*8(sp)
+    sd      tp, 4*8(sp)
+    .irp    n, 10,11,12,13,14,15,17
+    sd      x\n, \n*8(sp)
+    .endr
+    csrrw   t0, sscratch, zero
+    sd      t0, 2*8(sp)
+    ld      tp, FRAME_SIZE(sp)
+    csrr    t0, sepc
+    sd      t0, 32*8(sp)
+    csrr    t0, sstatus
+    sd      t0, 33*8(sp)
+    mv      a0, sp
+    call    trap_handler
+    ld      t0, 33*8(sp)
+    andi    t0, t0, ~SSTATUS_SIE    /* as trap_return, for the same reason */
+    csrw    sstatus, t0
+    addi    t0, sp, FRAME_SIZE
+    sd      tp, 0(t0)
+    csrw    sscratch, t0
+    ld      t0, 32*8(sp)
+    csrw    sepc, t0
+    ld      ra, 1*8(sp)
+    ld      gp, 3*8(sp)
+    ld      tp, 4*8(sp)
+    ld      a0, 10*8(sp)
+    .irp    n, 6,7,11,12,13,14,15,16,17,28,29,30,31
+    li      x\n, 0
+    .endr
+    ld      sp, 2*8(sp)
+    li      t0, 0
     sret
 
 /* void trap_resume(struct trap_frame *f): return through a frame built in C. */

@@ -63,6 +63,11 @@ void riscv_probe_asids(void)
     asid_count = (unsigned)((back >> SATP_ASID_SHIFT) & 0xffff) + 1;
 }
 
+unsigned arch_asid_bits(void)
+{
+    return asid_count > 1 ? riscv_asid_bits() : 0;
+}
+
 unsigned riscv_asid_bits(void)
 {
     return (unsigned)__builtin_ctz(asid_count);

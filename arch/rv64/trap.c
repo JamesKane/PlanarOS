@@ -7,6 +7,7 @@
 #include "irq.h"
 #include "kprintf.h"
 #include "pmm.h"
+#include "prof.h"
 #include "process.h"
 #include "riscv.h"
 #include "sched.h"
@@ -111,8 +112,10 @@ void trap_handler(struct trap_frame *f)
     uint64_t stval = scause == CAUSE_ECALL_U ? 0 : csr_read_stval();     /* CSRs cost */
     bool from_user = !(f->sstatus & SSTATUS_SPP);
 
-    if (from_user)
+    if (from_user) {
+        prof_mark(P_TRAP_IN);
         riscv_lazy_enter(&f->sstatus, &task_self()->ctx);
+    }
     if (scause & SCAUSE_INTERRUPT) {
         irq_enter();
         if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER)) {
@@ -133,6 +136,7 @@ void trap_handler(struct trap_frame *f)
         user_return();      /* a killed task stops here */
         riscv_lazy_return(&f->sstatus, &task_self()->ctx);
         riscv_lazy_note_reuse(f->sstatus);
+        prof_mark(P_TRAP_OUT);
         if (f->sepc >= ARCH_USER_TOP) {
             /* Returning to user mode at a kernel address: the frame was
              * overwritten. Always a kernel bug; say where. */

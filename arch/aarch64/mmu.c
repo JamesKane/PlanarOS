@@ -41,6 +41,13 @@ static desc_t *table(uint64_t pa)
     return phys_to_virt(pa);
 }
 
+static unsigned asid_count(void);
+
+unsigned arch_asid_bits(void)
+{
+    return (unsigned)__builtin_ctz(asid_count());
+}
+
 static unsigned asid_count(void)
 {
     return ((sysreg_read(id_aa64mmfr0_el1) >> 4) & 0xf) == 2 ? 65536 : 256;

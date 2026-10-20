@@ -139,6 +139,11 @@ const struct user_image user_images[] = {
     { nullptr, nullptr, nullptr },
 };
 
+unsigned arch_asid_bits(void)
+{
+    return 0;
+}
+
 bool arch_domain_create(struct arch_domain *)
 {
     return false;

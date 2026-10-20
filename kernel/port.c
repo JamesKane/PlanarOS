@@ -18,6 +18,7 @@
 #include "pmm.h"
 #include "port.h"
 #include "process.h"
+#include "prof.h"
 #include "sched.h"
 #include "syscall.h"
 
@@ -436,6 +437,7 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
 
     was = spin_lock_irqsave(&lock);
     if ((e = end_of(h))) {
+        prof_mark(P_X4);
         peer = &e->conn->end[e == &e->conn->end[CLIENT] ? SERVER : CLIENT];
         /* A client waiting on its server lends it priority; a server
          * waking its client on the way to sleep only hands over. */
@@ -447,6 +449,7 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
     }
     here = this_cpu();
     spin_unlock_irqrestore(&lock, was);
+    prof_mark(P_IPC_POSTED);
     if (!peer)
         return 0;
     /* Woken here, the peer runs as soon as this task waits. */

@@ -11,6 +11,7 @@
 #include "ktime.h"
 #include "port.h"
 #include "process.h"
+#include "prof.h"
 #include "sched.h"
 #include "syscall.h"
 
@@ -130,12 +131,13 @@ static int64_t sys_alloc_signal(struct task *t, int64_t bit)
     return bit;
 }
 
-int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
+static int64_t dispatch(uint64_t nr, const uint64_t a[6])
 {
     struct task *self = task_self();
 
     cpu_count(&this_cpu()->syscalls);
     cpu_count(&self->calls);
+    prof_mark(P_SYSCALL);
     switch (nr) {
     case SYS_KLOG:
         return sys_klog(self, a[0]);
@@ -188,6 +190,14 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
     default:
         return ERR_NOSYS;
     }
+}
+
+int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
+{
+    int64_t r = dispatch(nr, a);
+
+    prof_mark(P_SYSCALL_OUT);
+    return r;
 }
 
 uint64_t syscall_count(void)

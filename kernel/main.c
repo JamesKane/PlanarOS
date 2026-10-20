@@ -54,7 +54,8 @@
         bootargs_init();
         layout_init();
     }
-    kprintf("planar: user layout %s\n", layout_name(layout_boot()));
+    kprintf("planar: user layout %s, %u-bit ASIDs\n", layout_name(layout_boot()),
+            arch_asid_bits());
 
     if (have_fdt && cpu_enumerate(boot_cpu))
         kprintf("planar: %u CPUs; booted on %llx\n", ncpus, (unsigned long long)boot_cpu);

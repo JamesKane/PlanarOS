@@ -19,7 +19,7 @@ ifeq ($(wildcard mk/$(PLATFORM).mk),)
 $(error unknown PLATFORM '$(PLATFORM)': no mk/$(PLATFORM).mk)
 endif
 
-BUILD := build/$(PLATFORM)
+BUILD = build/$(PLATFORM)$(BUILD_SUFFIX)
 
 # Portable compile units: built for every platform.
 PORTABLE_SRCS := \
@@ -39,6 +39,7 @@ PORTABLE_SRCS := \
 	kernel/memmap.c \
 	kernel/pmm.c \
 	kernel/port.c \
+	kernel/prof.c \
 	kernel/process.c \
 	kernel/sched.c \
 	kernel/selftest.c \
@@ -59,6 +60,12 @@ FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\
 EXPECT := V2.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
+
+# make PROFILE=1: kernel/prof.h's marks count cycles (a separate build).
+ifeq ($(PROFILE),1)
+CFLAGS += -DPLANAR_PROF
+BUILD_SUFFIX := -prof
+endif
 CPPFLAGS := -Iinclude -Ikernel -Idrivers
 
 include mk/toolchain.mk

@@ -6,10 +6,11 @@
 #include "kprintf.h"
 #include "pmm.h"
 #include "process.h"
+#include "prof.h"
 #include "sched.h"
 
 static struct task idle_tasks[MAX_CPUS];
-static atomic_uint_fast64_t switches, steals, handoffs;
+static atomic_uint_fast64_t steals, handoffs;
 
 [[noreturn]] void task_start(void);
 
@@ -212,6 +213,7 @@ static void kick(struct cpu *c, bool now)
 
 void sched_kick(struct cpu *c)
 {
+    prof_mark(P_KICK);
     unsigned long was = arch_irq_save();
 
     kick(c, was);
@@ -279,13 +281,14 @@ static void finish_switch(struct task *prev)
     }
 }
 
-void schedule(void)
+/* schedule(), from the point where this CPU's rq_lock is held with
+ * interrupts off ('was' says whether to turn them back on). A task about
+ * to block comes in here straight from marking itself waiting, rather
+ * than letting go of the lock only to take it again. */
+static void schedule_locked(struct cpu *c, unsigned long was)
 {
-    unsigned long was = arch_irq_save();
-    struct cpu *c = this_cpu();
     struct task *prev = c->current, *next;
 
-    spin_lock(&c->rq_lock);
     atomic_store(&c->need_resched, false);
     atomic_store(&c->quantum_check, false);
     if (prev->state == TASK_RUNNING && prev != c->idle) {
@@ -304,6 +307,7 @@ void schedule(void)
     c->current = next;
     quantum_update(c);
     spin_unlock(&c->rq_lock);
+    prof_mark(P_X1);
 
     if (next != prev) {
         /* Its context may still be in use where it last ran. */
@@ -311,18 +315,34 @@ void schedule(void)
             arch_cpu_relax();
         atomic_store(&next->on_cpu, true);
         next->runs++;
-        atomic_fetch_add(&switches, 1);
+        cpu_count(&c->switches);
         c->switched_from = prev;
+        prof_mark(P_X2);
         /* A kernel task runs in the kernel's domain alone, so a domain
          * is loaded only while one of its tasks runs (process.c relies
          * on that to reclaim). */
         arch_switch_out(&prev->ctx);
+        prof_mark(P_X3);
         arch_domain_switch(next->domain);
+        prof_mark(P_SWITCH);
         arch_switch(&prev->ctx, &next->ctx);
+        prof_mark(P_SWITCHED);
         /* Back here, maybe on another CPU, as 'prev'. */
         finish_switch(this_cpu()->switched_from);
+        prof_mark(P_FINISHED);
     }
+    prof_mark(P_SCHED_OUT);
     arch_irq_restore(was);
+}
+
+void schedule(void)
+{
+    prof_mark(P_SCHED);
+    unsigned long was = arch_irq_save();
+    struct cpu *c = this_cpu();
+
+    spin_lock(&c->rq_lock);
+    schedule_locked(c, was);
 }
 
 /* A new task's first switch lands here (through arch_task_start). */
@@ -613,10 +633,10 @@ uint64_t task_wait_kick(uint64_t mask, struct cpu *kick_cpu)
         self->sig_waiting = mask | SIGF_KILL;
         spin_lock(&self->cpu->rq_lock);
         self->state = TASK_WAITING;
-        spin_unlock(&self->cpu->rq_lock);
         spin_unlock(&self->lock);
         loan = kick_cpu = nullptr;
-        schedule();
+        prof_mark(P_WAIT);
+        schedule_locked(self->cpu, 0);  /* rq_lock held; interrupts stay off */
         arch_irq_restore(was);
     }
 }
@@ -715,7 +735,11 @@ void task_sleep_until(uint64_t deadline)
 
 uint64_t sched_switches(void)
 {
-    return atomic_load(&switches);
+    uint64_t n = 0;
+
+    for (unsigned i = 0; i < ncpus; i++)
+        n += atomic_load_explicit(&cpus[i].switches, memory_order_relaxed);
+    return n;
 }
 
 uint64_t sched_steals(void)

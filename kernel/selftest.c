@@ -18,6 +18,7 @@
 #include "layout.h"
 #include "port.h"
 #include "process.h"
+#include "prof.h"
 #include "syscall.h"
 #include "userimg.h"
 #include "va.h"
@@ -995,6 +996,7 @@ void selftest_user(void)
 
     test_fpu();
     expect_exit("vecfp", 42);
+    expect_exit("callregs", 0);
 
     /* Reclamation is asynchronous only by a switch; give it a moment. */
     task_sleep_until(time_now() + time_us(5000));
@@ -1597,16 +1599,29 @@ static void pieces(void)
     for (unsigned i = 0; i < N; i++)
         cpu_count(&n);
     store = arch_read_cycles() - c0;
+    struct arch_domain d;
+    uint64_t dom = 0;
+
+    if (arch_domain_create(&d)) {
+        c0 = arch_read_cycles();
+        for (unsigned i = 0; i < N; i++) {
+            arch_domain_switch(&d);
+            arch_domain_switch(nullptr);
+        }
+        dom = (arch_read_cycles() - c0) / 2;
+        arch_domain_destroy(&d);
+    }
     arch_irq_restore(was);
     c0 = arch_read_cycles();
     for (unsigned i = 0; i < N; i++)
         task_yield();       /* nothing else ready here: picks itself */
     yield = arch_read_cycles() - c0;
     kprintf("V2.3 pieces: cycles for a lock and unlock %llu, an atomic add %llu, "
-            "interrupts off and on %llu, a per-CPU count %llu, schedule() to itself %llu\n",
+            "interrupts off and on %llu, a per-CPU count %llu, schedule() to itself %llu, "
+            "a domain switch %llu\n",
             (unsigned long long)(lock / N), (unsigned long long)(amo / N),
             (unsigned long long)(irq / N), (unsigned long long)(store / N),
-            (unsigned long long)(yield / N));
+            (unsigned long long)(yield / N), (unsigned long long)(dom / N));
 }
 
 void selftest_domsg(void)
@@ -1622,7 +1637,9 @@ void selftest_domsg(void)
     expect_exit("bench", 0);
     before = sched_handoffs();
     start = time_now();
+    prof_reset();
     with_echo("pingpong", 0, calls);
+    prof_report("pingpong, both CPUs' worth", 20000);
     ns = time_to_us((time_now() - start) * 1000) / 20000;
     if (sched_handoffs() - before < 20000 / 2)
         fail("V2.3 domsg", "DoMsg seldom handed the CPU to the server");
