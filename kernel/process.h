@@ -14,7 +14,7 @@
  * Built-in programs (conformance/) are flat images. A process's memory
  * is Areas (kernel/area.c): its image (code read and execute, the rest
  * read and write), a stack per task with a guard below, and what it
- * allocates; the boot's layout decides where they live.
+ * allocates.
  */
 #ifndef KERNEL_PROCESS_H
 #define KERNEL_PROCESS_H

@@ -21,7 +21,6 @@
 #include "hw.h"
 #include "intc.h"
 #include "kprintf.h"
-#include "layout.h"
 #include "ktime.h"
 #include "memmap.h"
 #include "plat.h"
@@ -62,10 +61,7 @@
         memmap_report();
         pmm_init();
     }
-    if (have_hw)
-        layout_init();
-    kprintf("planar: user layout %s, %u-bit ASIDs\n", layout_name(layout_boot()),
-            arch_asid_bits());
+    kprintf("planar: %u-bit ASIDs\n", arch_asid_bits());
 
     if (have_hw && cpu_enumerate(boot_cpu))
         kprintf("planar: %u CPUs; booted on %llx\n", ncpus, (unsigned long long)boot_cpu);

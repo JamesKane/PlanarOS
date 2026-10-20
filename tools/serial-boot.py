@@ -2,7 +2,7 @@
 """Boot an image on a board over its serial console, through U-Boot.
 
     serial-boot.py --port /dev/cu.usbserial-X --image build/ky-x1/planar.bin
-                   [--bootargs 'layout=global reboot'] [--log FILE]
+                   [--bootargs 'vq3 reboot'] [--log FILE]
 
 Waits for a U-Boot prompt (sending Ctrl-C to stop distro boot), sends the
 image with `loadx`, stops U-Boot's watchdogs, sets `bootargs`, runs

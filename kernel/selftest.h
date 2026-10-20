@@ -29,8 +29,7 @@ void selftest_tasks(void *);
 /* V1 step 4: processes in user mode. Called from selftest_tasks. */
 void selftest_user(void);
 
-/* V1 step 5: Areas, in the boot's layout, and the VQ3 soak of both
- * layouts. Called from selftest_tasks. */
+/* V1 step 5: Areas, and the VQ3 soak. Called from selftest_tasks. */
 void selftest_areas(void);
 void selftest_vq3(void);
 
@@ -60,8 +59,7 @@ void selftest_classes(void);
  * from selftest_tasks. */
 void selftest_costs(void);
 
-/* V3 step 6: user mode's TLB misses in this boot's layout (VQ3). Called
- * from selftest_tasks. */
+/* V3 step 6: user mode's TLB misses (VQ3). Called from selftest_tasks. */
 void selftest_tlb(void);
 
 #endif /* KERNEL_SELFTEST_H */

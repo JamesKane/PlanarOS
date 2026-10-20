@@ -7,7 +7,7 @@
 #
 # The board runs FreeBSD, with root over ssh as BOARD; each run installs
 # the image on its EFI partition, sets BootNext and reboots, and FreeBSD
-# comes back after. The kernel arguments (LAYOUT, BOOTARGS) are the boot
+# comes back after. The kernel arguments (BOOTARGS) are the boot
 # entry's load options; "reboot" is added so the board goes back to
 # FreeBSD after its tests. BOOTARGS=stub=reset stops in the stub,
 # which reports what UEFI gave and resets the board.
@@ -29,7 +29,7 @@ EXPECT := efi-boot: the board reset itself
 endif
 
 RUN_CMD := python3 -I tools/efi-boot.py --host $(BOARD) --port $(SERIAL) --image $(IMAGE) \
-	--bootargs 'layout=$(LAYOUT) reboot $(BOOTARGS)' --log $(BUILD)/efi-boot.log
+	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/efi-boot.log
 
 run: $(IMAGE)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }

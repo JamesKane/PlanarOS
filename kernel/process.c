@@ -40,7 +40,7 @@ static const struct user_image *find_image(const char *name)
 /* A stack Area for a new task in 'p', mapped; its top, or 0. */
 static uint64_t new_stack(struct process *p, struct area **out)
 {
-    struct area *a = area_new(layout_boot(), STACK_PAGES, 0, true);
+    struct area *a = area_new(STACK_PAGES, 0, true);
 
     if (!a)
         return 0;
@@ -153,7 +153,7 @@ struct process *process_create_on(const char *name, int pri, uint64_t arg,
     /* One Area for the image, so code and data stay where PC-relative
      * code expects them: code and constants read and execute, then data
      * and .bss read and write. */
-    image = area_new(layout_boot(), (end + PAGE_SIZE - 1) / PAGE_SIZE, AREAF_EXEC, false);
+    image = area_new((end + PAGE_SIZE - 1) / PAGE_SIZE, AREAF_EXEC, false);
     if (image) {
         area_copy_in(image, 0, file, file_size);
         for (uint64_t off = 0; off < etext; off += PAGE_SIZE)

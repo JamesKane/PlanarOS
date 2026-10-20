@@ -6,7 +6,7 @@
 #   make PLATFORM=ky-x1 run        boot it over the serial console (U-Boot loadx)
 #   make PLATFORM=ky-x1 test       the same, checking the transcript
 #
-# Over the serial console, the kernel arguments (LAYOUT, BOOTARGS) go in
+# Over the serial console, the kernel arguments (BOOTARGS) go in
 # U-Boot's bootargs, always with "reboot": the board resets after its
 # tests, so runs can follow each other without anyone at the power
 # switch (as on the CIX, mk/uefi-a64.mk). A board left idle in the
@@ -28,7 +28,7 @@ PLAT_SRCS := \
 SERIAL ?= $(firstword $(wildcard /dev/cu.usbserial-*))
 
 RUN_CMD := python3 -I tools/serial-boot.py --port $(SERIAL) --image $(IMAGE) \
-	--bootargs 'layout=$(LAYOUT) reboot $(BOOTARGS)' --log $(BUILD)/serial-boot.log
+	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/serial-boot.log
 
 run: $(IMAGE)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }

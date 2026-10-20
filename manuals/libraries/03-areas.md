@@ -6,7 +6,7 @@ An **Area** is Planar's unit of memory a program can ask for, give to another pr
 
 ## Concepts
 
-- **Allocation.** `AllocArea(size, flags, &address)` rounds `size` up to whole pages, maps the Area read-write into the calling process, and returns its handle, or a negative error. The memory is always zeroed. A size larger than the free memory fails at once with `ERR_NOMEM`. Each Area's handle counts against the process's 256 (chapter 1, *Limits*).
+- **Allocation.** `AllocArea(size, flags, &address)` rounds `size` up to whole pages, maps the Area read-write into the calling process, and returns its handle, or a negative error. The memory is always zeroed. A size larger than the free memory fails at once with `ERR_NOMEM`, and so can a large one when no single run of free pages is long enough. Each Area's handle counts against the process's 256 (chapter 1, *Limits*).
 - **Ownership.** The process that allocated an Area owns it. Only the owner can share it, unshare it, change its rights or free it.
 - **Sharing.** `ShareArea(area, task, rights)` maps the Area into the process that `task` belongs to, at the **same address**, with the rights given. A pointer into the Area means the same thing in both processes. The other process must be one the caller has an open, accepted connection with (chapter 4); any other gets `ERR_RIGHTS`.
 - **Rights.** Each process that maps an Area has its own rights to it: read, write, execute. Write and execute need read. Execute needs the Area to have been allocated with `AREAF_EXEC`; write *and* execute at once need `AREAF_RWX`.
@@ -19,7 +19,7 @@ An **Area** is Planar's unit of memory a program can ask for, give to another pr
 | Flag | Meaning |
 |---|---|
 | `AREAF_CLEAR` | Zero-filled. Every Area is, so this changes nothing. It's kept for Exec's habit. |
-| `AREAF_CONTIG` | Physically contiguous. |
+| `AREAF_CONTIG` | Physically contiguous. Every Area is, since its address is its physical address (chapter 1), so this changes nothing. |
 | `AREAF_EXEC` | May be made executable with `ProtectArea`, but never while writable. |
 | `AREAF_RWX` | May be writable and executable at once. Use only when you have to, such as for a JIT that patches code in place. |
 | `AREAF_LARGE` | Aligned to 2 MiB, so the kernel can map it with large pages. |
@@ -73,8 +73,8 @@ The peer receives `buf` as a plain pointer. In V2 the usual way to move data bet
 ## Rules
 
 - **Keep `AllocArea`'s result in an `int64_t`** and test it with `< 0` before using it as a `Handle` (chapter 1).
-- **Don't assume where an Area is.** Its address depends on the memory layout (chapter 1), and successive Areas aren't adjacent.
-- **An Area isn't physically contiguous unless you ask** with `AREAF_CONTIG`. Physical addresses aren't visible to programs yet in any case.
+- **Don't assume where an Area is.** Its address is wherever free memory was, and successive Areas aren't adjacent.
+- **A large Area can fail while memory is free.** It needs one run of free pages as long as itself (chapter 1).
 - **Sharing is with a process, named by any of its tasks.** Every task in that process can then reach the memory.
 - **Share only with a peer.** `ShareArea` needs an open connection to the target. The mapping outlasts the connection, so unshare when the peer is done.
 - **A process can map an Area only once.** Sharing it again with the same process fails with `ERR_EXISTS`. To change a sharer's rights, unshare and share again.

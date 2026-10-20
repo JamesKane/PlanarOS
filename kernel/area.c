@@ -1,10 +1,8 @@
 /*
  * kernel/area.c -- Areas
  *
- * Identity layout: one physically contiguous run, at VA = PA; a guard is
- * the run's first page, left unmapped. Global layout: a range of
- * kernel/va.c's window (with its guard page) backed by pages from
- * anywhere, listed in 'pages', or one contiguous run with AREAF_CONTIG.
+ * Identity layout (docs §3.1, VQ3): an Area is one physically contiguous
+ * run, at VA = PA; a guard is the run's first page, left unmapped.
  *
  * One lock covers every Area's mappings and every process's list of
  * them; mapping a page may allocate page-table pages, which the page
@@ -28,7 +26,6 @@
 #include "port.h"
 #include "process.h"
 #include "sched.h"
-#include "va.h"
 
 constexpr uint32_t AREAF_ALL = AREAF_CLEAR | AREAF_CONTIG | AREAF_EXEC | AREAF_RWX | AREAF_LARGE;
 constexpr uint32_t AREAR_ALL = AREAR_READ | AREAR_WRITE | AREAR_EXEC;
@@ -46,12 +43,8 @@ struct mapping {
 struct area {
     uint64_t va, size;              /* bytes, page multiple, guard excluded */
     uint32_t flags;
-    enum layout layout;
     bool guard;
-    uint64_t pa;                    /* a contiguous Area's first mapped page */
-    uint64_t *pages;                /* a scattered one's pages, by index */
-    uint64_t pages_pa;              /* where 'pages' lives, if it took whole pages */
-    uint64_t run_pa, run_pages;     /* identity: the whole run, guard included */
+    uint64_t run_pa, run_pages;     /* the whole run, guard included */
     unsigned sharers;
     unsigned refs;                  /* calls using it (lock held) */
     uint32_t handle;                /* 0 if the kernel owns it, or once freed */
@@ -68,11 +61,6 @@ static bool unused(const struct area *a)
     return a->sharers == 0 && a->handle == 0 && a->refs == 0;
 }
 
-static uint64_t npages(const struct area *a)
-{
-    return a->size / PAGE_SIZE;
-}
-
 uint64_t area_base(const struct area *a)
 {
     return a->va;
@@ -85,9 +73,7 @@ uint64_t area_size(const struct area *a)
 
 uint64_t area_pa(const struct area *a, uint64_t offset)
 {
-    uint64_t i = offset / PAGE_SIZE;
-
-    return (a->pages ? a->pages[i] : a->pa + i * PAGE_SIZE) + offset % PAGE_SIZE;
+    return a->va + offset;
 }
 
 unsigned area_count(void)
@@ -95,115 +81,35 @@ unsigned area_count(void)
     return atomic_load(&live);
 }
 
-/* --- Backing, per layout. --- */
+/* --- Backing. --- */
 
-static bool back_identity(struct area *a, uint64_t n)
+struct area *area_new(uint64_t pages, uint32_t flags, bool guard)
 {
-    uint64_t total = n + a->guard;
-    uint64_t align = a->flags & AREAF_LARGE ? LARGE_ALIGN : PAGE_SIZE;
-
-    if (a->guard && (a->flags & AREAF_LARGE))
-        return false;               /* a guard would break the alignment */
-    if (!(a->run_pa = pmm_alloc_contig_aligned(total, align)))
-        return false;
-    a->run_pages = total;
-    a->pa = a->run_pa + a->guard * PAGE_SIZE;
-    a->va = a->pa;
-    return true;
-}
-
-static void unback_identity(struct area *a)
-{
-    for (uint64_t i = 0; i < a->run_pages; i++)
-        pmm_free(a->run_pa + i * PAGE_SIZE);
-}
-
-static void free_page_list(struct area *a);
-
-static bool back_global(struct area *a, uint64_t n)
-{
-    uint64_t align = a->flags & AREAF_LARGE ? LARGE_ALIGN : PAGE_SIZE;
-    uint64_t bytes = n * sizeof(uint64_t);
-
-    if (!(a->va = va_alloc(n * PAGE_SIZE, align)))
-        return false;
-    if (a->flags & AREAF_CONTIG) {
-        /* AREAF_LARGE: the physical run aligned too, as identity does. */
-        if ((a->pa = pmm_alloc_contig_aligned(n, align)))
-            return true;
-    } else {
-        /* The page list: from the kernel heap, or whole pages if long. */
-        if (bytes <= 2048)
-            a->pages = kmalloc(bytes);
-        else if ((a->pages_pa = pmm_alloc_contig((bytes + PAGE_SIZE - 1) / PAGE_SIZE)))
-            a->pages = phys_to_virt(a->pages_pa);
-        for (uint64_t i = 0; a->pages && i < n; i++) {
-            if (!(a->pages[i] = pmm_alloc())) {
-                while (i--)
-                    pmm_free(a->pages[i]);
-                break;
-            }
-            if (i == n - 1)
-                return true;
-        }
-        if (a->pages)
-            free_page_list(a);      /* the list as well (review M5) */
-    }
-    va_free(a->va - PAGE_SIZE, (n + 1) * PAGE_SIZE);
-    return false;
-}
-
-static void free_page_list(struct area *a)
-{
-    uint64_t n = npages(a);
-
-    if (a->pages_pa) {
-        uint64_t list_pages = (n * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE;
-
-        for (uint64_t i = 0; i < list_pages; i++)
-            pmm_free(a->pages_pa + i * PAGE_SIZE);
-    } else {
-        kfree(a->pages);
-    }
-    a->pages = nullptr;
-}
-
-static void unback_global(struct area *a)
-{
-    uint64_t n = npages(a);
-
-    for (uint64_t i = 0; i < n; i++)
-        pmm_free(area_pa(a, i * PAGE_SIZE));
-    if (a->pages)
-        free_page_list(a);
-    va_free(a->va - PAGE_SIZE, (n + 1) * PAGE_SIZE);
-}
-
-struct area *area_new(enum layout l, uint64_t pages, uint32_t flags, bool guard)
-{
+    uint64_t total = pages + guard;
+    uint64_t align = flags & AREAF_LARGE ? LARGE_ALIGN : PAGE_SIZE;
     struct area *a;
-    bool ok;
 
     if (pages == 0 || (flags & ~AREAF_ALL))
         return nullptr;
+    if (guard && (flags & AREAF_LARGE))
+        return nullptr;             /* a guard would break the alignment */
     if (!(a = kmalloc(sizeof *a)))
         return nullptr;
-    *a = (struct area){ .size = pages * PAGE_SIZE, .flags = flags, .layout = l, .guard = guard };
-    ok = l == LAYOUT_IDENTITY ? back_identity(a, pages) : back_global(a, pages);
-    if (!ok) {
+    *a = (struct area){ .size = pages * PAGE_SIZE, .flags = flags, .guard = guard };
+    if (!(a->run_pa = pmm_alloc_contig_aligned(total, align))) {
         kfree(a);
         return nullptr;
     }
+    a->run_pages = total;
+    a->va = a->run_pa + guard * PAGE_SIZE;
     atomic_fetch_add(&live, 1);
     return a;
 }
 
 void area_destroy(struct area *a)
 {
-    if (a->layout == LAYOUT_IDENTITY)
-        unback_identity(a);
-    else
-        unback_global(a);
+    for (uint64_t i = 0; i < a->run_pages; i++)
+        pmm_free(a->run_pa + i * PAGE_SIZE);
     kfree(a);
     atomic_fetch_sub(&live, 1);
 }
@@ -493,11 +399,11 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
     uint64_t va;
     int64_t err;
 
-    if (size == 0 || size > (VA_WINDOW_TOP - VA_WINDOW_BASE) / 2 || (flags & ~AREAF_ALL))
+    if (size == 0 || (flags & ~AREAF_ALL))
         return ERR_BADARG;
-    if ((size + PAGE_SIZE - 1) / PAGE_SIZE > pmm_free_pages())
+    if (size / PAGE_SIZE + (size % PAGE_SIZE != 0) > pmm_free_pages())
         return ERR_NOMEM;           /* can't be had: say so before zeroing it all */
-    if (!(a = area_new(layout_boot(), (size + PAGE_SIZE - 1) / PAGE_SIZE, flags, false)))
+    if (!(a = area_new((size + PAGE_SIZE - 1) / PAGE_SIZE, flags, false)))
         return ERR_NOMEM;
     a->owner = p;
     a->refs = 1;                    /* ours, until the call is done */

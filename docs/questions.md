@@ -25,7 +25,7 @@ Each entry gives the question, where it came up, and the current leaning or deci
 - Context switches cost the same in both.
 - Identity's cost: under pressure about 0.15% of allocations fail with enough memory free, and the peak is about 5% lower. That is open work for V4.
 
-The global layout is deleted after V3, in a commit of its own (v3-plan decision 3, 2026-10-20).
+The global layout was deleted after V3, in a commit of its own (v3-plan decision 3, 2026-10-20).
 
 V1 measures:
 - Largest free run per zone after a soak test that creates and destroys processes and grows and shrinks heaps.

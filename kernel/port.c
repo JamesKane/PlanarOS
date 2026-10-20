@@ -305,7 +305,7 @@ int64_t port_open_call(uint64_t user_name, int64_t sigbit, uint64_t slots, uint6
     hdr.ca_HeapSize = hdr.ca_Size - hdr.ca_Heap;
     if (!(c = kmalloc(sizeof *c)))
         return ERR_NOMEM;
-    if (!(arena = area_new(layout_boot(), hdr.ca_Size / PAGE_SIZE, 0, false))) {
+    if (!(arena = area_new(hdr.ca_Size / PAGE_SIZE, 0, false))) {
         kfree(c);
         return ERR_NOMEM;
     }

@@ -2,7 +2,7 @@
 """Boot an image once on a UEFI board that runs FreeBSD, watching its serial console.
 
     efi-boot.py --host root@BOARD --port /dev/cu.usbserial-X --image build/uefi-a64/planar.bin
-                [--bootargs 'layout=global reboot'] [--log FILE]
+                [--bootargs 'vq3 reboot'] [--log FILE]
 
 Over ssh, as root on the board's FreeBSD (docs/v3-plan.md, decision 1):
 copies the image to the EFI partition as \\EFI\\planar\\planar.efi, writes

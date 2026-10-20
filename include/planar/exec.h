@@ -33,7 +33,7 @@ void FreeSignal(int64_t bit);
  * lets ProtectArea make it executable instead, AREAF_RWX both at once.
  */
 #define AREAF_CLEAR     (1u << 0)   /* zero-filled (they always are) */
-#define AREAF_CONTIG    (1u << 1)   /* physically contiguous */
+#define AREAF_CONTIG    (1u << 1)   /* physically contiguous (they always are) */
 #define AREAF_EXEC      (1u << 2)   /* may be made executable */
 #define AREAF_RWX       (1u << 3)   /* may be writable and executable at once */
 #define AREAF_LARGE     (1u << 4)   /* 2 MiB-aligned */

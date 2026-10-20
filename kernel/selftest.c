@@ -22,13 +22,11 @@
 #include "handle.h"
 #include "kmalloc.h"
 #include "kstring.h"
-#include "layout.h"
 #include "port.h"
 #include "process.h"
 #include "prof.h"
 #include "syscall.h"
 #include "userimg.h"
-#include "va.h"
 #include "sched.h"
 #include "selftest.h"
 
@@ -1551,7 +1549,7 @@ static void test_share(void)
     if (!p1 || !p2)
         fail("V1.5 share", "process_create failed");
     with_processes = area_count();      /* their images and stacks */
-    if (!(a = area_new(layout_boot(), 3, 0, false)))
+    if (!(a = area_new(3, 0, false)))
         fail("V1.5 share", "area_new failed");
     va = area_base(a);
     if (!area_map(a, p1, AREAR_READ | AREAR_WRITE, 0) || area_share(a, p2, AREAR_READ) != 0)
@@ -1581,7 +1579,6 @@ static void test_share(void)
 void selftest_areas(void)
 {
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
-    uint64_t va_before = va_free_bytes();
     struct process *p;
 
     if (!user_images[0].name) {
@@ -1589,8 +1586,7 @@ void selftest_areas(void)
         return;
     }
     expect_exit("areas", 0);
-    kprintf("V1.5 areas ok (%s layout): allocate, query, protect, run written code, "
-            "free, churn\n", layout_name(layout_boot()));
+    kprintf("V1.5 areas ok: allocate, query, protect, run written code, free, churn\n");
 
     p = run("overrun", 0, 1000000);
     /* In the guard page, and the guard unmapped: a page below that is
@@ -1609,23 +1605,6 @@ void selftest_areas(void)
 
     test_share();
 
-    /* A global Area whose pages run out part way gives back what it
-     * took, its page list included (review M5). The identity layout
-     * takes one run, so fails before taking anything. */
-    {
-        uint64_t before = pmm_free_pages();
-        struct area *a;
-
-        pmm_fail_after(300);
-        a = area_new(LAYOUT_GLOBAL, 600, 0, false);
-        pmm_fail_after(0);
-        if (a)
-            fail("V1.5 nomem", "an Area was made with its pages failing");
-        if (pmm_free_pages() != before)
-            fail("V1.5 nomem", "a failed Area kept pages");
-        kprintf("V1.5 nomem ok: an Area failing part way gave back every page\n");
-    }
-
     expect_exit("arearace", 0);
     kprintf("V1.5 race ok: 3000 FreeAreas raced ShareArea and ProtectArea on the same handle; "
             "nothing mapped a freed Area\n");
@@ -1637,13 +1616,13 @@ void selftest_areas(void)
         fail("V1.5 reclaim", "a page was freed that wasn\'t allocated");
     if (area_count() != 0)
         fail("V1.5 reclaim", "Areas leaked");
-    if (va_free_bytes() != va_before)
-        fail("V1.5 reclaim", "address space leaked");
-    kprintf("V1.5 reclaim ok: every page, Area and address back\n");
+    kprintf("V1.5 reclaim ok: every page and Area back\n");
 }
 
 /* ---------------------------------------------------------------------
- * The VQ3 soak: the same random workload against both layouts.
+ * The VQ3 soak: a random workload of Areas under memory pressure. VQ3
+ * ran it against both layouts (docs/vq3-results.md); identity's needless
+ * failures under pressure are what it watches now.
  */
 
 constexpr unsigned SOAK_OPS = 6000;
@@ -1681,7 +1660,7 @@ struct soak_result {
     uint64_t tables, domains, guarded;
 };
 
-static void soak(enum layout l, struct soak_result *r)
+static void soak(struct soak_result *r)
 {
     static struct area *held[SOAK_HELD];
     static uint64_t held_pages[SOAK_HELD];
@@ -1689,7 +1668,7 @@ static void soak(enum layout l, struct soak_result *r)
     uint64_t in_use = 0, target = pmm_free_pages() * 9 / 10;
 
     *r = (struct soak_result){ 0 };
-    soak_rng = 0x9e3779b97f4a7c15ULL;       /* the same workload for both */
+    soak_rng = 0x9e3779b97f4a7c15ULL;       /* the same workload every boot */
     soak_scale = pmm_total() / 65536 ? pmm_total() / 65536 : 1;
     for (unsigned op = 0; op < SOAK_OPS; op++) {
         bool grow = nheld == 0 || (nheld < SOAK_HELD && in_use < target && soak_random() % 3);
@@ -1697,7 +1676,7 @@ static void soak(enum layout l, struct soak_result *r)
         if (grow) {
             uint64_t n = soak_size(), t0 = time_now();
             bool guard = soak_random() % 8 == 0;    /* a stack */
-            struct area *a = area_new(l, n, 0, guard);
+            struct area *a = area_new(n, 0, guard);
 
             r->alloc_ticks += time_now() - t0;
             r->attempts++;
@@ -1744,12 +1723,12 @@ static void soak(enum layout l, struct soak_result *r)
         area_destroy(held[--nheld]);
 }
 
-static void report(enum layout l, const struct soak_result *r)
+static void report(const struct soak_result *r)
 {
-    kprintf("V1.5 vq3 %s: %llu of %llu allocations failed, %llu with enough memory free; "
+    kprintf("V1.5 vq3 identity: %llu of %llu allocations failed, %llu with enough memory free; "
             "%llu ns each (zero-filling included); peak %llu MiB; largest free run after "
             "%llu MiB; %llu page-table pages per %u-Area process\n",
-            layout_name(l), (unsigned long long)r->failures, (unsigned long long)r->attempts,
+            (unsigned long long)r->failures, (unsigned long long)r->attempts,
             (unsigned long long)r->needless,
             (unsigned long long)(time_to_us(r->alloc_ticks * 1000) / (r->attempts ? r->attempts : 1)),
             (unsigned long long)(r->peak_pages >> 8), (unsigned long long)(r->largest_run >> 8),
@@ -1758,21 +1737,17 @@ static void report(enum layout l, const struct soak_result *r)
 
 void selftest_vq3(void)
 {
-    struct soak_result id, gl;
+    struct soak_result r;
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
 
     if (pmm_total() == 0 || !bootargs_has("vq3")) {
         kprintf("V1.5 vq3 skipped: %s\n", pmm_total() ? "not asked for (make vq3)" : "no managed memory");
         return;
     }
-    soak(LAYOUT_IDENTITY, &id);
-    soak(LAYOUT_GLOBAL, &gl);
-    report(LAYOUT_IDENTITY, &id);
-    report(LAYOUT_GLOBAL, &gl);
+    soak(&r);
+    report(&r);
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before || area_count())
         fail("V1.5 vq3", "the soak leaked");
-    if (gl.needless)
-        fail("V1.5 vq3", "the global layout failed with memory free");
 }
 
 /* ---------------------------------------------------------------------
@@ -2253,7 +2228,7 @@ void selftest_costs(void)
 }
 
 /* ---------------------------------------------------------------------
- * V3 step 6: TLB misses in this boot's layout (VQ3).
+ * V3 step 6: TLB misses (VQ3).
  */
 
 /* Run tlbwalk with 'arg' on CPU 'a' alone, counting user mode's TLB
@@ -2276,33 +2251,6 @@ static int64_t tlb_run(uint64_t arg, unsigned a, unsigned n, uint64_t counts[ARC
     return code;
 }
 
-/* Of the pages of 64 fresh 64-page Areas in this boot's layout, the
- * shares (percent) that follow the page before them physically, and
- * whose address and physical address agree below 64 KiB: what a TLB
- * that coalesces neighbouring entries needs. All of them in the
- * identity layout. */
-static void contiguous_shares(uint64_t *follow, uint64_t *aligned)
-{
-    static struct area *a[64];
-
-    *follow = *aligned = 0;
-    for (unsigned i = 0; i < 64; i++)
-        if (!(a[i] = area_new(layout_boot(), 64, 0, false)))
-            fail("V3.6 tlb", "area_new failed");
-    for (unsigned i = 0; i < 64; i++) {
-        for (uint64_t off = 0; off < 64 * PAGE_SIZE; off += PAGE_SIZE) {
-            uint64_t pa = area_pa(a[i], off);
-
-            *aligned += (area_base(a[i]) + off - pa) % (64 * 1024) == 0;
-            if (off)
-                *follow += pa == area_pa(a[i], off - PAGE_SIZE) + PAGE_SIZE;
-        }
-        area_destroy(a[i]);
-    }
-    *follow = *follow * 100 / (64 * 63);
-    *aligned = *aligned * 100 / (64 * 64);
-}
-
 /* tlbwalk's cycles per touch, in tenths, over 16 and 48 MiB. */
 static void print_touch(const int64_t cyc[2])
 {
@@ -2321,18 +2269,15 @@ static void print_counts(const char *what, unsigned n, const char *const names[]
 
 /* On the first CPU of each class: TLB events per thousand pages touched
  * at random over 16 and 48 MiB (tlbwalk), and per thousand DoMsg round
- * trips between two processes. Only user mode counts; the layout is
- * this boot's. */
+ * trips between two processes. Only user mode counts. */
 void selftest_tlb(void)
 {
     constexpr unsigned SIZES[2] = { 64, 192 };     /* Areas of 64 pages */
-    uint64_t follow, aligned;
 
     if (!user_images[0].name) {
         kprintf("V3.6 tlb skipped: no user programs\n");
         return;
     }
-    contiguous_shares(&follow, &aligned);
     for (unsigned k = 0; cpu_class(k); k++) {
         const char *names[ARCH_TLB_EVENTS];
         uint64_t one[ARCH_TLB_EVENTS], nine[ARCH_TLB_EVENTS], msg[ARCH_TLB_EVENTS], calls[2];
@@ -2362,9 +2307,6 @@ void selftest_tlb(void)
 
         kprintf("V3.6 tlb: ");
         print_class(cpu_class(k));
-        kprintf(", %s layout, %llu%% of pages after their neighbour, %llu%% aligned alike",
-                layout_name(layout_boot()), (unsigned long long)follow,
-                (unsigned long long)aligned);
         if (!n) {
             print_touch(cyc);
             kprintf("; no TLB events to count\n");

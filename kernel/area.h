@@ -5,9 +5,8 @@
  * space with committed memory behind it, mapped into one or more
  * processes, each with its own rights. A process's image, its stacks and
  * the Areas it allocates are all Areas. An Area lives while anyone maps
- * it; the last one out frees it. Where its memory comes from is the
- * layout's business (kernel/layout.h), and this file is the only one
- * that knows.
+ * it; the last one out frees it. Its memory is one physically contiguous
+ * run, mapped at VA = PA (the identity layout, docs §3.1, VQ3).
  *
  * The calls taking handles act for the running task, from its kernel call.
  */
@@ -16,19 +15,16 @@
 
 #include <stdint.h>
 
-#include "layout.h"
-
 struct area;
 struct arch_domain;
 struct process;
 
 /*
- * A new Area of 'pages' pages from layout 'l'. With 'guard', an
- * unmapped page sits below it (stacks): a range of addresses in the
- * global layout, a page of memory in the identity layout. nullptr if
- * there's no memory or no room.
+ * A new Area of 'pages' pages. With 'guard', an unmapped page of memory
+ * sits below it (stacks). nullptr if there's no run of free pages that
+ * long.
  */
-struct area *area_new(enum layout l, uint64_t pages, uint32_t flags, bool guard);
+struct area *area_new(uint64_t pages, uint32_t flags, bool guard);
 
 /* Free an Area nobody maps (the soak test's, or one never mapped). */
 void area_destroy(struct area *a);

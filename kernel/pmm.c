@@ -17,7 +17,6 @@
 #include "spinlock.h"
 
 static atomic_uint bad_frees;
-static atomic_uint_fast64_t fail_in;    /* tests: allocations left before one fails */
 static uint64_t *bitmap;            /* bit n: page base_pfn + n is taken */
 static uint64_t base_pfn, npages;   /* the span the bitmap covers */
 static uint64_t nwords, next_word;
@@ -153,25 +152,10 @@ bool pmm_init(void)
     return true;
 }
 
-/* A test asked for this allocation to fail. */
-static bool injected_failure(void)
-{
-    uint64_t n = atomic_load_explicit(&fail_in, memory_order_relaxed);
-
-    return n && atomic_fetch_sub(&fail_in, 1) == 1;
-}
-
-void pmm_fail_after(uint64_t n)
-{
-    atomic_store(&fail_in, n ? n + 1 : 0);
-}
-
 uint64_t pmm_alloc(void)
 {
     uint64_t page = 0;
 
-    if (injected_failure())
-        return 0;
     unsigned long was = spin_lock_irqsave(&lock);
 
     for (uint64_t w = 0; nfree && w < nwords; w++) {

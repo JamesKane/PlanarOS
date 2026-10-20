@@ -26,13 +26,13 @@ How this differs from Omega:
 
 A hybrid could reserve one non-identity window for "virtual-contiguous" Areas, but every pointer into that window would be a non-DMA pointer, which brings back the distinction the design is trying to remove. The needless failures are worked on within identity instead (V4).
 
-The global layout is deleted after V3, in a commit of its own (v3-plan decision 3). From now on, code above the protection back end may assume VA = PA for user addresses.
+The global layout was deleted after V3, in a commit of its own (v3-plan decision 3); `layout=` is gone with it. Code above the protection back end may assume VA = PA for user addresses.
 
 ## 3.2 Kernel mapping
 
 **Decided (VQ4, 2026-10-19). See [v1-plan.md](v1-plan.md).**
 
-The kernel lives in the **upper half** in both layouts:
+The kernel lives in the **upper half** (it did in both layouts while VQ3 was open):
 - **Sv39:** at `0xffff_ffc0_0000_0000`.
 - **AArch64:** at `0xffff_0000_0000_0000`, through TTBR1.
 

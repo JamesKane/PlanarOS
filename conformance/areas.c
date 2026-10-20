@@ -5,7 +5,7 @@
  * it wrote, frees them, tries bad arguments, and churns: Areas of
  * different sizes come and go, each keeping its contents and none
  * overlapping another. Exits 0 if every check passed, otherwise with the
- * number of the first that failed. The same in either layout. From
+ * number of the first that failed. From
  * omega's conformance/areas.c, less what needs ports (V2).
  */
 #include <planar/exec.h>
@@ -109,11 +109,10 @@ int main(void)
     CHECK(QueryArea((void *)8, &info) == ERR_NOTFOUND);
 
     /* More than there is: refused, as an error (review M5's handle-or-
-     * error return; the kernel tests failing part way itself). The
-     * largest size AllocArea takes, half the 64 GiB window: more than any
-     * board here has free. 31 GiB wasn't, on the CIX's 32 GB: allocated
-     * page by page in the global layout, it outran the test's timeout. */
+     * error return), before any is zeroed. 32 GiB is more than any board
+     * here has free; the largest size is too, without overflowing. */
     CHECK(AllocArea(32ULL << 30, 0, (void **)&q) == ERR_NOMEM);
+    CHECK(AllocArea(~0ULL, 0, (void **)&q) == ERR_NOMEM);
 
     /* Churn: each live Area keeps its contents and no two overlap. */
     for (unsigned i = 0; i < SLOTS; i++)

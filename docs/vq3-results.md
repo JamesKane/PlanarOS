@@ -1,10 +1,10 @@
 # VQ3 measurements: identity vs. global layout
 
-**Status: decided (2026-10-20): the identity layout.** The data is from QEMU, the Orange Pi RV2 and the CIX P1 (V3 step 6). The global layout is deleted after V3, in a commit of its own (v3-plan decision 3).
+**Status: decided (2026-10-20): the identity layout.** The data is from QEMU, the Orange Pi RV2 and the CIX P1 (V3 step 6). The global layout was deleted after V3, in a commit of its own (v3-plan decision 3). The commits up to `727403c` still have it, for rerunning these measurements.
 
 ## How it's measured
 
-`make vq3 [QEMU_MEM=…]` boots each QEMU platform with the `vq3` kernel argument. The kernel then runs the same pseudo-random workload against both layouts' allocators, one after the other, from the same free memory (`selftest_vq3` in `kernel/selftest.c`).
+`make vq3 [QEMU_MEM=…]` boots each QEMU platform with the `vq3` kernel argument. The kernel then ran the same pseudo-random workload against both layouts' allocators, one after the other, from the same free memory (`selftest_vq3` in `kernel/selftest.c`). Since the global layout was deleted, it runs the identity layout alone, as a baseline for the V4 work on its failures.
 
 Workload:
 - **Area sizes:** 70% are 1–8 pages, 25% are 9–128 pages, and 5% are 129–1,024 pages.
@@ -113,6 +113,6 @@ Identity wins on TLB cost on both Arm cores, on physical fragmentation (38–60%
 The failures are rare, fall on large Areas, and can be worked on in identity: reserving long runs for large Areas, or packing small ones away from them. Global's TLB cost falls on every big-memory Arm machine, and is largest on the newest little core.
 
 **What follows:**
-- The global layout and `layout=` are deleted after V3, in a commit of their own (v3-plan decision 3).
+- The global layout and `layout=` were deleted after V3, in a commit of their own (v3-plan decision 3).
 - Code above the protection back end may now assume VA = PA for user addresses (docs §3.1).
 - Identity's needless failures under pressure are open work for V4, when servers allocate for real.

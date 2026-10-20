@@ -36,10 +36,6 @@ uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align);
 /* Pages managed in total, and how many are free now. */
 uint64_t pmm_total(void);
 
-/* Tests only: let 'n' more single-page allocations succeed, then fail
- * one (0: no failures). */
-void pmm_fail_after(uint64_t n);
-
 /* Where 'bytes' can go at or after 'start': in RAM, clear of the
  * reserved ranges and of [avoid, avoid + avoid_size). 0 if nowhere.
  * pmm_init places its bitmap so; exported for the self-test. */

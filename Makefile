@@ -45,7 +45,6 @@ PORTABLE_SRCS := \
 	kernel/kprintf.c \
 	kernel/kstring.c \
 	kernel/ktime.c \
-	kernel/layout.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
 	kernel/port.c \
@@ -55,7 +54,6 @@ PORTABLE_SRCS := \
 	kernel/selftest.c \
 	kernel/smp.c \
 	kernel/syscall.c \
-	kernel/va.c \
 	drivers/pl011.c \
 	drivers/plic.c \
 	drivers/uart8250.c
@@ -80,9 +78,7 @@ CPPFLAGS := -Iinclude -Ikernel -Idrivers
 
 include mk/toolchain.mk
 
-# Kernel arguments for QEMU runs: the user layout (docs §3.1, VQ3;
-# kernel/layout.h) and anything else (BOOTARGS=vq3 runs the VQ3 soak).
-LAYOUT ?= identity
+# Kernel arguments for QEMU runs (BOOTARGS=vq3 runs the VQ3 soak).
 BOOTARGS ?=
 QEMU_MEM ?= 256M
 
@@ -123,21 +119,21 @@ test: $(IMAGE)
 
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
 
-# Both ISAs in both layouts; AArch64 once more entered at EL2 (as the CIX
+# Both ISAs; AArch64 once more entered at EL2 (as the CIX
 # and RK3588 boards enter it), and through UEFI at EL1 and EL2, from the
 # device tree and from ACPI; RV64 with 17 GiB (RAM and the device tree
 # above 16 GiB); the hosted build, alone and on the CIX's ACPI tables.
 # Then the AArch64 boots' facts are compared.
 test-all:
 	@rm -f $(A64_FACTS)/facts-*.txt
-	@for p in $(TEST_PLATFORMS); do for l in identity global; do \
-	  $(MAKE) --no-print-directory PLATFORM=$$p LAYOUT=$$l test || exit 1; \
-	done; done
-	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 LAYOUT=global test
-	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 LAYOUT=identity test
-	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 QEMU_EL2=1 LAYOUT=global test
-	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 HW=acpi LAYOUT=identity test
-	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 HW=acpi QEMU_EL2=1 LAYOUT=global test
+	@for p in $(TEST_PLATFORMS); do \
+	  $(MAKE) --no-print-directory PLATFORM=$$p test || exit 1; \
+	done
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 QEMU_EL2=1 test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 HW=acpi test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 HW=acpi QEMU_EL2=1 test
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-rv64 QEMU_MEM=17G test
 	@$(MAKE) --no-print-directory PLATFORM=hosted test
 	@$(MAKE) --no-print-directory PLATFORM=hosted ACPI_BOARD=cix-p1 test
@@ -157,8 +153,8 @@ compare-hw:
 	done
 	@echo "compare-hw: ok: $$(wc -l < $(A64_FACTS)/facts-kernel.txt | tr -d ' ') facts the same from the device tree, twice, and from ACPI"
 
-# The VQ3 measurement (docs/v1-plan.md): the same random workload against
-# both layouts, on each QEMU platform. Slow, so not part of make test.
+# The VQ3 soak (docs/vq3-results.md): a random workload of Areas under
+# memory pressure, on each QEMU platform. Slow, so not part of make test.
 vq3:
 	@for p in $(TEST_PLATFORMS); do \
 	  $(MAKE) --no-print-directory PLATFORM=$$p BOOTARGS=vq3 QEMU_MEM=$(QEMU_MEM) test | \
