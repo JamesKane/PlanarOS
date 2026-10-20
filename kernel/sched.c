@@ -18,6 +18,13 @@ static unsigned level(int pri)
     return (unsigned)(pri - TASK_PRI_MIN);
 }
 
+static int clamp_pri(int pri)
+{
+    if (pri < TASK_PRI_MIN + 1)
+        return TASK_PRI_MIN + 1;        /* below that is idle's */
+    return pri > TASK_PRI_MAX ? TASK_PRI_MAX : pri;
+}
+
 static uint64_t bit(const struct cpu *c)
 {
     return 1ULL << c->index;
@@ -35,6 +42,21 @@ static void enqueue(struct cpu *c, struct task *t)
     else
         c->rq_head[l] = t;
     c->rq_tail[l] = t;
+    c->rq_bits[l / 64] |= 1ULL << (l % 64);
+    c->nr_ready++;
+    t->on_rq = true;
+    t->cpu = c;
+}
+
+/* The same, at the front of its priority: next to run there. */
+static void enqueue_head(struct cpu *c, struct task *t)
+{
+    unsigned l = level(t->pri);
+
+    t->rq_next = c->rq_head[l];
+    c->rq_head[l] = t;
+    if (!c->rq_tail[l])
+        c->rq_tail[l] = t;
     c->rq_bits[l / 64] |= 1ULL << (l % 64);
     c->nr_ready++;
     t->on_rq = true;
@@ -125,20 +147,38 @@ static bool wake_check(struct cpu *c, struct task *t)
     return false;
 }
 
-/* Interrupt 'c', or on this CPU switch now if that's allowed. */
-static void kick(struct cpu *c)
+/*
+ * Make 'c' notice a wakeup: interrupt it, or on this CPU act now if
+ * 'now' (the caller holds no lock), or else interrupt itself, so the
+ * switch comes once interrupts are back on and the lock is let go.
+ * Inside an interrupt, irq_exit() acts on the way out.
+ */
+static void kick(struct cpu *c, bool now)
 {
     struct cpu *self = this_cpu();
 
     if (c != self) {
         arch_send_ipi(c);
-    } else if (self->irq_depth == 0 && atomic_load(&self->need_resched)) {
+    } else if (self->irq_depth) {
+        return;
+    } else if (!now) {
+        if (atomic_load(&self->need_resched) || atomic_load(&self->quantum_check))
+            arch_send_ipi(self);
+    } else if (atomic_load(&self->need_resched)) {
         schedule();
-    } else if (self->irq_depth == 0 && atomic_exchange(&self->quantum_check, false)) {
+    } else if (atomic_exchange(&self->quantum_check, false)) {
         unsigned long was = spin_lock_irqsave(&self->rq_lock);
         quantum_update(self);
         spin_unlock_irqrestore(&self->rq_lock, was);
     }
+}
+
+void sched_kick(struct cpu *c)
+{
+    unsigned long was = arch_irq_save();
+
+    kick(c, was);
+    arch_irq_restore(was);
 }
 
 /* --- Switching. --- */
@@ -181,7 +221,7 @@ static void finish_switch(struct task *prev)
             bool notify = wake_check(to, prev);
             spin_unlock(&to->rq_lock);
             if (notify)
-                kick(to);
+                kick(to, false);
         }
     } else if (prev->state == TASK_DEAD) {
         struct process *p = prev->process;
@@ -340,12 +380,10 @@ struct task *task_new(const char *name, int pri, uint64_t affinity,
 
     if (!stack)
         return nullptr;
-    if (pri < TASK_PRI_MIN + 1)
-        pri = TASK_PRI_MIN + 1;         /* below that is idle's */
-    if (pri > TASK_PRI_MAX)
-        pri = TASK_PRI_MAX;
+    pri = clamp_pri(pri);
     t = phys_to_virt(stack);
-    *t = (struct task){ .name = name, .pri = (int8_t)pri, .state = TASK_READY,
+    *t = (struct task){ .name = name, .pri = (int8_t)pri, .base_pri = (int8_t)pri,
+                        .state = TASK_READY,
                         .affinity = affinity, .entry = entry, .data = data,
                         .stack = stack };
     arch_context_init(&t->ctx, phys_to_virt(stack + TASK_STACK_PAGES * PAGE_SIZE));
@@ -374,7 +412,7 @@ bool task_launch(struct task *t)
     bool notify = wake_check(c, t);
     spin_unlock(&c->rq_lock);
     if (notify)
-        kick(c);
+        kick(c, was);
     arch_irq_restore(was);
     return true;
 }
@@ -421,16 +459,13 @@ void task_set_affinity(uint64_t affinity)
         schedule();                     /* schedule() sends it on */
 }
 
-void task_set_pri(struct task *t, int pri)
+/* Run 't' at 'pri' from now on (t->lock held, interrupts off); returns
+ * the CPU to kick, or nullptr. */
+static struct cpu *set_pri(struct task *t, int pri)
 {
-    struct cpu *c;
+    struct cpu *c = t->cpu;
+    bool notify;
 
-    if (pri < TASK_PRI_MIN + 1)
-        pri = TASK_PRI_MIN + 1;
-    if (pri > TASK_PRI_MAX)
-        pri = TASK_PRI_MAX;
-    unsigned long was = spin_lock_irqsave(&t->lock);
-    c = t->cpu;
     spin_lock(&c->rq_lock);
     if (t->on_rq) {
         unlink_rq(c, t);
@@ -439,18 +474,52 @@ void task_set_pri(struct task *t, int pri)
     } else {
         t->pri = (int8_t)pri;
     }
-    bool notify = t->state == TASK_READY ? wake_check(c, t)
-                                         : (atomic_store(&c->need_resched, true), true);
+    if (t->state == TASK_READY) {
+        notify = wake_check(c, t);
+    } else if (t->state == TASK_RUNNING) {
+        /* Lowered below something ready there: switch. */
+        notify = top_level(c) > (int)level(t->pri);
+        if (notify)
+            atomic_store(&c->need_resched, true);
+    } else {
+        notify = false;
+    }
     spin_unlock(&c->rq_lock);
+    return notify ? c : nullptr;
+}
+
+void task_set_pri(struct task *t, int pri)
+{
+    unsigned long was = spin_lock_irqsave(&t->lock);
+    struct cpu *c;
+
+    t->base_pri = (int8_t)clamp_pri(pri);
+    c = set_pri(t, t->base_pri);
     spin_unlock_irqrestore(&t->lock, was);
-    if (notify)
-        kick(c);
+    if (c)
+        sched_kick(c);
+}
+
+void task_end_loan(void)
+{
+    struct task *self = task_self();
+    unsigned long was;
+    struct cpu *c;
+
+    if (self->pri == self->base_pri)
+        return;
+    was = spin_lock_irqsave(&self->lock);
+    c = set_pri(self, self->base_pri);
+    spin_unlock_irqrestore(&self->lock, was);
+    if (c)
+        sched_kick(c);
 }
 
 /* --- Signals. --- */
 
 uint64_t task_wait(uint64_t mask)
 {
+    task_end_loan();
     for (;;) {
         unsigned long was = arch_irq_save();
         struct task *self = this_cpu()->current;
@@ -480,10 +549,11 @@ uint64_t task_wait(uint64_t mask)
     }
 }
 
-void task_signal(struct task *t, uint64_t mask)
+struct cpu *task_post(struct task *t, uint64_t mask, bool handoff)
 {
     unsigned long was = spin_lock_irqsave(&t->lock);
-    struct cpu *c = nullptr;
+    struct cpu *self = this_cpu(), *c = nullptr;
+    struct task *me = self->current;
     bool notify = false;
 
     t->sig_received |= mask;
@@ -493,16 +563,35 @@ void task_signal(struct task *t, uint64_t mask)
         if (t->state == TASK_WAITING) {
             t->sig_waiting = 0;
             t->state = TASK_READY;
-            if (!t->on_rq)
+            if (handoff && !t->on_rq && (t->affinity & bit(self)) && me != self->idle) {
+                /* Here, next: the caller is about to wait for it. Its
+                 * state keeps everyone else off while it moves (they
+                 * take t->lock first anyway). */
+                if (c != self) {
+                    spin_unlock(&c->rq_lock);
+                    c = self;
+                    spin_lock(&c->rq_lock);
+                }
+                if (t->pri < me->pri)
+                    t->pri = me->pri;   /* lent until it next signals or waits */
+                enqueue_head(c, t);
+            } else if (!t->on_rq) {
                 enqueue(c, t);
+            }
             notify = wake_check(c, t);
         }
         spin_unlock(&c->rq_lock);
     }
-    spin_unlock(&t->lock);
-    if (notify)
-        kick(c);
-    arch_irq_restore(was);
+    spin_unlock_irqrestore(&t->lock, was);
+    return notify ? c : nullptr;
+}
+
+void task_signal(struct task *t, uint64_t mask)
+{
+    struct cpu *c = task_post(t, mask, false);
+
+    if (c)
+        sched_kick(c);
 }
 
 uint64_t task_set_signal(uint64_t bits, uint64_t mask)

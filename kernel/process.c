@@ -11,6 +11,7 @@
 #include "area.h"
 #include "kstring.h"
 #include "pmm.h"
+#include "port.h"
 #include "process.h"
 #include "sched.h"
 #include "userimg.h"
@@ -185,9 +186,11 @@ static void kill_tasks(struct process *p, struct task *except)
 {
     struct task *self = task_self();
     struct process *p = self->process;
-    unsigned long was = spin_lock_irqsave(&p->lock);
+    unsigned long was;
     struct task **pp;
 
+    ipc_task_gone(self);        /* its ports and connections close */
+    was = spin_lock_irqsave(&p->lock);
     for (pp = &p->tasks; *pp != self; pp = &(*pp)->next_in_proc)
         ;
     *pp = self->next_in_proc;

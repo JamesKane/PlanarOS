@@ -56,6 +56,7 @@ struct task {
     struct arch_context ctx;
     const char *name;
     int8_t pri;
+    int8_t base_pri;                /* pri, less any loan (task_post) */
     enum task_state state;          /* under cpu->rq_lock */
     bool on_rq;                     /* under cpu->rq_lock */
     bool migrating;                 /* leaving its CPU at the next switch */
@@ -112,9 +113,25 @@ struct task *task_self(void);
 void task_set_affinity(uint64_t affinity);
 void task_set_pri(struct task *t, int pri);
 
-/* Block until any signal in 'mask' arrives; returns and clears those. */
+/* The calling task gives back priority lent to it by task_post(). */
+void task_end_loan(void);
+
+/* Block until any signal in 'mask' arrives; returns and clears those.
+ * A task waiting gives back any priority lent to it. */
 uint64_t task_wait(uint64_t mask);
 void task_signal(struct task *t, uint64_t mask);
+
+/*
+ * task_signal() for a caller that holds a lock: signals 't' and returns
+ * the CPU to pass to sched_kick() once the lock is let go, or nullptr.
+ * (task_signal() inside a lock works too, but a switch it calls for on
+ * this CPU waits for an IPI to itself.) With 'handoff', a task this
+ * wakes that may run on this CPU goes to the front of this CPU's queue,
+ * at the caller's priority if that's higher, so the caller's next wait
+ * switches straight to it (docs/v2-plan.md).
+ */
+struct cpu *task_post(struct task *t, uint64_t mask, bool handoff);
+void sched_kick(struct cpu *c);
 
 /* Exec's SetSignal: set the bits of 'mask' to those of 'bits'; returns
  * the old signals. */

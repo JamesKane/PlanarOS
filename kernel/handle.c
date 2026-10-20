@@ -83,6 +83,16 @@ bool handle_with(Handle h, enum handle_type type, void (*fn)(void *, void *), vo
     return ran;
 }
 
+void *handle_get(Handle h, enum handle_type type, const struct process *owner)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    struct entry *e = lookup(h);
+    void *obj = e && e->type == type && e->owner == owner ? e->obj : nullptr;
+
+    spin_unlock_irqrestore(&lock, was);
+    return obj;
+}
+
 void handle_free_owner(struct process *owner)
 {
     unsigned long was = spin_lock_irqsave(&lock);

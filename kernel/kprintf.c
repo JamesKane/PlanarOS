@@ -1,12 +1,43 @@
 /*
  * kernel/kprintf.c -- kernel log over the early console
+ *
+ * One CPU writes at a time, so lines from different CPUs don't
+ * interleave. A CPU that faults while writing (a Guru Meditation from
+ * inside kprintf) carries on rather than waiting for itself.
  */
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "console.h"
+#include "cpu.h"
 #include "kprintf.h"
+
+static atomic_uint writer;          /* the writing CPU's index + 1, or 0 */
+
+/* Take the log for this CPU; false if it already had it. */
+static bool log_take(unsigned long *was)
+{
+    unsigned me = this_cpu()->index + 1, none;
+
+    *was = arch_irq_save();
+    if (atomic_load_explicit(&writer, memory_order_relaxed) == me)
+        return false;
+    for (;;) {
+        none = 0;
+        if (atomic_compare_exchange_weak_explicit(&writer, &none, me, memory_order_acquire,
+                                                  memory_order_relaxed))
+            return true;
+        arch_cpu_relax();
+    }
+}
+
+static void log_give(bool took, unsigned long was)
+{
+    if (took)
+        atomic_store_explicit(&writer, 0, memory_order_release);
+    arch_irq_restore(was);
+}
 
 static void put(char c)
 {
@@ -15,10 +46,19 @@ static void put(char c)
     console_putc(c);
 }
 
-void kputs(const char *s)
+static void puts_unlocked(const char *s)
 {
     while (*s)
         put(*s++);
+}
+
+void kputs(const char *s)
+{
+    unsigned long was;
+    bool took = log_take(&was);
+
+    puts_unlocked(s);
+    log_give(took, was);
 }
 
 static void put_unsigned(uint64_t v, unsigned base, int width, char pad)
@@ -60,6 +100,8 @@ static int64_t arg_signed(va_list *ap, enum length len)
 
 void kprintf(const char *fmt, ...)
 {
+    unsigned long was;
+    bool took = log_take(&was);
     va_list ap;
 
     va_start(ap, fmt);
@@ -92,7 +134,7 @@ void kprintf(const char *fmt, ...)
         switch (*fmt) {
         case 's': {
             const char *s = va_arg(ap, const char *);
-            kputs(s ? s : "(null)");
+            puts_unlocked(s ? s : "(null)");
             break;
         }
         case 'c':
@@ -116,7 +158,7 @@ void kprintf(const char *fmt, ...)
             put_unsigned(arg_unsigned(&ap, len), 16, width, pad);
             break;
         case 'p':
-            kputs("0x");
+            puts_unlocked("0x");
             put_unsigned((uintptr_t)va_arg(ap, void *), 16, 16, '0');
             break;
         case '%':
@@ -132,4 +174,5 @@ void kprintf(const char *fmt, ...)
         }
     }
     va_end(ap);
+    log_give(took, was);
 }

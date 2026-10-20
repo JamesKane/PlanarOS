@@ -7,6 +7,7 @@
 #include "area.h"
 #include "handle.h"
 #include "kprintf.h"
+#include "port.h"
 #include "process.h"
 #include "sched.h"
 #include "syscall.h"
@@ -17,6 +18,17 @@ constexpr unsigned KLOG_MAX = 200;
 constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL;
 
 static atomic_uint_fast64_t calls;
+
+bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
+{
+    for (unsigned n = 0; n < size; n++) {
+        if (!arch_copy_from_user(&dst[n], src + n, 1))
+            return false;
+        if (!dst[n])
+            return true;
+    }
+    return false;
+}
 
 static int64_t sys_klog(struct task *self, uint64_t text)
 {
@@ -65,6 +77,8 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
     struct task *self = task_self();
 
     atomic_fetch_add(&calls, 1);
+    if (self->process)
+        atomic_fetch_add_explicit(&self->process->calls, 1, memory_order_relaxed);
     switch (nr) {
     case SYS_KLOG:
         return sys_klog(self, a[0]);
@@ -100,6 +114,20 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
         return area_protect_call((uint32_t)a[0], (uint32_t)a[1]);
     case SYS_QUERY_AREA:
         return area_query_call(a[0], a[1]);
+    case SYS_CREATE_PORT:
+        return port_create_call(a[0], (int64_t)a[1]);
+    case SYS_DELETE_PORT:
+        return port_delete_call((uint32_t)a[0]);
+    case SYS_OPEN_PORT:
+        return port_open_call(a[0], (int64_t)a[1], a[2], a[3], a[4]);
+    case SYS_ACCEPT_CONN:
+        return port_accept_call((uint32_t)a[0], (int64_t)a[1], a[2]);
+    case SYS_SIGNAL_CONN:
+        return conn_signal_call((uint32_t)a[0]);
+    case SYS_SIGNAL_WAIT_CONN:
+        return (int64_t)conn_signal_wait_call((uint32_t)a[0], a[1] & ~SIGF_KERNEL);
+    case SYS_CLOSE_CONN:
+        return conn_close_call((uint32_t)a[0]);
     default:
         return ERR_NOSYS;
     }

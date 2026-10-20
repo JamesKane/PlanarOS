@@ -15,6 +15,7 @@
 #include "handle.h"
 #include "kmalloc.h"
 #include "layout.h"
+#include "port.h"
 #include "process.h"
 #include "syscall.h"
 #include "userimg.h"
@@ -628,6 +629,8 @@ void selftest_tasks(void *)
     selftest_areas();
     selftest_vq3();
     kprintf("V1.5 done\n");
+    selftest_ipc();
+    kprintf("V2.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1024,4 +1027,107 @@ void selftest_vq3(void)
         fail("V1.5 vq3", "the soak leaked");
     if (gl.needless)
         fail("V1.5 vq3", "the global layout failed with memory free");
+}
+
+/* ---------------------------------------------------------------------
+ * V2 step 1: ports and connections, run from the selftest task.
+ */
+
+static atomic_bool urgent_ran;
+static spinlock_t test_lock;
+
+static void urgent_waiter(void *)
+{
+    task_wait(SIGF_TEST);
+    atomic_store(&urgent_ran, true);
+}
+
+/*
+ * Waking a higher-priority task on this CPU while holding a lock must
+ * not switch to it there and then, but must as soon as the lock goes:
+ * by the IPI the CPU sends itself, with nothing else to interrupt it.
+ */
+static void test_wake_locked(void)
+{
+    unsigned me = ncpus > 1 ? 1 : 0;
+    struct task *t;
+    unsigned long was;
+    uint64_t end;
+    bool inside;
+
+    task_set_affinity(cpu_mask(me));
+    atomic_store(&urgent_ran, false);
+    if (!(t = task_create("urgent", 20, cpu_mask(me), urgent_waiter, nullptr)))
+        fail("V2.1 wake", "task_create failed");
+    while (t->state != TASK_WAITING)    /* it outranks us: it ran at once */
+        task_yield();
+    was = spin_lock_irqsave(&test_lock);
+    task_signal(t, SIGF_TEST);
+    for (end = time_now() + time_us(200); time_now() < end;)
+        arch_cpu_relax();
+    inside = atomic_load(&urgent_ran);
+    spin_unlock_irqrestore(&test_lock, was);
+    for (end = time_now() + time_us(2000); !atomic_load(&urgent_ran) && time_now() < end;)
+        arch_cpu_relax();
+    if (inside)
+        fail("V2.1 wake", "switched to the woken task with a lock held");
+    if (!atomic_load(&urgent_ran))
+        fail("V2.1 wake", "the woken task didn't run once the lock went");
+    task_set_affinity(1);
+    kprintf("V2.1 wake ok: a wakeup inside a lock switched only once it was let go\n");
+}
+
+/* Start two programs at once and wait (at most 'us') for both to die. */
+static void run_pair(const char *a, uint64_t arg_a, const char *b, uint64_t arg_b, uint64_t us,
+                     struct process *out[2])
+{
+    uint64_t start = time_now();
+
+    task_set_signal(0, SIGF_DEAD);
+    out[0] = process_create(a, 5, arg_a, task_self(), SIGF_DEAD);
+    out[1] = process_create(b, 5, arg_b, task_self(), SIGF_DEAD);
+    if (!out[0] || !out[1])
+        fail("V2 run", "process_create failed");
+    while ((!atomic_load(&out[0]->dead) || !atomic_load(&out[1]->dead)) &&
+           time_now() - start < time_us(us))
+        wait_test_dead();
+}
+
+static void expect_pair(const char *test, const char *a, uint64_t arg_a, const char *b,
+                        uint64_t arg_b)
+{
+    struct process *p[2];
+
+    run_pair(a, arg_a, b, arg_b, 5000000, p);
+    for (int i = 0; i < 2; i++) {
+        if (!atomic_load(&p[i]->dead))
+            fail(test, "a process never ended");
+        if (p[i]->fault != FAULT_NONE || p[i]->exit_code != 0) {
+            kprintf("%s: %s exit %lld\n", test, p[i]->name, (long long)p[i]->exit_code);
+            fail(test, "a process failed a check");
+        }
+        process_free(p[i]);
+    }
+}
+
+void selftest_ipc(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    unsigned handles_before = handle_count();
+
+    test_wake_locked();
+    if (!user_images[0].name) {
+        kprintf("V2.1 conn skipped: no user programs\n");
+        return;
+    }
+    expect_pair("V2.1 conn", "conn", 0, "conn", 1);
+    kprintf("V2.1 conn ok: a port, a connection, its arena in both, signals both ways, "
+            "the close heard\n");
+
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V2.1 reclaim", "pages leaked");
+    if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0)
+        fail("V2.1 reclaim", "handles, ports, connections or Areas leaked");
+    kprintf("V2.1 reclaim ok\n");
 }

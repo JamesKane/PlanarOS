@@ -38,6 +38,7 @@ PORTABLE_SRCS := \
 	kernel/layout.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
+	kernel/port.c \
 	kernel/process.c \
 	kernel/sched.c \
 	kernel/selftest.c \
@@ -49,7 +50,7 @@ PORTABLE_SRCS := \
 	drivers/uart8250.c
 
 # What every boot transcript must end with (tools/boot-check.py).
-EXPECT := V1.5 done
+EXPECT := V2.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 CPPFLAGS := -Iinclude -Ikernel -Idrivers

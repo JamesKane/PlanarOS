@@ -57,6 +57,7 @@ struct process {
     struct task *watcher;           /* signalled with watch_sig when dead */
     uint64_t watch_sig;
     uint64_t stack_base;            /* the first task's stack, for the overrun test */
+    atomic_uint_fast64_t calls;     /* kernel calls its tasks made */
 };
 
 /* Load built-in program 'name' into a new process and start it at 'pri'

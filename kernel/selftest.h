@@ -33,4 +33,7 @@ void selftest_user(void);
 void selftest_areas(void);
 void selftest_vq3(void);
 
+/* V2 step 1: ports and connections. Called from selftest_tasks. */
+void selftest_ipc(void);
+
 #endif /* KERNEL_SELFTEST_H */

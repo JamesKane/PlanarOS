@@ -92,6 +92,8 @@
         kprintf("V1.4 done\n");
         kprintf("V1.5 areas skipped: no tasks\n");
         kprintf("V1.5 done\n");
+        kprintf("V2.1 ipc skipped: no tasks\n");
+        kprintf("V2.1 done\n");
         arch_halt();
     }
     sched_idle();

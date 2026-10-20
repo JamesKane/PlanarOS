@@ -16,6 +16,8 @@ enum handle_type : uint8_t {
     HANDLE_FREE,
     HANDLE_TASK,
     HANDLE_AREA,
+    HANDLE_PORT,
+    HANDLE_CONN,
 };
 
 struct process;
@@ -29,6 +31,13 @@ void handle_free(Handle h);
  * locked, so the object can't be freed under it; returns whether it ran.
  */
 bool handle_with(Handle h, enum handle_type type, void (*fn)(void *obj, void *arg), void *arg);
+
+/*
+ * The object 'h' names, if it's of 'type' and 'owner' holds it; nullptr
+ * otherwise. Only for objects the caller's own lock keeps alive (the
+ * owner frees the handle under that lock before freeing the object).
+ */
+void *handle_get(Handle h, enum handle_type type, const struct process *owner);
 
 /* Free every handle 'owner' holds. */
 void handle_free_owner(struct process *owner);

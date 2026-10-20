@@ -24,6 +24,13 @@
 #define SYS_UNSHARE_AREA    14
 #define SYS_PROTECT_AREA    15
 #define SYS_QUERY_AREA      16
+#define SYS_CREATE_PORT     17
+#define SYS_DELETE_PORT     18
+#define SYS_OPEN_PORT       19
+#define SYS_ACCEPT_CONN     20
+#define SYS_SIGNAL_CONN     21
+#define SYS_SIGNAL_WAIT_CONN 22
+#define SYS_CLOSE_CONN      23
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)
@@ -33,5 +40,7 @@
 #define ERR_BADARG          (-6)
 #define ERR_EXISTS          (-7)
 #define ERR_RIGHTS          (-8)        /* rights the Area's flags don't allow */
+#define ERR_FULL            (-9)        /* a ring is full */
+#define ERR_PORT_DIED       (-10)       /* the other end of a connection went */
 
 #endif /* PLANAR_SYSCALLS_H */
