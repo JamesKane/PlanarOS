@@ -1,0 +1,131 @@
+NOTICE:  BL2: v2.7(debug):Beta_2.1.5_release
+NOTICE:  BL2: Built : 21:53:41, Sep  4 2025
+NOTICE:  BL2: Booting BL31
+NOTICE:  BL31: v2.7(debug):Beta_2.1.5_release
+NOTICE:  BL31: Built : 21:53:41, Sep  4 2025
+NOTICE:  Send CMD: 0x82000001
+E/TC:10    console_init:112 Cix uart register successful
+E/TC:10    console_init:112 Cix uart register successful
+MBEDTLS_CORE  host[1] waits sw_init_done...MBEDTLS_CORE  [DONE]
+MBEDTLS_CORE   HASH driver init success!
+MBEDTLS_CORE   SCA driver init success!
+MBEDTLS_CORE  SRAM Pool Base: 0x80000000, size: 0x2000, alignment: 0x10
+MBEDTLS_CORE   ACA driver init success!
+E/TC:10 00 cix_get_key_info:121 Get device key:
+[00.058] [UEFI] E006 PrePiStart
+Cix UEFI firmware (version BiosV1.3-W20251113-eebde4a7 built at 15:14:14 on Nov 13 2025)
+[00.186] [UEFI] E007 PrePiEnd
+[00.430] [UEFI] E3C1 XspiInitDxeStart
+[00.431] [UEFI] E400 XspiInitDxeEnd
+[00.436] [UEFI] E119 PlatformConfigParamsManageDxeStart
+[00.445] [UEFI] E11A PlatformConfigParamsManageDxeEnd
+[00.447] [UEFI] E117 ConfigParamsManageDxeStart
+[00.451] [UEFI] E118 ConfigParamsManageDxeEnd
+[00.456] [UEFI] E115 PlatformDxeStart
+Farm Function Disable.
+[00.545] [UEFI] E116 PlatformDxeEnd
+[00.556] [UEFI] E2C1 PcieInitDxeStart
+Root Port 0: Enable
+Root Port 0: Link Up Success
+Root Port 1: Enable
+Root Port 1: Link Up Fail,Ltssm State:40080
+Root Port 2: Enable
+Root Port 2: Link Up Success
+Root Port 3: Enable
+Root Port 3: Link Up Success
+Root Port 4: Enable
+Root Port 4: Link Up Fail,Ltssm State:40080
+[01.112] [UEFI] E300 PcieInitDxeEnd
+[01.121] [UEFI] E381 GmacInitDxeStart
+[01.122] [UEFI] E3C0 GmacInitDxeEnd
+[01.126] [UEFI] E201 I2cInitDxeStart
+[01.131] [UEFI] E240 I2cInitDxeEnd
+[01.133] [UEFI] E241 SpiInitDxeStart
+[01.135] [UEFI] E280 SpiInitDxeEnd
+[01.150] [UEFI] E6C1 PdDxeStart
+Update Pd Device 0 state, Mode: TYPEC_STATE_USB, Orientation: TYPEC_ORIENTATION_REVERSE
+Update Pd Device 1 state, Mode: TYPEC_STATE_DISCONNECT, Orientation: TYPEC_ORIENTATION_NONE
+Update Pd Device 2 state, Mode: TYPEC_DP_STATE_E, Orientation: TYPEC_ORIENTATION_NORMAL
+Update Pd Device 3 state, Mode: TYPEC_DP_STATE_E, Orientation: TYPEC_ORIENTATION_NORMAL
+[01.181] [UEFI] E700 PdDxeEnd
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+NOTICE:  Send CMD: 0x82000002
+------Begin firmware version dump------
+ SE:beta2.0-208899644954
+ PM:00.10.002-d54cd97fdcdf
+ PBL:v2.7-6f1cdf4f3a61
+ ATF:v2.7-6f1cdf4f3a61
+ TEE:Beta_2.1.3_release-3.17-7c1538ba6c38
+ UEFI:BiosV1.3-W20251113-eebde4a7
+ STMM:Beta2-W28M250709N-59816c6b3a81
+ EC:V1.13-7e90ed4de22c
+ Board Id:A4(PHECDA-Rev A)
+ PD:0.0 0.1
+ PMIC: 0x00 0x00 0x00 
+------End firmware version dump------
+No device was plugged on Typec port0!
+No device was plugged on Typec port1!
+No device was plugged on Typec port3!
+total 3 modes (current pixel clock 2517, width 640, height 480)
+I2C[5] hardware no response (ISR=0x00000004) during write!
+I2C[5] Failed to process I2C message, status No Response
+[01.829] [UEFI] E1FF DxeMainEnd
+Tianocore/EDK2 firmware version BiosV1.3-W20251113-eebde4a7
+Press ESCAPE for boot options 
+PhyDetectDevice: fail to detect ethernet PHY
+I2C[5] hardware no response (ISR=0x00000004) during write!
+I2C[5] Failed to process I2C message, status No Response
+[02.308] [UEFI] E550 BmAfterConsole
+Dtb file not found
+[07.368] [UEFI] E580 DxeReadyToBoot
+Consoles: EFI console  
+    Reading loader env vars from /efi/freebsd/loader.env
+Setting currdev to disk0p1:
+FreeBSD/arm64 EFI loader, Revision 3.0
+(Mon Sep 28 12:35:58 UTC 2026 root@releng3.nyi.freebsd.org)
+
+   Command line arguments: loader.efi
+   Image base: 0x7fa7bf000
+   EFI version: 2.70
+   EFI Firmware: EDK II (rev 0.05)
+   Console: efi (0x1000)
+   Load Path: \EFI\freebsd\loader.efi
+   Load Device: PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,5A-D8-C0-47-01-7
+5-A0-00)/HD(1,GPT,BBEC220E-A11B-4B8D-82B0-6AADB2CFBE9F,0x800,0x219800)
+   BootCurrent: 0005
+   BootOrder: 0005[*] 0004 0000 0002 0003
+Setting currdev to md0:
+MD not present
+   BootInfo Path: HD(1,GPT,BBEC220E-A11B-4B8D-82B0-6AADB2CFBE9F,0x800,0x219800)/
+\EFI\freebsd\loader.efi
+Ignoring Boot0005: Only one DP found
+Trying ESP device: PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,5A-D8-C0-47-0
+1-75-A0-00)/HD(1,GPT,BBEC220E-A11B-4B8D-82B0-6AADB2CFBE9F,0x800,0x219800)
+Setting currdev to disk0p1:
+Trying: PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,5A-D8-C0-47-01-75-A0-00)
+
+Setting currdev to disk0:
+Loading /boot/defaults/loader.conf
+Loading /boot/defaults/loader.conf
+Loading /boot/device.hints
+Loading /boot/loader.conf
+Loading /boot/loader.conf.local
+?c  ```                        ` s` `.....---.......--.```   -/ +o   .--`         /y:`      +.  yo`:.            :o      `+-   y/               -/`   -o/  .-                  ::/sy+:.  /                     `--  / `:                          :` `:                          :`  /                          /  .-                        -.   --                      -.    `:`                  `:`      .--             `--.         .---.....----.  ______               ____   _____ _____   |  ____|             |  _ \ / ____|  __ \  | |___ _ __ ___  ___ | |_) | (___ | |  | | |  ___| '__/ _ \/ _ \|  _ < \___ \| |  | | | |   | | |  __/  __/| |_) |____) | |__| | | |   | | |    |    ||     |      |      | |_|   |_|  \___|\___||____/|_____/|_____/ /\\/----------------------------------------------------------------------------|||||||||||||||||||||||||| Welcome to FreeBSD 1. Boot Multi user [Enter]2. Boot Single user3. Escape to loader prompt4. Reboot5. Cons: SerialKernel:6. kernel (1 of 5)Options:7. Boot OptionsAutoboot in 10 seconds. [Space] to pause Autoboot in 9 seconds. [Space] to pause Autoboot in 8 seconds. [Space] to pause Autoboot in 7 seconds. [Space] to pause Autoboot in 6 seconds. [Space] to pause Autoboot in 5 seconds. [Space] to pause Autoboot in 4 seconds. [Space] to pause Autoboot in 3 seconds. [Space] to pause Autoboot in 2 seconds. [Space] to pause Autoboot in 1 seconds. [Space] to pause Autoboot in 0 seconds. [Space] to pause Loading kernel...
+/boot/kernel/kernel text=0x318 text=0xac7040 text=0x3147e0 data=0x1954a0 data=0x
+0+0x375000 0x8+0x18bf58+0x8+0x15863b
+Loading configured modules...
+/etc/hostid size=0x25
+/boot/entropy size=0x1000
+Loading splash ok
+Loading shutdown splash ok
+EFI framebuffer information:
+addr, size     0x84800000, 0x7e9000
+dimensions     1920 x 1080
+stride         1920
+masks          0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000

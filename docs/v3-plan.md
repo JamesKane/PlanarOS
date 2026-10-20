@@ -4,6 +4,8 @@
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
+**Board facts are in [boards/cix-p1](boards/cix-p1/README.md)**: the raw ACPI tables (fixtures for step 2), the firmware's serial log and FreeBSD's dmesg, all taken on 2026-10-20. They confirm or settle what this plan assumed: GICD `0xe010000`, GICR `0xe090000`, UART2 from DBG2, the boot CPU at MPIDR `0xa00`, 16-bit ASIDs, the watchdog frames, and a 1 GHz timer.
+
 **What's already built.** The AArch64 port runs on QEMU: the EL2→EL1 drop, GICv3, the generic timer, PSCI SMP (over SMC or HVC, read from the device tree), PL011, lazy FP state and both layouts. All of it is found through the FDT. V3 adds:
 - the UEFI entry;
 - ACPI as a second source of the same facts;
@@ -66,7 +68,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 **One image for every UEFI Arm board.** The CIX gets quirk entries, not a platform of its own (proposed; see the decisions below). The order of bring-up:
 
 1. A line from the stub, through UEFI's console.
-2. The kernel's banner on UART2: a PL011, `ARMH0011`, at 3.3 V on the 10-pin header (pin 1 TX, pin 3 RX, pin 5 GND). UEFI leaves it programmed, so the kernel writes to it without changing the baud rate.
+2. The kernel's banner on UART2: a PL011, `ARMH0011`, at 3.3 V on the 10-pin header (pin 1 TX, pin 3 RX, pin 5 GND). UEFI leaves it programmed at 115200 (seen on the board), so the kernel writes to it without changing the baud rate.
 3. The MMU and the memory map. The board has 32 GB, and the RAM ranges come from EFI. The direct map has to cover them.
 4. **The watchdog.** The GTDT's SBSA watchdog is disabled at boot if it's running. Its refresh frame is broken (writing WRR doesn't refresh it), so it is refreshed through WOR if it is ever armed.
 5. **The GIC-700.** It needs erratum 2941627's workaround, matched on IIDR as Linux does: an SPI whose affinity excludes this CPU is EOI'd, then `dsb sy`, then deactivated through `GICD_ICACTIVER`, not `ICC_DIR`.
@@ -142,6 +144,6 @@ While the cable is on the CIX, the RV2 has no console and no serial boot. Step 6
    - (c) USB stick swaps.
 
    Any of them wants a 3.3 V USB-serial adapter on UART2 for the console, and a way to cut power on a hang: a smart plug, or the watchdog left armed by us.
-   *Proposed:* (a) plus serial, with the watchdog armed during tests, as on the RV2. **Serial decided:** the RV2's cable moves to UART2 (step 3).
+   **Decided (2026-10-20): (a), from FreeBSD rather than Ubuntu.** The board boots AbyssBSD's FreeBSD first (Boot0005), with root over ssh. A test copies the image to the EFI partition (`nda0p1`), sets `BootNext` with `efibootmgr -n`, and reboots; the next boot falls back to FreeBSD. Serial works on UART2 (step 3). Whether this firmware honours `BootNext` is still to be checked.
 2. **One UEFI image, or a CIX platform.** *Proposed:* one `uefi-a64` image, with board differences as quirk data keyed by ACPI IDs. This is the point of ACPI. The RK3588 will still use `booti` and the FDT.
 3. **What VQ3's decision does to the losing layout:** keep it behind `layout=` as an option, or delete it. *Proposed:* delete it, after V3, in its own commit, so the decision shows in the history.
