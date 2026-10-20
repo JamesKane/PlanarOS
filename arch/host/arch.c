@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include "arch.h"
+#include "userimg.h"
 
 const char arch_name[] = "host";
 
@@ -117,6 +118,64 @@ void arch_send_ipi(struct cpu *)
 uint32_t arch_ipi_irq(void)
 {
     return 0;
+}
+
+/* No protection domains or user mode in a host process: processes
+ * can't be created, so these are never reached with a real domain. */
+const struct user_image user_images[] = {
+    { nullptr, nullptr, nullptr },
+};
+
+bool arch_domain_create(struct arch_domain *)
+{
+    return false;
+}
+
+void arch_domain_destroy(struct arch_domain *)
+{
+}
+
+bool arch_map(struct arch_domain *, uint64_t, uint64_t, uint32_t)
+{
+    return false;
+}
+
+uint64_t arch_unmap(struct arch_domain *, uint64_t)
+{
+    return 0;
+}
+
+uint64_t arch_lookup(struct arch_domain *, uint64_t)
+{
+    return 0;
+}
+
+void arch_domain_switch(struct arch_domain *)
+{
+}
+
+unsigned arch_domains_live(void)
+{
+    return 0;
+}
+
+[[noreturn]] void arch_user_enter(uint64_t, uint64_t, uint64_t, uint64_t)
+{
+    abort();
+}
+
+bool arch_copy_from_user(void *, uint64_t, size_t)
+{
+    return false;
+}
+
+bool arch_copy_to_user(uint64_t, const void *, size_t)
+{
+    return false;
+}
+
+void arch_sync_icache(const void *, size_t)
+{
 }
 
 /* A host process can't take a fault and carry on. */

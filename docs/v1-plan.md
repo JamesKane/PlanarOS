@@ -11,6 +11,14 @@ Each step ends with `make test-all` green and a `V1.n done` line in the transcri
 
 `make PLATFORM=... soak` boots a platform repeatedly and counts failures. Step 3 found a race that hung about one boot in 75: a self-test checked a flag and then executed `wfi` with interrupts on, so an interrupt landing in between left the CPU asleep. Waits now check with interrupts masked. After that, 300 RV64 boots and 400 AArch64 boots (EL1 and EL2) all passed.
 
+Step 4a's design points:
+- **Reclaiming on SMP.** A process is reclaimed only once each of its tasks has switched away for the last time. The scheduler's `finish_switch` counts them down. Until then, some CPU might still be walking the process's page tables.
+- **Kernel tasks run in the kernel's domain.** So a domain is loaded only while one of its tasks runs.
+- **RISC-V `tp`.** A trap from user mode finds its CPU in a slot above the trap frame, because user code owns `tp`. A return to the kernel never restores `tp` from the frame, because a preempted task may resume on another CPU. That was a latent bug in step 3.
+- **RISC-V TLBs.** `sfence.vma` is local, so unmaps and domain teardown fence every hart through SBI RFENCE. A page fault on a page another hart just mapped is recognised and retried.
+- **AArch64 PAN.** With `SCTLR.SPAN` clear, PAN is set on every exception to EL1. User copies use `ldtrb`/`sttrb`, which are checked with EL0 permissions.
+- **Testing.** Mutation tests confirmed the step 4a checks catch W^X turned off, missing kill IPIs, and leaked process memory.
+
 What step 3 delivers, and what it doesn't yet:
 - **Delivered:** per-CPU run queues with 256 priorities; preemption by IPI; a 4 ms quantum running only while a peer waits; signals; self-migration; idle CPUs stealing ready tasks; placement on the least-loaded CPU in a task's affinity.
 - **Not yet:** a placement *policy* by core class. Each CPU's `capacity-dmips-mhz` is read, but nothing uses it. That needs big.LITTLE hardware to test on, so it waits for a board.
@@ -23,7 +31,8 @@ Step 2's first QEMU numbers are under TCG, so they say nothing about the hardwar
 | **1. Kernel memory, traps, interrupts** ✅ | Upper-half kernel with a direct map (Sv39 gigapages; AArch64 TTBR1 1 GiB blocks, with RAM split from devices by the device tree). Trap entry and return with fixups, and Guru Meditation on kernel faults. Physical page allocator (omega's bitmap, made SMP-safe). An interrupt controller picked from the device tree (PLIC, GICv3). Tickless timer (Sstc/SBI, generic virtual timer). | yes |
 | **2. SMP** ✅ | Start the other CPUs (SBI HSM, PSCI `CPU_ON`). Per-CPU data, spinlocks, IPIs (SBI IPI, GIC SGIs), per-CPU timers and interrupt routing. | yes |
 | **3. Tasks and scheduler** ✅ | Kernel tasks; per-CPU run queues with Exec's priorities (−128..127, round robin within a level); preemption; placement by core class; migration and load balancing; signals (`Wait`, `Signal`, `SetSignal`). Measure context switches and cross-CPU `Signal`. | yes |
-| **4. Domains and user mode** | `arch_domain_*`, user entry, system calls, the handle table, processes, lazy FP and vector state, reclamation on exit with deferred kill. | yes |
+| **4a. Domains and user mode** ✅ | `arch_domain_*` (Sv39; VMSAv8-64 TTBR0 with ASIDs), user entry, system calls, the handle table, processes from built-in images, faults, reclamation on exit, deferred kill across CPUs. User memory is identity-mapped until step 5. | yes |
+| **4b. Lazy FP and vector state** | `sstatus.FS`/`VS` on RISC-V; first-use trap through `CPACR_EL1.FPEN` on AArch64, with an eager-vs-lazy measurement (§7.4). User programs get FP and vector. | yes |
 | **5. Areas and the two layouts** | Areas over zoned physical memory. User VA allocators: `identity` (VA = PA) and `global` (a VA window, as in omega), chosen at boot. Port the A1 acceptance tests. Measure a soak test for VQ3. | yes |
 
 ## Decision taken in step 1: the kernel stays in the upper half in both layouts

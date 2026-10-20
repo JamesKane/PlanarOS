@@ -32,7 +32,9 @@ constexpr uint64_t IRQ_S_TIMER      = 5;
 constexpr uint64_t IRQ_S_EXTERNAL   = 9;
 
 constexpr uint64_t SSTATUS_SIE      = 1ULL << 1;
+constexpr uint64_t SSTATUS_SPIE     = 1ULL << 5;
 constexpr uint64_t SSTATUS_SPP      = 1ULL << 8;
+constexpr uint64_t SSTATUS_SUM      = 1ULL << 18;
 constexpr uint64_t SSTATUS_VS_MASK  = 3ULL << 9;
 constexpr uint64_t SSTATUS_FS       = 3ULL << 13;
 constexpr uint64_t SIE_SSIE         = 1ULL << IRQ_S_SOFT;
@@ -52,5 +54,11 @@ uint64_t probe_stimecmp(uint64_t *val);         /* csrr stimecmp (Sstc) */
 
 /* Point stvec at the trap entry. */
 void trap_init(void);
+
+/* mmu.c: the hart's ASID width, and a fault on a page another hart just
+ * mapped (retry it). */
+void riscv_probe_asids(void);
+unsigned riscv_asid_bits(void);
+bool riscv_fault_spurious(uint64_t va, uint64_t scause);
 
 #endif /* ARCH_RV64_RISCV_H */

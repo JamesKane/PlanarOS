@@ -21,6 +21,11 @@ struct arch_context {
     ucontext_t uc;
 };
 
+/* No protection in a host process. */
+struct arch_domain {
+    uint64_t unused;
+};
+
 static inline void *phys_to_virt(uint64_t pa)
 {
     return (void *)(uintptr_t)pa;

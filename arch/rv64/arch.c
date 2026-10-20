@@ -38,6 +38,7 @@ void arch_early_init(void)
     trap_init();
     have_sstc = probe_stimecmp(&v) == 0;
     kernel_satp = csr_read_satp();
+    riscv_probe_asids();
     arch_cpu_init();
 }
 

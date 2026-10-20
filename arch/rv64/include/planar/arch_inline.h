@@ -34,6 +34,12 @@ struct arch_context {
     uint64_t s[12];
 };
 
+/* A protection domain: an Sv39 root table and its ASID. */
+struct arch_domain {
+    uint64_t root;      /* physical */
+    uint32_t asid;
+};
+
 static inline void *phys_to_virt(uint64_t pa)
 {
     return (void *)(uintptr_t)(ARCH_DIRECT_MAP + pa);

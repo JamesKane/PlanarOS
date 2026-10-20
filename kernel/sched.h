@@ -38,6 +38,8 @@ constexpr uint64_t TASK_ANY_CPU = ~(uint64_t)0;
 /* Signals the kernel uses for itself. */
 constexpr unsigned SIGB_SLEEP = 2;
 constexpr uint64_t SIGF_SLEEP = 1ULL << SIGB_SLEEP;
+constexpr unsigned SIGB_KILL = 3;           /* wakes a killed task from Wait */
+constexpr uint64_t SIGF_KILL = 1ULL << SIGB_KILL;
 
 enum task_state : uint8_t {
     TASK_READY,
@@ -47,6 +49,7 @@ enum task_state : uint8_t {
 };
 
 struct cpu;
+struct process;
 
 struct task {
     struct arch_context ctx;
@@ -69,6 +72,15 @@ struct task {
     uint64_t stack;                 /* physical base of stack + struct; 0 for idle */
     struct ktimer sleep;
     uint64_t runs;                  /* times switched to */
+
+    /* User tasks (kernel/process.c); all zero for a kernel task. */
+    struct process *process;
+    struct arch_domain *domain;     /* nullptr: the kernel's alone */
+    struct task *next_in_proc;
+    uint32_t handle;
+    atomic_bool killed;             /* stop at the next return to user mode */
+    uint64_t user_pc, user_sp, user_arg[2];
+    uint64_t sig_alloc;             /* AllocSignal's bits */
 };
 
 /* Make the code running on this CPU its idle task. Each CPU, once,
@@ -84,6 +96,13 @@ void sched_init_cpu(void);
  * no online CPU in 'affinity'. */
 struct task *task_create(const char *name, int pri, uint64_t affinity,
                          void (*entry)(void *), void *data);
+
+/* The same in two steps, so the caller can finish setting the task up
+ * before anything runs it; task_discard() frees one never launched. */
+struct task *task_new(const char *name, int pri, uint64_t affinity,
+                      void (*entry)(void *), void *data);
+bool task_launch(struct task *t);
+void task_discard(struct task *t);
 [[noreturn]] void task_exit(void);
 struct task *task_self(void);
 

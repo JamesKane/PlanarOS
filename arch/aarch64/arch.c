@@ -51,11 +51,13 @@ void arch_cpu_init(void)
     sysreg_write(vbar_el1, (uintptr_t)vectors);
     isb();
     /* entry.S also mapped physical memory through TTBR0 to get here; the
-     * kernel now runs in TTBR1's half, so stop TTBR0 walks until user
-     * domains exist. */
-    sysreg_write(tcr_el1, sysreg_read(tcr_el1) | TCR_EPD0);
-    isb();
+     * kernel now runs in TTBR1's half, and TTBR0 belongs to user domains:
+     * the kernel's own is an empty table. */
+    arch_domain_switch(nullptr);
     tlb_flush_local();
+    __asm__ volatile("msr pan, #1" : : : "memory");
+    /* User mode may read the virtual counter (TimeNow without a trap). */
+    sysreg_write(cntkctl_el1, sysreg_read(cntkctl_el1) | 2);
 
     /* The cycle counter, if there's a PMU (PMUVer neither 0 nor 0xf). */
     dfr0 = (sysreg_read(id_aa64dfr0_el1) >> 8) & 0xf;

@@ -26,6 +26,7 @@ PORTABLE_SRCS := \
 	kernel/main.c \
 	kernel/console.c \
 	kernel/fdt.c \
+	kernel/handle.c \
 	kernel/intc.c \
 	kernel/irq.c \
 	kernel/kprintf.c \
@@ -33,15 +34,17 @@ PORTABLE_SRCS := \
 	kernel/ktime.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
+	kernel/process.c \
 	kernel/sched.c \
 	kernel/selftest.c \
 	kernel/smp.c \
+	kernel/syscall.c \
 	drivers/pl011.c \
 	drivers/plic.c \
 	drivers/uart8250.c
 
 # What every boot transcript must end with (tools/boot-check.py).
-EXPECT := V1.3 done
+EXPECT := V1.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 CPPFLAGS := -Iinclude -Ikernel -Idrivers
@@ -57,7 +60,7 @@ include mk/$(PLATFORM).mk
 CPPFLAGS += -Iarch/$(ARCH)/include
 
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
-OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS))
+OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
 .PHONY: all run test test-all soak check clean
 .DEFAULT_GOAL := all

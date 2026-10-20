@@ -80,6 +80,8 @@
     if (!task_create("selftest", 10, 1, selftest_tasks, nullptr)) {
         kprintf("V1.3 tasks skipped: no memory for tasks\n");
         kprintf("V1.3 done\n");
+        kprintf("V1.4 user skipped: no tasks\n");
+        kprintf("V1.4 done\n");
         arch_halt();
     }
     sched_idle();

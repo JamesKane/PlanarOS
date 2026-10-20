@@ -6,6 +6,10 @@
 #include "kprintf.h"
 #include "ktime.h"
 #include "pmm.h"
+#include "handle.h"
+#include "process.h"
+#include "syscall.h"
+#include "userimg.h"
 #include "sched.h"
 #include "selftest.h"
 
@@ -602,4 +606,130 @@ void selftest_tasks(void *)
     kprintf("V1.3 scheduler: %llu switches, %llu steals so far\n",
             (unsigned long long)sched_switches(), (unsigned long long)sched_steals());
     kprintf("V1.3 done\n");
+    selftest_user();
+    kprintf("V1.4 done\n");
+}
+
+/* ---------------------------------------------------------------------
+ * V1 step 4: processes in user mode, run from the selftest task.
+ */
+
+constexpr unsigned SIGB_DEAD = 17;
+constexpr uint64_t SIGF_DEAD = 1ULL << SIGB_DEAD;
+
+/* Run built-in program 'name' and wait (at most 'us') for it to die. */
+static struct process *run(const char *name, uint64_t arg, uint64_t us)
+{
+    struct process *p;
+    uint64_t start = time_now();
+
+    task_set_signal(0, SIGF_DEAD);
+    if (!(p = process_create(name, 5, arg, task_self(), SIGF_DEAD)))
+        fail("V1.4 user", "process_create failed");
+    while (!atomic_load(&p->dead) && time_now() - start < time_us(us)) {
+        struct ktimer t = { .fn = timeout_fire, .data = task_self() };
+
+        ktimer_start(&t, time_now() + time_us(1000));
+        task_wait(SIGF_DEAD | SIGF_SLEEP);
+        ktimer_stop(&t);
+    }
+    return p;
+}
+
+static void expect_exit(const char *name, int64_t code)
+{
+    struct process *p = run(name, 0, 1000000);
+
+    if (!atomic_load(&p->dead))
+        fail("V1.4 user", "process never ended");
+    if (p->fault != FAULT_NONE || p->exit_code != code)
+        fail("V1.4 user", "wrong exit");
+    process_free(p);
+}
+
+static void expect_fault(const char *name, uint64_t arg, enum fault kind, uint64_t addr)
+{
+    struct process *p = run(name, arg, 1000000);
+
+    if (!atomic_load(&p->dead))
+        fail("V1.4 fault", "faulting process never ended");
+    if (p->fault != kind)
+        fail("V1.4 fault", "wrong kind of fault");
+    if (addr && p->fault_addr != addr)
+        fail("V1.4 fault", "wrong fault address");
+    process_free(p);
+}
+
+static void wait_test_dead(void)
+{
+    struct ktimer t = { .fn = timeout_fire, .data = task_self() };
+
+    ktimer_start(&t, time_now() + time_us(1000));
+    task_wait(SIGF_DEAD | SIGF_SLEEP);
+    ktimer_stop(&t);
+}
+
+/* Kill a process once it's well under way; it must be dead soon after.
+ * Returns how long that took, in microseconds. */
+static uint64_t expect_killed(const char *name)
+{
+    struct process *p;
+    uint64_t start;
+
+    task_set_signal(0, SIGF_DEAD);
+    if (!(p = process_create(name, 5, 0, task_self(), SIGF_DEAD)))
+        fail("V1.4 kill", "process_create failed");
+    task_sleep_until(time_now() + time_us(20000));
+    if (atomic_load(&p->dead))
+        fail("V1.4 kill", "process ended by itself");
+    start = time_now();
+    process_kill(p);
+    while (!atomic_load(&p->dead) && time_now() - start < time_hz())
+        wait_test_dead();
+    if (!atomic_load(&p->dead))
+        fail("V1.4 kill", "killed process never ended");
+    start = time_now() - start;
+    process_free(p);
+    return time_to_us(start);
+}
+
+void selftest_user(void)
+{
+    uint64_t free_before = pmm_free_pages(), spin_us, wait_us;
+    unsigned handles_before = handle_count(), domains_before = arch_domains_live();
+    uint64_t kernel_page = pmm_alloc();
+
+    if (!user_images[0].name) {
+        kprintf("V1.4 user skipped: no user programs\n");
+        return;
+    }
+    expect_exit("hello", 7);
+    expect_exit("tasks", 0);
+    kprintf("V1.4 user ok: hello exited 7; tasks: 4 tasks in one process\n");
+
+    expect_fault("wild", 0, FAULT_WRITE, 0x10);
+    expect_fault("wx", 0, FAULT_WRITE, 0);
+    expect_fault("peek", (uint64_t)(uintptr_t)phys_to_virt(kernel_page), FAULT_READ,
+                 (uint64_t)(uintptr_t)phys_to_virt(kernel_page));
+    pmm_free(kernel_page);
+    kprintf("V1.4 fault ok: wild write, write to code, read of the kernel each ended "
+            "only their process\n");
+
+    spin_us = expect_killed("spin");
+    wait_us = expect_killed("waiter");
+    kprintf("V1.4 kill ok: 3 spinning tasks dead %llu us after the kill, a blocked one %llu us\n",
+            (unsigned long long)spin_us, (unsigned long long)wait_us);
+
+    /* Reclamation is asynchronous only by a switch; give it a moment. */
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() != free_before)
+        fail("V1.4 reclaim", "pages leaked");
+    if (handle_count() != handles_before)
+        fail("V1.4 reclaim", "handles leaked");
+    if (arch_domains_live() != domains_before)
+        fail("V1.4 reclaim", "ASIDs leaked");
+    if (process_count() != 0)
+        fail("V1.4 reclaim", "process records leaked");
+    kprintf("V1.4 reclaim ok: every page, handle and ASID back; %llu kernel calls made\n",
+            (unsigned long long)syscall_count());
 }

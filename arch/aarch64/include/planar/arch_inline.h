@@ -31,6 +31,12 @@ struct arch_context {
     uint64_t fp, lr, sp;
 };
 
+/* A protection domain: a TTBR0 table (4 levels, 48 bits) and its ASID. */
+struct arch_domain {
+    uint64_t root;      /* physical */
+    uint32_t asid;
+};
+
 static inline void *phys_to_virt(uint64_t pa)
 {
     return (void *)(uintptr_t)(ARCH_DIRECT_MAP + pa);

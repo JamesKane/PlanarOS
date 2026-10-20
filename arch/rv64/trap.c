@@ -1,15 +1,15 @@
 /*
  * arch/rv64/trap.c -- S-mode trap handling
- *
- * Until the kernel has processes (V1 step 4), every trap is an interrupt,
- * a probe that was allowed to fault, or a kernel fault, which is a Guru
- * Meditation.
  */
 #include "arch.h"
 #include "irq.h"
 #include "kprintf.h"
+#include "process.h"
 #include "riscv.h"
 #include "sched.h"
+#include "syscall.h"
+
+constexpr uint64_t CAUSE_ECALL_U = 8;
 
 struct trap_frame {
     uint64_t x[32];     /* x[2] is the sp at the time of the trap */
@@ -26,10 +26,41 @@ extern const struct fixup __fixup_start[], __fixup_end[];
 extern const char trap_entry[];
 
 void trap_handler(struct trap_frame *f);
+[[noreturn]] void trap_resume(struct trap_frame *f);
+uint64_t probe_copy_from_user(void *dst, uint64_t src, size_t n);
+uint64_t probe_copy_to_user(uint64_t dst, const void *src, size_t n);
 
 void trap_init(void)
 {
     csr_write_stvec((uint64_t)(uintptr_t)trap_entry);
+}
+
+/* What a user-mode exception means. */
+static enum fault fault_kind(uint64_t scause)
+{
+    switch (scause) {
+    case 1: case 12:            return FAULT_EXEC;
+    case 5: case 13:            return FAULT_READ;
+    case 7: case 15:            return FAULT_WRITE;
+    case 2:                     return FAULT_ILLEGAL;
+    case 3:                     return FAULT_BREAK;
+    case 0: case 4: case 6:     return FAULT_ALIGN;
+    default:                    return FAULT_OTHER;
+    }
+}
+
+static void user_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
+{
+    if (scause == CAUSE_ECALL_U) {
+        f->sepc += 4;
+        arch_irq_enable();
+        f->x[10] = (uint64_t)syscall_dispatch(f->x[17], &f->x[10]);
+        arch_irq_disable();
+        return;
+    }
+    if ((scause == 12 || scause == 13 || scause == 15) && riscv_fault_spurious(stval, scause))
+        return;
+    process_fault(fault_kind(scause), f->sepc, stval);
 }
 
 static void kernel_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
@@ -55,21 +86,67 @@ void trap_handler(struct trap_frame *f)
 {
     uint64_t scause = csr_read_scause();
     uint64_t stval = csr_read_stval();
+    bool from_user = !(f->sstatus & SSTATUS_SPP);
 
-    if (!(scause & SCAUSE_INTERRUPT)) {
+    if (scause & SCAUSE_INTERRUPT) {
+        irq_enter();
+        if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER)) {
+            irq_timer();
+        } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_SOFT)) {
+            __asm__ volatile("csrc sip, %0" : : "r"(SIE_SSIE) : "memory");
+            irq_ipi();
+        } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_EXTERNAL)) {
+            irq_external();
+        }
+        irq_exit();         /* may switch tasks: this frame waits on its stack */
+    } else if (from_user) {
+        user_trap(f, scause, stval);
+    } else {
         kernel_trap(f, scause, stval);
-        return;
     }
-    irq_enter();
-    if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER)) {
-        irq_timer();
-    } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_SOFT)) {
-        __asm__ volatile("csrc sip, %0" : : "r"(SIE_SSIE) : "memory");
-        irq_ipi();
-    } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_EXTERNAL)) {
-        irq_external();
-    }
-    irq_exit();             /* may switch tasks: this frame waits on its stack */
+    if (from_user)
+        user_return();      /* a killed task stops here */
+}
+
+/* The frame is built on the current stack; once popped, the slot above
+ * it is where the next trap from user mode lands. */
+[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1)
+{
+    struct trap_frame f = { 0 };
+
+    f.x[2] = sp;
+    f.x[10] = arg0;
+    f.x[11] = arg1;
+    f.sepc = pc;
+    /* User mode, interrupts on after sret, FP and vector off. */
+    f.sstatus = (csr_read_sstatus() & ~(SSTATUS_SPP | SSTATUS_SUM | SSTATUS_FS |
+                                        SSTATUS_VS_MASK)) | SSTATUS_SPIE;
+    arch_irq_disable();
+    trap_resume(&f);
+}
+
+bool arch_copy_from_user(void *dst, uint64_t src, size_t n)
+{
+    uint64_t cause;
+
+    if (src >= ARCH_USER_TOP || n > ARCH_USER_TOP - src)
+        return false;
+    __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_SUM) : "memory");
+    cause = probe_copy_from_user(dst, src, n);
+    __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_SUM) : "memory");
+    return cause == 0;
+}
+
+bool arch_copy_to_user(uint64_t dst, const void *src, size_t n)
+{
+    uint64_t cause;
+
+    if (dst >= ARCH_USER_TOP || n > ARCH_USER_TOP - dst)
+        return false;
+    __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_SUM) : "memory");
+    cause = probe_copy_to_user(dst, src, n);
+    __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_SUM) : "memory");
+    return cause == 0;
 }
 
 bool arch_probe_read(uint64_t addr, uint64_t *val)

@@ -22,7 +22,6 @@ static inline void tlb_flush_local(void)
     __asm__ volatile("dsb ishst\n\ttlbi vmalle1\n\tdsb nsh\n\tisb" : : : "memory");
 }
 
-constexpr uint64_t TCR_EPD0 = 1ULL << 7;    /* no TTBR0 walks */
 
 /* Accesses that may fault (vectors.S): 0 and the value, or the ESR. */
 uint64_t probe_ld(uint64_t addr, uint64_t *val);

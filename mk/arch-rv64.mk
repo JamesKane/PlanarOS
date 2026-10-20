@@ -17,10 +17,17 @@ LDFLAGS := $(TARGET_FLAGS) $(FREESTANDING_LDFLAGS) \
 ARCH_SRCS := \
 	arch/rv64/entry.S \
 	arch/rv64/arch.c \
+	arch/rv64/mmu.c \
 	arch/rv64/sbi.c \
 	arch/rv64/switch.S \
 	arch/rv64/trap.S \
 	arch/rv64/trap.c
+
+# User programs: no FP or vector either, until their state is switched
+# (V1 step 4b).
+USER_FLAGS := --target=riscv64-unknown-elf -march=rv64imac_zba_zbb -mabi=lp64 \
+	-mcmodel=medany -mno-relax
+include mk/user.mk
 
 ELF   := $(BUILD)/planar.elf
 IMAGE := $(BUILD)/planar.bin

@@ -25,4 +25,7 @@ void selftest_lock(void);
  * tests in turn, then prints "V1.3 done". */
 void selftest_tasks(void *);
 
+/* V1 step 4: processes in user mode. Called from selftest_tasks. */
+void selftest_user(void);
+
 #endif /* KERNEL_SELFTEST_H */

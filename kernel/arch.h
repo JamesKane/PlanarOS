@@ -13,6 +13,7 @@
 #ifndef KERNEL_ARCH_H
 #define KERNEL_ARCH_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <planar/arch_inline.h>
@@ -94,6 +95,43 @@ uint32_t arch_ipi_irq(void);
  */
 void arch_context_init(struct arch_context *ctx, void *stack_top);
 void arch_switch(struct arch_context *from, struct arch_context *to);
+
+/*
+ * Protection domains and user mode (V1 step 4; docs §3.5 is where the
+ * contract is going). A domain maps user pages in the lower half; the
+ * kernel half is the same in all of them. struct arch_domain comes from
+ * <planar/arch_inline.h>. Mappings take effect on every CPU: a page
+ * unmapped, or a domain destroyed, is gone from every TLB on return.
+ */
+constexpr uint32_t MAP_READ  = 1u << 0;
+constexpr uint32_t MAP_WRITE = 1u << 1;
+constexpr uint32_t MAP_EXEC  = 1u << 2;
+constexpr uint32_t MAP_USER  = 1u << 3;
+
+bool arch_domain_create(struct arch_domain *d);
+void arch_domain_destroy(struct arch_domain *d);   /* tables and ASID, not pages */
+bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags);
+uint64_t arch_unmap(struct arch_domain *d, uint64_t va);  /* the page's pa, or 0 */
+uint64_t arch_lookup(struct arch_domain *d, uint64_t va); /* the page's pa, or 0 */
+
+/* Load 'd' on this CPU (nullptr: the kernel's alone). */
+void arch_domain_switch(struct arch_domain *d);
+
+/* ASIDs in use, for leak checks. */
+unsigned arch_domains_live(void);
+
+/* Leave the kernel for user mode at 'pc' with 'sp', and 'arg0' and 'arg1'
+ * as the first two arguments, in the running task's domain. The task
+ * comes back through the trap path. */
+[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1);
+
+/* Copy from or to a user address, which may be bad: false if it faulted. */
+bool arch_copy_from_user(void *dst, uint64_t src, size_t n);
+bool arch_copy_to_user(uint64_t dst, const void *src, size_t n);
+
+/* Make every CPU's instruction fetch see code just written through the
+ * kernel's mapping at [va, va + len). */
+void arch_sync_icache(const void *va, size_t len);
 
 /* Read 64 bits at kernel address 'addr' if that doesn't fault: true and
  * the value, or false. For self-tests and probes. */

@@ -22,8 +22,11 @@
  * turns TTBR0 off; arch_memory_init() makes the rest of RAM normal.
  */
 
-#define SCTLR_EL1_RES1  0x30d00800      /* RES1 bits; MMU, caches, alignment checks off */
-#define SCTLR_EL1_MMU   0x30d01805      /* RES1 | I | C | M */
+/* RES1 bits (v8.0), less SPAN (bit 23): from v8.1, clearing it sets PAN
+ * on every exception to EL1, so the kernel can't touch user memory but
+ * through the unprivileged loads and stores of its copy routines. */
+#define SCTLR_EL1_RES1  0x30500800      /* MMU, caches, alignment checks off */
+#define SCTLR_EL1_MMU   0x30501805      /* ... | I | C | M */
 #define HCR_EL2_RW      (1 << 31)       /* EL1 is AArch64 */
 #define SPSR_EL1H_DAIF  0x3c5           /* EL1h, D A I F masked */
 #define CPTR_EL2_RES1   0x33ff          /* no FP/SIMD or trace traps to EL2 */

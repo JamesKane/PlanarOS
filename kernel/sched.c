@@ -5,6 +5,7 @@
 #include "cpu.h"
 #include "kprintf.h"
 #include "pmm.h"
+#include "process.h"
 #include "sched.h"
 
 static struct task idle_tasks[MAX_CPUS];
@@ -183,8 +184,12 @@ static void finish_switch(struct task *prev)
                 kick(to);
         }
     } else if (prev->state == TASK_DEAD) {
+        struct process *p = prev->process;
+
         for (unsigned i = 0; i < TASK_STACK_PAGES; i++)
             pmm_free(prev->stack + i * PAGE_SIZE);
+        if (p)
+            process_task_finished(p);
     }
 }
 
@@ -220,6 +225,10 @@ void schedule(void)
         next->runs++;
         atomic_fetch_add(&switches, 1);
         c->switched_from = prev;
+        /* A kernel task runs in the kernel's domain alone, so a domain
+         * is loaded only while one of its tasks runs (process.c relies
+         * on that to reclaim). */
+        arch_domain_switch(next->domain);
         arch_switch(&prev->ctx, &next->ctx);
         /* Back here, maybe on another CPU, as 'prev'. */
         finish_switch(this_cpu()->switched_from);
@@ -321,12 +330,11 @@ static bool steal(struct cpu *self)
     }
 }
 
-struct task *task_create(const char *name, int pri, uint64_t affinity,
-                         void (*entry)(void *), void *data)
+struct task *task_new(const char *name, int pri, uint64_t affinity,
+                      void (*entry)(void *), void *data)
 {
     uint64_t stack = pmm_alloc_contig(TASK_STACK_PAGES);
     struct task *t;
-    struct cpu *c;
 
     if (!stack)
         return nullptr;
@@ -339,14 +347,25 @@ struct task *task_create(const char *name, int pri, uint64_t affinity,
                         .affinity = affinity, .entry = entry, .data = data,
                         .stack = stack };
     arch_context_init(&t->ctx, phys_to_virt(stack + TASK_STACK_PAGES * PAGE_SIZE));
+    return t;
+}
 
+void task_discard(struct task *t)
+{
+    uint64_t stack = t->stack;
+
+    for (unsigned i = 0; i < TASK_STACK_PAGES; i++)
+        pmm_free(stack + i * PAGE_SIZE);
+}
+
+bool task_launch(struct task *t)
+{
     unsigned long was = arch_irq_save();
-    c = place(affinity, this_cpu());
+    struct cpu *c = place(t->affinity, this_cpu());
+
     if (!c) {
         arch_irq_restore(was);
-        for (unsigned i = 0; i < TASK_STACK_PAGES; i++)
-            pmm_free(stack + i * PAGE_SIZE);
-        return nullptr;
+        return false;
     }
     spin_lock(&c->rq_lock);
     enqueue(c, t);
@@ -355,6 +374,18 @@ struct task *task_create(const char *name, int pri, uint64_t affinity,
     if (notify)
         kick(c);
     arch_irq_restore(was);
+    return true;
+}
+
+struct task *task_create(const char *name, int pri, uint64_t affinity,
+                         void (*entry)(void *), void *data)
+{
+    struct task *t = task_new(name, pri, affinity, entry, data);
+
+    if (t && !task_launch(t)) {
+        task_discard(t);
+        return nullptr;
+    }
     return t;
 }
 
@@ -425,13 +456,19 @@ uint64_t task_wait(uint64_t mask)
 
         spin_lock(&self->lock);
         got = self->sig_received & mask;
+        if (atomic_load(&self->killed)) {
+            /* Killed: back out of the kernel call; user_return() ends it. */
+            spin_unlock(&self->lock);
+            arch_irq_restore(was);
+            return got;
+        }
         if (got) {
             self->sig_received &= ~got;
             spin_unlock(&self->lock);
             arch_irq_restore(was);
             return got;
         }
-        self->sig_waiting = mask;
+        self->sig_waiting = mask | SIGF_KILL;
         spin_lock(&self->cpu->rq_lock);
         self->state = TASK_WAITING;
         spin_unlock(&self->cpu->rq_lock);

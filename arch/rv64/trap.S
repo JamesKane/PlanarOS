@@ -2,11 +2,17 @@
  * arch/rv64/trap.S -- S-mode trap entry and return, and faulting probes
  *
  * sscratch is 0 while the hart runs kernel code. While a task runs in
- * user mode (V1 step 4) it holds the top of that task's kernel stack: a
- * trap from user mode swaps it into sp, a trap from the kernel stays on
- * the current stack. Either way the frame goes on the kernel stack.
+ * user mode it holds that task's "slot": the 16 bytes at the top of the
+ * frame area on its kernel stack, whose first word is the struct cpu the
+ * task last left the kernel on. A trap from user mode swaps the slot into
+ * sp, puts the frame below it, and reloads tp from it: user code owns tp.
+ * A trap from the kernel stays on the current stack.
+ *
+ * A return to the kernel never reloads tp from the frame: a task
+ * preempted in an interrupt may resume on another CPU, and tp must stay
+ * that CPU's. A return to user mode writes this CPU into the slot first.
+ *
  * struct trap_frame in trap.c matches this layout: x0-x31, sepc, sstatus.
- * From omega's trap.S.
  */
 
 #define FRAME_SIZE  (34 * 8)
@@ -16,18 +22,27 @@
     .balign 4
     .globl  trap_entry
 trap_entry:
-    csrrw   sp, sscratch, sp        /* from user: sp = kernel stack, sscratch = user sp */
-    bnez    sp, 1f
+    csrrw   sp, sscratch, sp        /* from user: sp = slot, sscratch = user sp */
+    bnez    sp, from_user
     csrrw   sp, sscratch, sp        /* from the kernel: put it all back */
-1:  addi    sp, sp, -FRAME_SIZE
+    addi    sp, sp, -FRAME_SIZE
     sd      x1, 1*8(sp)
     .irp    n, 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
     sd      x\n, \n*8(sp)
     .endr
-    csrr    t0, sscratch            /* the user sp, or 0 from the kernel */
-    bnez    t0, 2f
     addi    t0, sp, FRAME_SIZE      /* the kernel sp at the time of the trap */
-2:  sd      t0, 2*8(sp)
+    sd      t0, 2*8(sp)
+    j       saved
+from_user:
+    addi    sp, sp, -FRAME_SIZE
+    sd      x1, 1*8(sp)
+    .irp    n, 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+    sd      x\n, \n*8(sp)
+    .endr
+    csrr    t0, sscratch
+    sd      t0, 2*8(sp)             /* the user sp */
+    ld      tp, FRAME_SIZE(sp)      /* this CPU, from the slot */
+saved:
     csrw    sscratch, zero
     csrr    t0, sepc
     sd      t0, 32*8(sp)
@@ -43,10 +58,11 @@ trap_return:
     ld      t0, 33*8(sp)
     csrw    sstatus, t0
     andi    t0, t0, SSTATUS_SPP
-    bnez    t0, 3f
-    addi    t0, sp, FRAME_SIZE      /* back to user: next trap lands here */
+    bnez    t0, to_kernel
+    addi    t0, sp, FRAME_SIZE      /* the slot */
+    sd      tp, 0(t0)               /* where the next trap finds this CPU */
     csrw    sscratch, t0
-3:  ld      t0, 32*8(sp)
+    ld      t0, 32*8(sp)
     csrw    sepc, t0
     ld      x1, 1*8(sp)
     .irp    n, 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
@@ -54,6 +70,21 @@ trap_return:
     .endr
     ld      sp, 2*8(sp)
     sret
+to_kernel:
+    ld      t0, 32*8(sp)
+    csrw    sepc, t0
+    ld      x1, 1*8(sp)
+    .irp    n, 3,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+    ld      x\n, \n*8(sp)
+    .endr
+    ld      sp, 2*8(sp)
+    sret
+
+/* void trap_resume(struct trap_frame *f): return through a frame built in C. */
+    .globl  trap_resume
+trap_resume:
+    mv      sp, a0
+    j       trap_return
 
 /*
  * FIXUP insn, resume: if 'insn' traps, the handler puts scause in a0 and
@@ -87,3 +118,40 @@ probe_stimecmp:
 .Lstimecmp_done:
     ret
     FIXUP   .Lstimecmp, .Lstimecmp_done
+
+/* uint64_t probe_copy_from_user(void *dst, uint64_t src, size_t n): 0, or
+ * scause. Called with sstatus.SUM set, so user pages are readable. */
+    .globl  probe_copy_from_user
+probe_copy_from_user:
+    beqz    a2, .Lin_done
+.Lin:
+    lbu     t0, 0(a1)
+    sb      t0, 0(a0)
+    addi    a0, a0, 1
+    addi    a1, a1, 1
+    addi    a2, a2, -1
+    bnez    a2, .Lin
+.Lin_done:
+    li      a0, 0
+.Lin_out:
+    ret
+    FIXUP   .Lin, .Lin_out
+
+/* uint64_t probe_copy_to_user(uint64_t dst, const void *src, size_t n): 0,
+ * or scause. Called with sstatus.SUM set. */
+    .globl  probe_copy_to_user
+probe_copy_to_user:
+    beqz    a2, .Lout_done
+.Lout_load:
+    lbu     t0, 0(a1)
+.Lout_store:
+    sb      t0, 0(a0)
+    addi    a0, a0, 1
+    addi    a1, a1, 1
+    addi    a2, a2, -1
+    bnez    a2, .Lout_load
+.Lout_done:
+    li      a0, 0
+.Lout_ret:
+    ret
+    FIXUP   .Lout_store, .Lout_ret
