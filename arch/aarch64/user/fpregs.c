@@ -23,8 +23,22 @@ uint64_t fpregs_modes(void)
     return 4;                   /* FPCR.RMode: RN, RP, RM, RZ */
 }
 
+uint64_t fpregs_extra(uint64_t seed)
+{
+    return seed << 16 | 0x7e57;     /* TPIDR_EL0 holds anything */
+}
+
+uint64_t fpregs_vecfp_first(void)
+{
+    double x = 21.0;
+
+    __asm__ volatile("dup v1.2d, v0.d[0]\n"
+                     "fadd %d[x], %d[x], %d[x]\n" : [x] "+w"(x) : : "v1");
+    return (uint64_t)x;
+}
+
 void fpregs_hold(const uint64_t in[32], uint64_t fout[32], uint64_t *vout,
-                 uint64_t misc[1], uint64_t mode, uint64_t ticks)
+                 uint64_t misc[2], uint64_t mode, uint64_t extra, uint64_t ticks)
 {
     __asm__ volatile(
         ".irp r, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31\n"
@@ -36,6 +50,7 @@ void fpregs_hold(const uint64_t in[32], uint64_t fout[32], uint64_t *vout,
         "mrs x9, fpcr\n"
         "bfi x9, %[mode], #22, #2\n"
         "msr fpcr, x9\n"
+        "msr tpidr_el0, %[extra]\n"
         "mrs x10, cntvct_el0\n"
         "add x10, x10, %[ticks]\n"
         "1: mrs x11, cntvct_el0\n"
@@ -48,9 +63,11 @@ void fpregs_hold(const uint64_t in[32], uint64_t fout[32], uint64_t *vout,
         "mrs x9, fpcr\n"
         "ubfx x9, x9, #22, #2\n"
         "str x9, [%[misc]]\n"
+        "mrs x9, tpidr_el0\n"
+        "str x9, [%[misc], #8]\n"
         :
         : [in] "r"(in), [fout] "r"(fout), [misc] "r"(misc), [vout] "r"(vout),
-          [mode] "r"(mode), [ticks] "r"(ticks)
+          [mode] "r"(mode), [extra] "r"(extra), [ticks] "r"(ticks)
         : "x9", "x10", "x11", "memory", "cc",
           "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11",
           "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20", "v21", "v22",

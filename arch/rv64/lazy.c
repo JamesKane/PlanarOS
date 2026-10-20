@@ -42,10 +42,11 @@ void riscv_lazy_init(uint64_t hart_vlenb)
     vlenb = (VEC_OFFSET + 4) * 8 + 32 * hart_vlenb <= PAGE_SIZE ? hart_vlenb : 0;
 }
 
-/* What an illegal instruction would have used, had it been allowed. */
-enum ext { EXT_NONE, EXT_FP, EXT_VEC };
+/* What an illegal instruction would have used, had it been allowed: a
+ * mask, since vector FP needs both (review H6). */
+enum ext { EXT_NONE = 0, EXT_FP = 1, EXT_VEC = 2 };
 
-static enum ext ext_of(uint32_t insn)
+static unsigned ext_of(uint32_t insn)
 {
     uint32_t op = insn & 0x7f, funct3 = (insn >> 12) & 7, csr = insn >> 20;
 
@@ -62,8 +63,8 @@ static enum ext ext_of(uint32_t insn)
         return funct3 >= 1 && funct3 <= 4 ? EXT_FP : EXT_VEC;
     case 0x43: case 0x47: case 0x4b: case 0x4f: case 0x53:
         return EXT_FP;
-    case 0x57:          /* OP-V; a scalar FP operand traps again for FS */
-        return EXT_VEC;
+    case 0x57:          /* OP-V: OPFVV and OPFVF use the FP state too */
+        return funct3 == 1 || funct3 == 5 ? EXT_VEC | EXT_FP : EXT_VEC;
     case 0x73:          /* CSRs: fflags, frm, fcsr; vstart..vcsr, vl, vtype, vlenb */
         if (funct3 == 0 || funct3 == 4)
             return EXT_NONE;
@@ -113,9 +114,17 @@ void riscv_lazy_return(uint64_t *sstatus, struct arch_context *ctx)
 bool riscv_lazy_first_use(uint64_t *sstatus, uint32_t insn, struct arch_context *ctx)
 {
     struct cpu *c = this_cpu();
-    enum ext kind = ext_of(insn);
+    unsigned need = ext_of(insn);
 
-    if (kind == EXT_NONE || (kind == EXT_VEC && !vlenb))
+    if (!vlenb)
+        need &= ~EXT_VEC;
+    /* Load what's needed and not yet allowed; if that's nothing, the
+     * instruction is illegal for another reason. */
+    if (*sstatus & SSTATUS_FS)
+        need &= ~EXT_FP;
+    if (*sstatus & SSTATUS_VS_MASK)
+        need &= ~EXT_VEC;
+    if (!need)
         return false;
     if (!ctx->lazy) {
         uint64_t page = pmm_alloc();
@@ -125,18 +134,15 @@ bool riscv_lazy_first_use(uint64_t *sstatus, uint32_t insn, struct arch_context 
         ctx->lazy = phys_to_virt(page);
         cpu_count(&this_cpu()->arch.first_uses);
     }
-    if (kind == EXT_FP) {
-        if (*sstatus & SSTATUS_FS)
-            return false;           /* already allowed: illegal for another reason */
+    if (need & EXT_FP) {
         __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_FS_CLEAN) : "memory");
         riscv_fp_load(ctx->lazy);
         __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_FS) : "memory");
         c->arch.fp_owner = ctx;
         c->arch.fp_dirty = false;
         *sstatus |= SSTATUS_FS_CLEAN;
-    } else {
-        if (*sstatus & SSTATUS_VS_MASK)
-            return false;
+    }
+    if (need & EXT_VEC) {
         __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_VS_CLEAN) : "memory");
         riscv_vec_load(ctx->lazy + VEC_OFFSET);
         __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_VS_MASK) : "memory");

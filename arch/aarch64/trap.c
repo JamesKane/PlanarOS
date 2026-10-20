@@ -29,6 +29,8 @@ struct fixup {
 constexpr unsigned EC_UNKNOWN    = 0x00;
 constexpr unsigned EC_FP         = 0x07;
 constexpr unsigned EC_SVC64      = 0x15;
+constexpr unsigned EC_SYSREG      = 0x18;   /* MSR/MRS/SYS trapped: EL1's registers */
+constexpr unsigned EC_SVE         = 0x19;   /* SVE while CPACR_EL1.ZEN traps it */
 constexpr unsigned EC_IABT_LOWER = 0x20;
 constexpr unsigned EC_PC_ALIGN   = 0x22;
 constexpr unsigned EC_DABT_LOWER = 0x24;
@@ -103,6 +105,8 @@ void trap_el0_sync(struct trap_frame *f, uint64_t)
             break;          /* run it again, now allowed */
         process_fault(FAULT_ILLEGAL, f->elr, f->elr);
     case EC_UNKNOWN:
+    case EC_SYSREG:
+    case EC_SVE:
         process_fault(FAULT_ILLEGAL, f->elr, f->elr);
     default:
         process_fault(FAULT_OTHER, f->elr, far);

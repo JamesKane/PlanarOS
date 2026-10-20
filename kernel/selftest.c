@@ -808,10 +808,11 @@ void selftest_user(void)
     expect_fault("peek", (uint64_t)(uintptr_t)phys_to_virt(kernel_page), FAULT_READ,
                  (uint64_t)(uintptr_t)phys_to_virt(kernel_page));
     pmm_free(kernel_page);
+    expect_fault("ctrwrite", 0, FAULT_ILLEGAL, 0);
     expect_fault("kexec", (uint64_t)(uintptr_t)kernel_forty_two, FAULT_EXEC,
                  (uint64_t)(uintptr_t)kernel_forty_two);
     kprintf("V1.4 fault ok: wild write, write to code, read of the kernel, a call into "
-            "the kernel each ended only their process\n");
+            "the kernel, a write to the counters' controls each ended only their process\n");
 
     spin_us = expect_killed("spin");
     wait_us = expect_killed("waiter");
@@ -819,6 +820,7 @@ void selftest_user(void)
             (unsigned long long)spin_us, (unsigned long long)wait_us);
 
     test_fpu();
+    expect_exit("vecfp", 42);
 
     /* Reclamation is asynchronous only by a switch; give it a moment. */
     task_sleep_until(time_now() + time_us(5000));

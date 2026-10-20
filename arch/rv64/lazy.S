@@ -32,12 +32,14 @@ riscv_fp_load:
 /*
  * void riscv_vec_save(uint64_t *area): vstart, vl, vtype and vcsr, then
  * v0-v31 as whole registers (vlenb bytes each). Whole-register stores
- * ignore vl and vtype, so nothing is changed by saving.
+ * ignore vl and vtype but not vstart, so that is zeroed first, or the
+ * elements below it wouldn't be saved (review H3).
  */
     .globl  riscv_vec_save
 riscv_vec_save:
-    csrr    t0, vstart
-    sd      t0, 0*8(a0)
+    csrr    t3, vstart
+    sd      t3, 0*8(a0)
+    csrw    vstart, zero
     csrr    t0, vl
     sd      t0, 1*8(a0)
     csrr    t0, vtype
@@ -54,11 +56,14 @@ riscv_vec_save:
     vs8r.v  v16, (a0)
     add     a0, a0, t1
     vs8r.v  v24, (a0)
+    csrw    vstart, t3              /* the hart may go on holding this task's state */
     ret
 
-/* void riscv_vec_load(const uint64_t *area) */
+/* void riscv_vec_load(const uint64_t *area): vstart zero for the loads,
+ * whatever the last task left in it, and the task's own put back last. */
     .globl  riscv_vec_load
 riscv_vec_load:
+    csrw    vstart, zero
     addi    t2, a0, 4*8
     csrr    t1, vlenb
     slli    t1, t1, 3

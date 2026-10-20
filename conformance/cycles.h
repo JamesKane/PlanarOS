@@ -11,6 +11,10 @@
 
 uint64_t ReadCycles(void);
 
+/* Try to change the counters' controls, which user mode may only read:
+ * must fault (review M2). */
+void CounterWrite(void);
+
 /*
  * Each CPU has its own counter, and they needn't agree (the X60's
  * don't): a task that moves between reads gets nonsense. So time one

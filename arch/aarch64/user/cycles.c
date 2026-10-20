@@ -12,3 +12,8 @@ uint64_t ReadCycles(void)
     __asm__ volatile("mrs %0, pmccntr_el0" : "=r"(v));
     return v;
 }
+
+void CounterWrite(void)
+{
+    __asm__ volatile("msr pmcr_el0, xzr");  /* EL1's alone: undefined at EL0 */
+}

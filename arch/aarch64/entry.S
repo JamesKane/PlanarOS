@@ -29,7 +29,7 @@
 #define SCTLR_EL1_MMU   0x30501805      /* ... | I | C | M */
 #define HCR_EL2_RW      (1 << 31)       /* EL1 is AArch64 */
 #define SPSR_EL1H_DAIF  0x3c5           /* EL1h, D A I F masked */
-#define CPTR_EL2_RES1   0x33ff          /* no FP/SIMD or trace traps to EL2 */
+#define CPTR_EL2_RES1   0x22ff          /* RES1 only: no FP/SIMD, SVE or SME traps to EL2 */
 
 /* MAIR_EL1 (docs §3.6): 0 Device-nGnRnE, 1 Device-nGnRE, 2 Normal-NC, 3 Normal-WB */
 #define MAIR_VALUE      0xff440400

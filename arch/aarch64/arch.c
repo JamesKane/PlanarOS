@@ -65,11 +65,14 @@ void arch_cpu_init(void)
     if (have_pmu) {
         sysreg_write(pmcr_el0, sysreg_read(pmcr_el0) | 1);     /* E */
         sysreg_write(pmcntenset_el0, 1ULL << 31);              /* PMCCNTR */
-        sysreg_write(pmuserenr_el0, 1 | 4);     /* EN, CR: user mode reads it */
+        sysreg_write(pmuserenr_el0, 4);     /* CR alone: user mode reads the cycle
+                                             * counter, controls nothing (review M2) */
     }
 
     /* FP/SIMD traps until a task's state is loaded (lazy.c). */
-    sysreg_write(cpacr_el1, sysreg_read(cpacr_el1) & ~(3ULL << 20));
+    /* The whole register, not what the firmware left: FP/SIMD, SVE and SME
+     * trap (lazy.c turns FP/SIMD on per task), trace doesn't (review M1). */
+    sysreg_write(cpacr_el1, 0);
     isb();
 
     /* The virtual timer: on, unmasked, disarmed. */

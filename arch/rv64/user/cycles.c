@@ -12,3 +12,8 @@ uint64_t ReadCycles(void)
     __asm__ volatile("rdcycle %0" : "=r"(v));
     return v;
 }
+
+void CounterWrite(void)
+{
+    __asm__ volatile("csrw cycle, zero");   /* read-only: illegal */
+}
