@@ -99,6 +99,16 @@ uint32_t arch_ipi_irq(void)
     return 0;
 }
 
+extern const char arch_task_start[];   /* switch.S */
+
+void arch_context_init(struct arch_context *ctx, void *stack_top)
+{
+    *ctx = (struct arch_context){
+        .ra = (uint64_t)(uintptr_t)arch_task_start,
+        .sp = (uint64_t)(uintptr_t)stack_top & ~(uint64_t)15,
+    };
+}
+
 /* The direct map's gigapages need no memory types (the PMAs give them). */
 void arch_memory_init(void)
 {

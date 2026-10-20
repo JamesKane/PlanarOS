@@ -13,12 +13,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ktime.h"
 #include "spinlock.h"
 
 constexpr unsigned MAX_CPUS = 16;
 
-struct ktimer;
 struct cpu_call;
+struct task;
 
 struct cpu {
     uintptr_t stack_top;        /* first: the secondary entry code loads it */
@@ -33,6 +34,21 @@ struct cpu {
     spinlock_t call_lock;       /* cross-CPU calls waiting to run here */
     struct cpu_call *calls;
     atomic_uint_fast64_t ipis;  /* IPIs taken */
+
+    /* The run queue (kernel/sched.c): one FIFO per priority, and a bit
+     * per non-empty one. */
+    spinlock_t rq_lock;
+    uint64_t rq_bits[4];
+    struct task *rq_head[256], *rq_tail[256];
+    unsigned nr_ready;
+    struct task *current, *idle;
+    struct task *switched_from; /* for finish_switch, across arch_switch */
+    unsigned irq_depth;
+    atomic_bool need_resched;   /* set by a wakeup or the quantum */
+    atomic_bool quantum_check;  /* a peer of current may be waiting */
+    struct ktimer quantum;
+    bool quantum_on;
+    uint64_t capacity;          /* relative speed: capacity-dmips-mhz, or 1024 */
 };
 
 static_assert(offsetof(struct cpu, stack_top) == 0, "entry code reads stack_top at 0");

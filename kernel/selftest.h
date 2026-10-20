@@ -21,4 +21,8 @@ void selftest_ipi(void);
 void selftest_cpu_timers(void);
 void selftest_lock(void);
 
+/* V1 step 3: tasks and the scheduler. Runs as a task, all of step 3's
+ * tests in turn, then prints "V1.3 done". */
+void selftest_tasks(void *);
+
 #endif /* KERNEL_SELFTEST_H */

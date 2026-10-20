@@ -72,6 +72,30 @@ void arch_wait_for_interrupt(void)
 {
 }
 
+[[noreturn]] void task_start(void);
+
+/* makecontext passes ints and needs a function of its own. */
+static void host_task_start(void)
+{
+    task_start();
+}
+
+void arch_context_init(struct arch_context *ctx, void *stack_top)
+{
+    /* The stack's size isn't passed; the scheduler's stacks are 16 KiB
+     * and end at stack_top. */
+    getcontext(&ctx->uc);
+    ctx->uc.uc_stack.ss_sp = (char *)stack_top - 16384;
+    ctx->uc.uc_stack.ss_size = 16384;
+    ctx->uc.uc_link = nullptr;
+    makecontext(&ctx->uc, host_task_start, 0);
+}
+
+void arch_switch(struct arch_context *from, struct arch_context *to)
+{
+    swapcontext(&from->uc, &to->uc);
+}
+
 /* One host process, one CPU: there's nothing else to start or interrupt. */
 void arch_set_this_cpu(struct cpu *)
 {

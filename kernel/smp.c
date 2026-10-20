@@ -10,6 +10,7 @@
 #include "kstring.h"
 #include "ktime.h"
 #include "pmm.h"
+#include "sched.h"
 
 struct cpu cpus[MAX_CPUS];
 unsigned ncpus = 1;
@@ -47,13 +48,17 @@ bool cpu_enumerate(uint64_t boot_hwid)
         hwid &= 0xffffff;               /* MPIDR: Aff2.Aff1.Aff0 */
         if (hwid == boot_hwid) {
             cpus[0].node = n;
+            cpus[0].capacity = fdt_getprop_u32(n, "capacity-dmips-mhz", 1024);
             continue;
         }
         if (ncpus == MAX_CPUS) {
             kprintf("planar: more than %u CPUs; the rest stay off\n", MAX_CPUS);
             break;
         }
-        cpus[ncpus] = (struct cpu){ .index = ncpus, .hwid = hwid, .node = n };
+        cpus[ncpus] = (struct cpu){
+            .index = ncpus, .hwid = hwid, .node = n,
+            .capacity = fdt_getprop_u32(n, "capacity-dmips-mhz", 1024),
+        };
         ncpus++;
     }
     return cpus[0].node >= 0;
@@ -98,14 +103,13 @@ unsigned smp_start(void)
 [[noreturn]] void kmain_secondary(struct cpu *c)
 {
     arch_cpu_init();
+    sched_init_cpu();
     if (!intc_init_cpu(c->hwid))
         kprintf("planar: cpu %u has no interrupt controller\n", c->index);
     ipi_init_cpu();
     time_init_cpu();
-    arch_irq_enable();
     atomic_store(&c->online, true);
-    for (;;)
-        arch_wait_for_interrupt();
+    sched_idle();
 }
 
 bool cpu_call(struct cpu *c, struct cpu_call *call, bool wait)

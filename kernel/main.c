@@ -20,6 +20,7 @@
 #include "memmap.h"
 #include "plat.h"
 #include "pmm.h"
+#include "sched.h"
 #include "selftest.h"
 
 [[noreturn]] void kmain(uint64_t boot_cpu, uint64_t firmware_data);
@@ -30,6 +31,7 @@
 
     arch_set_this_cpu(&cpus[0]);
     arch_early_init();
+    sched_init_cpu();
     have_fdt = firmware_data && fdt_init(phys_to_virt(firmware_data));
     if (have_fdt && (have_memory = memmap_init()))
         arch_memory_init();
@@ -72,5 +74,14 @@
     selftest_cpu_timers();
     selftest_lock();
     kprintf("V1.2 done\n");
+
+    /* Step 3's tests need to block, so they run as a task; this code
+     * becomes the boot CPU's idle task. */
+    if (!task_create("selftest", 10, 1, selftest_tasks, nullptr)) {
+        kprintf("V1.3 tasks skipped: no memory for tasks\n");
+        kprintf("V1.3 done\n");
+        arch_halt();
+    }
+    sched_idle();
     arch_halt();
 }

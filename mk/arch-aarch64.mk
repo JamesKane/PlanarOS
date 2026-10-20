@@ -17,6 +17,7 @@ ARCH_SRCS := \
 	arch/aarch64/entry.S \
 	arch/aarch64/arch.c \
 	arch/aarch64/gicv3.c \
+	arch/aarch64/switch.S \
 	arch/aarch64/trap.c \
 	arch/aarch64/vectors.S
 

@@ -11,9 +11,15 @@
 
 #include <stdint.h>
 #include <time.h>
+#include <ucontext.h>
 
 #define ARCH_DIRECT_MAP     0ULL
 #define ARCH_USER_TOP       0ULL
+
+/* ucontext stands in for the context switch. */
+struct arch_context {
+    ucontext_t uc;
+};
 
 static inline void *phys_to_virt(uint64_t pa)
 {

@@ -139,6 +139,16 @@ uint32_t arch_ipi_irq(void)
     return IPI_SGI;
 }
 
+extern const char arch_task_start[];   /* switch.S */
+
+void arch_context_init(struct arch_context *ctx, void *stack_top)
+{
+    *ctx = (struct arch_context){
+        .lr = (uint64_t)(uintptr_t)arch_task_start,
+        .sp = (uint64_t)(uintptr_t)stack_top & ~(uint64_t)15,
+    };
+}
+
 /* Break-before-make: replace a live descriptor. */
 static void set_desc(uint64_t *slot, uint64_t desc)
 {

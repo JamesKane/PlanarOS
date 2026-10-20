@@ -6,6 +6,7 @@
 #   make PLATFORM=... run          build and run where that makes sense
 #   make PLATFORM=... test         build, run, and check the boot transcript
 #   make test-all                  test every platform that can run here
+#   make PLATFORM=... soak         boot SOAK times (100) and count failures
 #   make check                     portable code must not test arch or platform
 #
 # mk/<platform>.mk names the arch and board compile units, and includes
@@ -32,6 +33,7 @@ PORTABLE_SRCS := \
 	kernel/ktime.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
+	kernel/sched.c \
 	kernel/selftest.c \
 	kernel/smp.c \
 	drivers/pl011.c \
@@ -39,7 +41,7 @@ PORTABLE_SRCS := \
 	drivers/uart8250.c
 
 # What every boot transcript must end with (tools/boot-check.py).
-EXPECT := V1.2 done
+EXPECT := V1.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 CPPFLAGS := -Iinclude -Ikernel -Idrivers
@@ -57,7 +59,7 @@ CPPFLAGS += -Iarch/$(ARCH)/include
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS))
 
-.PHONY: all run test test-all check clean
+.PHONY: all run test test-all soak check clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -84,6 +86,17 @@ test-all:
 	  $(MAKE) --no-print-directory PLATFORM=$$p test || exit 1; \
 	done
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 test
+
+# Boot many times and count failures: races that show once in a hundred
+# boots don't show in one. make PLATFORM=... soak [SOAK=100]
+SOAK ?= 100
+
+soak: $(IMAGE)
+	@fails=0; for i in $$(seq 1 $(SOAK)); do \
+	  python3 -I tools/boot-check.py --timeout 10 --expect '$(EXPECT)' \
+	    --log $(BUILD)/soak-last.log -- $(RUN_CMD) >/dev/null || \
+	    { fails=$$((fails + 1)); cp $(BUILD)/soak-last.log $(BUILD)/soak-fail-$$fails.log; }; \
+	done; echo "soak: $$fails of $(SOAK) boots failed ($(PLATFORM))"; test $$fails -eq 0
 
 check:
 	@tools/check-portable.sh

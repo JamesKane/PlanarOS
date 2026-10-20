@@ -9,13 +9,20 @@
 
 Each step ends with `make test-all` green and a `V1.n done` line in the transcript. `make test-all` also boots AArch64 entered at EL2. The RV2 run comes at the end.
 
+`make PLATFORM=... soak` boots a platform repeatedly and counts failures. Step 3 found a race that hung about one boot in 75: a self-test checked a flag and then executed `wfi` with interrupts on, so an interrupt landing in between left the CPU asleep. Waits now check with interrupts masked. After that, 300 RV64 boots and 400 AArch64 boots (EL1 and EL2) all passed.
+
+What step 3 delivers, and what it doesn't yet:
+- **Delivered:** per-CPU run queues with 256 priorities; preemption by IPI; a 4 ms quantum running only while a peer waits; signals; self-migration; idle CPUs stealing ready tasks; placement on the least-loaded CPU in a task's affinity.
+- **Not yet:** a placement *policy* by core class. Each CPU's `capacity-dmips-mhz` is read, but nothing uses it. That needs big.LITTLE hardware to test on, so it waits for a board.
+- **Not yet:** moving another task between CPUs. Only a task can move itself.
+
 Step 2's first QEMU numbers are under TCG, so they say nothing about the hardware. They only show the paths work: cross-CPU call round trip about 8–14 µs, and every CPU online whichever RISC-V hart OpenSBI booted.
 
 | Step | Content | Both ISAs? |
 |---|---|---|
 | **1. Kernel memory, traps, interrupts** ✅ | Upper-half kernel with a direct map (Sv39 gigapages; AArch64 TTBR1 1 GiB blocks, with RAM split from devices by the device tree). Trap entry and return with fixups, and Guru Meditation on kernel faults. Physical page allocator (omega's bitmap, made SMP-safe). An interrupt controller picked from the device tree (PLIC, GICv3). Tickless timer (Sstc/SBI, generic virtual timer). | yes |
 | **2. SMP** ✅ | Start the other CPUs (SBI HSM, PSCI `CPU_ON`). Per-CPU data, spinlocks, IPIs (SBI IPI, GIC SGIs), per-CPU timers and interrupt routing. | yes |
-| **3. Tasks and scheduler** | Kernel tasks; per-CPU run queues with Exec's priorities (−128..127, round robin within a level); preemption; placement by core class; migration and load balancing; signals (`Wait`, `Signal`, `SetSignal`). Measure context switches and cross-CPU `Signal`. | yes |
+| **3. Tasks and scheduler** ✅ | Kernel tasks; per-CPU run queues with Exec's priorities (−128..127, round robin within a level); preemption; placement by core class; migration and load balancing; signals (`Wait`, `Signal`, `SetSignal`). Measure context switches and cross-CPU `Signal`. | yes |
 | **4. Domains and user mode** | `arch_domain_*`, user entry, system calls, the handle table, processes, lazy FP and vector state, reclamation on exit with deferred kill. | yes |
 | **5. Areas and the two layouts** | Areas over zoned physical memory. User VA allocators: `identity` (VA = PA) and `global` (a VA window, as in omega), chosen at boot. Port the A1 acceptance tests. Measure a soak test for VQ3. | yes |
 

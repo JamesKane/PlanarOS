@@ -1,0 +1,121 @@
+/*
+ * kernel/sched.h -- tasks and the SMP scheduler (docs/v1-plan.md, step 3)
+ *
+ * Exec's model on every CPU: strict priority from -128 to 127, preemptive,
+ * round robin within a priority. A task runs until it blocks, a
+ * higher-priority task becomes ready on its CPU, or its 4 ms quantum
+ * ends while another task of the same priority waits there. Each CPU has
+ * its own run queue; a task belongs to one CPU at a time. New tasks go to
+ * the least-loaded CPU their affinity allows, and an idle CPU steals
+ * ready tasks that may run on it.
+ *
+ * Signals are the only way to block (docs §4.1): a task waits for any of
+ * a set of signal bits, and anyone may signal it. The low 16 bits are the
+ * system's.
+ *
+ * Locking: a task's state changes only with its CPU's run-queue lock
+ * held, and a task's signals with its own lock; the order is task lock,
+ * then run-queue lock. A task's context is live while on_cpu is set,
+ * from being picked until the switch away from it completes
+ * (finish_switch on the next task); no other CPU runs it until then.
+ */
+#ifndef KERNEL_SCHED_H
+#define KERNEL_SCHED_H
+
+#include <stdatomic.h>
+#include <stdint.h>
+
+#include "arch.h"
+#include "ktime.h"
+#include "spinlock.h"
+
+constexpr int TASK_PRI_MIN = -128;
+constexpr int TASK_PRI_MAX = 127;
+constexpr unsigned TASK_STACK_PAGES = 4;        /* 16 KiB, struct task at its base */
+constexpr uint64_t TASK_QUANTUM_US = 4000;
+constexpr uint64_t TASK_ANY_CPU = ~(uint64_t)0;
+
+/* Signals the kernel uses for itself. */
+constexpr unsigned SIGB_SLEEP = 2;
+constexpr uint64_t SIGF_SLEEP = 1ULL << SIGB_SLEEP;
+
+enum task_state : uint8_t {
+    TASK_READY,
+    TASK_RUNNING,
+    TASK_WAITING,
+    TASK_DEAD,
+};
+
+struct cpu;
+
+struct task {
+    struct arch_context ctx;
+    const char *name;
+    int8_t pri;
+    enum task_state state;          /* under cpu->rq_lock */
+    bool on_rq;                     /* under cpu->rq_lock */
+    bool migrating;                 /* leaving its CPU at the next switch */
+    atomic_bool on_cpu;             /* context live on some CPU */
+    struct cpu *cpu;                /* whose run queue it belongs to */
+    uint64_t affinity;              /* CPUs it may run on, by index */
+    struct task *rq_next;
+
+    spinlock_t lock;                /* the signals */
+    uint64_t sig_received;
+    uint64_t sig_waiting;           /* the mask a waiting task wants */
+
+    void (*entry)(void *data);
+    void *data;
+    uint64_t stack;                 /* physical base of stack + struct; 0 for idle */
+    struct ktimer sleep;
+    uint64_t runs;                  /* times switched to */
+};
+
+/* Make the code running on this CPU its idle task. Each CPU, once,
+ * before it takes interrupts that may schedule. */
+void sched_init_cpu(void);
+
+/* This CPU's idle loop: run what's ready, steal what's ready elsewhere,
+ * sleep otherwise. Never returns. */
+[[noreturn]] void sched_idle(void);
+
+/* A new kernel task, ready to run on a CPU in 'affinity' (and running at
+ * once if it outranks what runs there). nullptr if there's no memory or
+ * no online CPU in 'affinity'. */
+struct task *task_create(const char *name, int pri, uint64_t affinity,
+                         void (*entry)(void *), void *data);
+[[noreturn]] void task_exit(void);
+struct task *task_self(void);
+
+/* Change where the calling task may run; it moves at once if it must. */
+void task_set_affinity(uint64_t affinity);
+void task_set_pri(struct task *t, int pri);
+
+/* Block until any signal in 'mask' arrives; returns and clears those. */
+uint64_t task_wait(uint64_t mask);
+void task_signal(struct task *t, uint64_t mask);
+
+/* Exec's SetSignal: set the bits of 'mask' to those of 'bits'; returns
+ * the old signals. */
+uint64_t task_set_signal(uint64_t bits, uint64_t mask);
+
+/* Let another ready task of the same priority on this CPU run. */
+void task_yield(void);
+
+/* Block until time_now() reaches 'deadline'. */
+void task_sleep_until(uint64_t deadline);
+
+/* Pick and switch to the best ready task on this CPU. */
+void schedule(void);
+
+/* Called by the architecture's trap code around every interrupt; on the
+ * way out, switch if the interrupt made a better task ready here or
+ * ended the quantum. */
+void irq_enter(void);
+void irq_exit(void);
+
+/* Counters for the self-tests. */
+uint64_t sched_switches(void);
+uint64_t sched_steals(void);
+
+#endif /* KERNEL_SCHED_H */

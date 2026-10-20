@@ -18,6 +18,7 @@ ARCH_SRCS := \
 	arch/rv64/entry.S \
 	arch/rv64/arch.c \
 	arch/rv64/sbi.c \
+	arch/rv64/switch.S \
 	arch/rv64/trap.S \
 	arch/rv64/trap.c
 

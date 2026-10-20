@@ -6,6 +6,7 @@
 #include "kprintf.h"
 #include "ktime.h"
 #include "pmm.h"
+#include "sched.h"
 #include "selftest.h"
 
 [[noreturn]] static void fail(const char *test, const char *why)
@@ -101,7 +102,43 @@ void selftest_fault(void)
     kprintf("V1.1 fault ok\n");
 }
 
+static void deadline_fn(void *)
+{
+}
+
+/*
+ * Sleep this CPU until cond(arg) holds or 'us' pass; true if it holds.
+ * The check runs with interrupts masked, so an interrupt that makes it
+ * true can't slip in between the check and the wait and leave the CPU
+ * asleep (wfi still wakes for a masked interrupt). A deadline timer
+ * makes sure something wakes it.
+ */
+static bool wait_for(bool (*cond)(void *), void *arg, uint64_t us)
+{
+    struct ktimer deadline = { .fn = deadline_fn };
+    uint64_t end = time_now() + time_us(us);
+    bool ok;
+
+    ktimer_start(&deadline, end);
+    for (;;) {
+        arch_irq_disable();
+        if ((ok = cond(arg)) || time_now() >= end) {
+            arch_irq_enable();
+            break;
+        }
+        arch_wait_for_interrupt();
+        arch_irq_enable();
+    }
+    ktimer_stop(&deadline);
+    return ok;
+}
+
 static volatile int fired;
+
+static bool timer_fired(void *)
+{
+    return fired != 0;
+}
 
 static void timer_fn(void *)
 {
@@ -124,8 +161,7 @@ void selftest_timer(void)
     start = time_now();
     deadline = start + time_us(10000);
     ktimer_start(&t, deadline);
-    while (!fired && time_now() - start < 50 * time_us(10000))
-        arch_wait_for_interrupt();
+    wait_for(timer_fired, nullptr, 500000);
     waited = time_now() - start;
     if (!fired)
         fail("V1.1 timer", "timer never fired");
@@ -213,6 +249,11 @@ static void cpu_timer_fn(void *arg)
     atomic_store(&fired_on[i], this_cpu()->index + 1);
 }
 
+static bool cpu_timer_fired(void *arg)
+{
+    return atomic_load(&fired_on[(unsigned)(uintptr_t)arg]) != 0;
+}
+
 static void start_cpu_timer(void *)
 {
     unsigned i = this_cpu()->index;
@@ -224,8 +265,6 @@ static void start_cpu_timer(void *)
 /* Each CPU's own timer: a 2 ms timer started on a CPU fires there. */
 void selftest_cpu_timers(void)
 {
-    uint64_t start;
-
     if (ncpus == 1 || !time_have_timers()) {
         kprintf("V1.2 cpu timers skipped: %s\n", ncpus == 1 ? "one CPU" : "no timers");
         return;
@@ -236,11 +275,8 @@ void selftest_cpu_timers(void)
         atomic_store(&fired_on[i], 0);
         cpu_call(&cpus[i], &call, true);
     }
-    start = time_now();
     for (unsigned i = 0; i < ncpus; i++) {
-        while (!atomic_load(&fired_on[i]) && time_now() - start < time_us(500000))
-            arch_wait_for_interrupt();
-        if (!atomic_load(&fired_on[i]))
+        if (!wait_for(cpu_timer_fired, (void *)(uintptr_t)i, 500000))
             fail("V1.2 cpu timers", "a CPU's timer never fired");
         if (atomic_load(&fired_on[i]) != i + 1)
             fail("V1.2 cpu timers", "a timer fired on the wrong CPU");
@@ -283,4 +319,287 @@ void selftest_lock(void)
     if (counter != (uint64_t)ncpus * LOCK_ROUNDS)
         fail("V1.2 lock", "increments lost");
     kprintf("V1.2 lock ok: %u CPUs x %u rounds\n", ncpus, LOCK_ROUNDS);
+}
+
+/* ---------------------------------------------------------------------
+ * V1 step 3: tasks and the scheduler. These run in the "selftest" task
+ * (priority 10, on the boot CPU), so they may block.
+ */
+
+constexpr unsigned SIGB_TEST = 16;              /* the first non-system signal */
+constexpr uint64_t SIGF_TEST = 1ULL << SIGB_TEST;
+
+static struct task *tester;
+
+static void timeout_fire(void *data)
+{
+    task_signal(data, SIGF_SLEEP);
+}
+
+/* Wait for SIGF_TEST for at most 'us': false if it timed out, so a
+ * broken scheduler fails a test instead of hanging it. */
+static bool wait_test(uint64_t us)
+{
+    struct task *self = task_self();
+    uint64_t got;
+
+    task_set_signal(0, SIGF_SLEEP);
+    self->sleep = (struct ktimer){ .fn = timeout_fire, .data = self };
+    ktimer_start(&self->sleep, time_now() + time_us(us));
+    got = task_wait(SIGF_TEST | SIGF_SLEEP);
+    ktimer_stop(&self->sleep);
+    if (got & SIGF_SLEEP && !(got & SIGF_TEST))
+        return false;
+    task_set_signal(0, SIGF_SLEEP);
+    return true;
+}
+
+static uint64_t cpu_mask(unsigned i)
+{
+    return 1ULL << (i % ncpus);
+}
+
+/* --- many tasks: created, run, exit, and their memory comes back --- */
+
+constexpr unsigned SPAWN = 24;
+static atomic_uint spawned_done;
+static atomic_uint_fast64_t ran_on_mask;
+
+static void spawn_fn(void *)
+{
+    atomic_fetch_or(&ran_on_mask, 1ULL << this_cpu()->index);
+    if (atomic_fetch_add(&spawned_done, 1) + 1 == SPAWN)
+        task_signal(tester, SIGF_TEST);
+}
+
+static void test_spawn(void)
+{
+    uint64_t free_before = pmm_free_pages(), start;
+    unsigned cpus_used;
+
+    atomic_store(&spawned_done, 0);
+    atomic_store(&ran_on_mask, 0);
+    for (unsigned i = 0; i < SPAWN; i++)
+        if (!task_create("spawn", 5, TASK_ANY_CPU, spawn_fn, nullptr))
+            fail("V1.3 tasks", "task_create failed");
+    if (!wait_test(1000000) || atomic_load(&spawned_done) != SPAWN)
+        fail("V1.3 tasks", "not every task ran");
+    /* Dead tasks are freed by the next switch on their CPU. */
+    start = time_now();
+    while (pmm_free_pages() != free_before && time_now() - start < time_hz())
+        task_sleep_until(time_now() + time_us(1000));
+    if (pmm_free_pages() != free_before)
+        fail("V1.3 tasks", "dead tasks' memory not freed");
+    cpus_used = (unsigned)__builtin_popcountll(atomic_load(&ran_on_mask));
+    if (ncpus > 1 && cpus_used < 2)
+        fail("V1.3 tasks", "every task ran on one CPU");
+    kprintf("V1.3 tasks ok: %u tasks over %u CPUs, all memory back\n", SPAWN, cpus_used);
+}
+
+/* --- signals: masks, pending bits, SetSignal --- */
+
+static void test_signals(void)
+{
+    uint64_t got;
+
+    task_set_signal(0, ~0ULL);
+    task_signal(task_self(), 1ULL << 20 | 1ULL << 21);
+    got = task_wait(1ULL << 20);
+    if (got != 1ULL << 20)
+        fail("V1.3 signals", "wait returned the wrong bits");
+    if (task_set_signal(0, 0) != 1ULL << 21)
+        fail("V1.3 signals", "a bit outside the mask was lost");
+    if (task_set_signal(0, 1ULL << 21) != 1ULL << 21 || task_set_signal(0, 0) != 0)
+        fail("V1.3 signals", "SetSignal didn't clear");
+    kprintf("V1.3 signals ok\n");
+}
+
+/* --- preemption: a higher-priority task runs at once on a busy CPU --- */
+
+static atomic_bool spin_stop;
+static atomic_uint_fast64_t spin_counts[2];
+static atomic_uint_fast64_t woke_at;
+static atomic_uint spin_finished;
+
+/* Signal bits don't count, so finishers count themselves. */
+static void spinner(void *arg)
+{
+    unsigned slot = (unsigned)(uintptr_t)arg;
+
+    while (!atomic_load(&spin_stop))
+        atomic_fetch_add(&spin_counts[slot], 1);
+    atomic_fetch_add(&spin_finished, 1);
+    task_signal(tester, SIGF_TEST);
+}
+
+static void stop_spinners(unsigned n)
+{
+    atomic_store(&spin_stop, true);
+    while (atomic_load(&spin_finished) < n)
+        task_wait(SIGF_TEST);
+    task_set_signal(0, SIGF_TEST);
+}
+
+static void urgent(void *)
+{
+    atomic_store(&woke_at, time_now());
+    task_signal(tester, SIGF_TEST);
+}
+
+static void test_preempt(void)
+{
+    unsigned target = ncpus > 1 ? 1 : 0;
+    uint64_t t0, waited;
+
+    if (ncpus == 1) {
+        kprintf("V1.3 preempt skipped: one CPU\n");
+        return;
+    }
+    atomic_store(&spin_stop, false);
+    atomic_store(&spin_finished, 0);
+    atomic_store(&spin_counts[0], 0);
+    task_create("spinner", 1, cpu_mask(target), spinner, (void *)0);
+    while (atomic_load(&spin_counts[0]) == 0)
+        task_sleep_until(time_now() + time_us(1000));
+    atomic_store(&woke_at, 0);
+    t0 = time_now();
+    task_create("urgent", 20, cpu_mask(target), urgent, nullptr);
+    if (!wait_test(500000))
+        fail("V1.3 preempt", "higher-priority task never ran on the busy CPU");
+    waited = atomic_load(&woke_at) - t0;
+    if (atomic_load(&spin_finished))
+        fail("V1.3 preempt", "spinner stopped early");
+    stop_spinners(1);
+    kprintf("V1.3 preempt ok: higher priority ran on a busy CPU after %llu us\n",
+            (unsigned long long)time_to_us(waited));
+}
+
+/*
+ * --- round robin: two equal-priority spinners on one CPU take turns ---
+ * Both making progress isn't enough: one stray switch would do that.
+ * Over 15 quanta each should be switched in several times.
+ */
+
+static void test_round_robin(void)
+{
+    unsigned target = ncpus > 1 ? ncpus - 1 : 0;
+    uint64_t a, b, a_runs, b_runs;
+    struct task *ta, *tb;
+
+    if (ncpus == 1) {
+        kprintf("V1.3 round robin skipped: one CPU\n");
+        return;
+    }
+    atomic_store(&spin_stop, false);
+    atomic_store(&spin_finished, 0);
+    atomic_store(&spin_counts[0], 0);
+    atomic_store(&spin_counts[1], 0);
+    ta = task_create("rr-a", 3, cpu_mask(target), spinner, (void *)0);
+    tb = task_create("rr-b", 3, cpu_mask(target), spinner, (void *)1);
+    if (!ta || !tb)
+        fail("V1.3 round robin", "task_create failed");
+    task_sleep_until(time_now() + time_us(60000));      /* 15 quanta */
+    a = atomic_load(&spin_counts[0]);
+    b = atomic_load(&spin_counts[1]);
+    a_runs = ta->runs;                  /* while they're still alive */
+    b_runs = tb->runs;
+    stop_spinners(2);
+    if (!a || !b)
+        fail("V1.3 round robin", "a spinner never ran");
+    if (a_runs < 3 || b_runs < 3)
+        fail("V1.3 round robin", "spinners didn't take turns");
+    kprintf("V1.3 round robin ok: %llu and %llu turns, %llu and %llu iterations in 60 ms\n",
+            (unsigned long long)a_runs, (unsigned long long)b_runs,
+            (unsigned long long)a, (unsigned long long)b);
+}
+
+/* --- migration: a task moves itself to another CPU --- */
+
+static atomic_uint moved_from, moved_to;
+
+static void mover(void *)
+{
+    atomic_store(&moved_from, this_cpu()->index + 1);
+    task_set_affinity(cpu_mask(this_cpu()->index + 1));
+    atomic_store(&moved_to, this_cpu()->index + 1);
+    task_signal(tester, SIGF_TEST);
+}
+
+static void test_migrate(void)
+{
+    unsigned from, to;
+
+    if (ncpus == 1) {
+        kprintf("V1.3 migrate skipped: one CPU\n");
+        return;
+    }
+    task_create("mover", 5, cpu_mask(1), mover, nullptr);
+    if (!wait_test(500000))
+        fail("V1.3 migrate", "mover never finished");
+    from = atomic_load(&moved_from) - 1;
+    to = atomic_load(&moved_to) - 1;
+    if (from != 1 || to != (2 % ncpus))
+        fail("V1.3 migrate", "task didn't end up on its new CPU");
+    kprintf("V1.3 migrate ok: cpu %u to cpu %u\n", from, to);
+}
+
+/* --- ping-pong: the cost of Signal + Wait, on one CPU and across two --- */
+
+constexpr unsigned PINGS = 2000;
+static struct task *pong_task;
+
+static void ponger(void *)
+{
+    for (unsigned n = 0; n < PINGS; n++) {
+        task_wait(SIGF_TEST);
+        task_signal(tester, SIGF_TEST);
+    }
+}
+
+static void pingpong(const char *what, unsigned ping_cpu, unsigned pong_cpu)
+{
+    uint64_t t0, c0, ticks, cycles;
+
+    task_set_affinity(cpu_mask(ping_cpu));
+    pong_task = task_create("pong", 10, cpu_mask(pong_cpu), ponger, nullptr);
+    if (!pong_task)
+        fail("V1.3 pingpong", "task_create failed");
+    task_sleep_until(time_now() + time_us(2000));       /* let it reach its Wait */
+    t0 = time_now();
+    c0 = arch_read_cycles();
+    for (unsigned n = 0; n < PINGS; n++) {
+        task_signal(pong_task, SIGF_TEST);
+        task_wait(SIGF_TEST);
+    }
+    cycles = arch_read_cycles() - c0;
+    ticks = time_now() - t0;
+    task_set_affinity(1);
+    kprintf("V1.3 pingpong ok: %s: round trip %llu ns, %llu cycles\n", what,
+            (unsigned long long)(time_to_us(ticks * 1000) / PINGS),
+            (unsigned long long)(cycles / PINGS));
+}
+
+static void test_pingpong(void)
+{
+    uint64_t switches = sched_switches();
+
+    pingpong("same CPU (2 switches)", ncpus > 1 ? 1 : 0, ncpus > 1 ? 1 : 0);
+    if (sched_switches() - switches < 2 * PINGS)
+        fail("V1.3 pingpong", "fewer switches than round trips");
+    if (ncpus > 2)
+        pingpong("across CPUs (Signal + IPI + wake)", 1, 2);
+}
+
+void selftest_tasks(void *)
+{
+    tester = task_self();
+    test_spawn();
+    test_signals();
+    test_preempt();
+    test_round_robin();
+    test_migrate();
+    test_pingpong();
+    kprintf("V1.3 scheduler: %llu switches, %llu steals so far\n",
+            (unsigned long long)sched_switches(), (unsigned long long)sched_steals());
+    kprintf("V1.3 done\n");
 }

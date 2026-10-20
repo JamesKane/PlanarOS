@@ -85,6 +85,16 @@ void arch_cpu_init(void);
 void arch_send_ipi(struct cpu *c);
 uint32_t arch_ipi_irq(void);
 
+/*
+ * Kernel tasks (V1 step 3). arch_context_init() makes 'ctx' start in
+ * task_start() on the stack that ends at 'stack_top' when it's first
+ * switched to. arch_switch() saves the running task's state in 'from'
+ * and resumes 'to'; it returns when something switches back to 'from'.
+ * Called with interrupts held off.
+ */
+void arch_context_init(struct arch_context *ctx, void *stack_top);
+void arch_switch(struct arch_context *from, struct arch_context *to);
+
 /* Read 64 bits at kernel address 'addr' if that doesn't fault: true and
  * the value, or false. For self-tests and probes. */
 bool arch_probe_read(uint64_t addr, uint64_t *val);

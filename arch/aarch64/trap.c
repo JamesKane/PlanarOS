@@ -9,6 +9,7 @@
 #include "arch.h"
 #include "irq.h"
 #include "kprintf.h"
+#include "sched.h"
 
 struct trap_frame {
     uint64_t x[31];
@@ -55,7 +56,9 @@ void trap_sync(struct trap_frame *f, uint64_t kind)
 
 void trap_irq(struct trap_frame *, uint64_t)
 {
+    irq_enter();
     irq_external();
+    irq_exit();             /* may switch tasks: this frame waits on its stack */
 }
 
 void trap_unexpected(struct trap_frame *f, uint64_t kind)

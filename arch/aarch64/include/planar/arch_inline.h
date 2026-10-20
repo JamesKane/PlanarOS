@@ -21,6 +21,16 @@
 /* TTBR0's half with 48-bit addresses; everything above belongs to TTBR1. */
 #define ARCH_USER_TOP       0x0001000000000000ULL
 
+/*
+ * A kernel task's saved state between switches (switch.S): x19-x28, the
+ * frame pointer, the link register and the stack pointer. Everything
+ * else is dead across arch_switch() or in a trap frame on the stack.
+ */
+struct arch_context {
+    uint64_t x[10];     /* x19-x28 */
+    uint64_t fp, lr, sp;
+};
+
 static inline void *phys_to_virt(uint64_t pa)
 {
     return (void *)(uintptr_t)(ARCH_DIRECT_MAP + pa);

@@ -23,6 +23,17 @@
 /* Sv39's user half; everything above belongs to the kernel. */
 #define ARCH_USER_TOP       0x0000004000000000ULL
 
+/*
+ * A kernel task's saved state between switches (switch.S): the
+ * callee-saved registers and the stack pointer. Everything else is dead
+ * across arch_switch() or in a trap frame on the task's stack.
+ */
+struct arch_context {
+    uint64_t ra;
+    uint64_t sp;
+    uint64_t s[12];
+};
+
 static inline void *phys_to_virt(uint64_t pa)
 {
     return (void *)(uintptr_t)(ARCH_DIRECT_MAP + pa);

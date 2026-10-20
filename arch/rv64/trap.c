@@ -9,6 +9,7 @@
 #include "irq.h"
 #include "kprintf.h"
 #include "riscv.h"
+#include "sched.h"
 
 struct trap_frame {
     uint64_t x[32];     /* x[2] is the sp at the time of the trap */
@@ -55,6 +56,11 @@ void trap_handler(struct trap_frame *f)
     uint64_t scause = csr_read_scause();
     uint64_t stval = csr_read_stval();
 
+    if (!(scause & SCAUSE_INTERRUPT)) {
+        kernel_trap(f, scause, stval);
+        return;
+    }
+    irq_enter();
     if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER)) {
         irq_timer();
     } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_SOFT)) {
@@ -62,9 +68,8 @@ void trap_handler(struct trap_frame *f)
         irq_ipi();
     } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_EXTERNAL)) {
         irq_external();
-    } else {
-        kernel_trap(f, scause, stval);
     }
+    irq_exit();             /* may switch tasks: this frame waits on its stack */
 }
 
 bool arch_probe_read(uint64_t addr, uint64_t *val)
