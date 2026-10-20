@@ -118,6 +118,8 @@ static void unback_identity(struct area *a)
         pmm_free(a->run_pa + i * PAGE_SIZE);
 }
 
+static void free_page_list(struct area *a);
+
 static bool back_global(struct area *a, uint64_t n)
 {
     uint64_t align = a->flags & AREAF_LARGE ? LARGE_ALIGN : PAGE_SIZE;
@@ -126,7 +128,8 @@ static bool back_global(struct area *a, uint64_t n)
     if (!(a->va = va_alloc(n * PAGE_SIZE, align)))
         return false;
     if (a->flags & AREAF_CONTIG) {
-        if ((a->pa = pmm_alloc_contig(n)))
+        /* AREAF_LARGE: the physical run aligned too, as identity does. */
+        if ((a->pa = pmm_alloc_contig_aligned(n, align)))
             return true;
     } else {
         /* The page list: from the kernel heap, or whole pages if long. */
@@ -143,6 +146,8 @@ static bool back_global(struct area *a, uint64_t n)
             if (i == n - 1)
                 return true;
         }
+        if (a->pages)
+            free_page_list(a);      /* the list as well (review M5) */
     }
     va_free(a->va - PAGE_SIZE, (n + 1) * PAGE_SIZE);
     return false;

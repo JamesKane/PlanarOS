@@ -35,7 +35,7 @@ int main(void)
     if (h <= 0)
         return 2;
     word = p;
-    if (!CreateTask(writer, 0))
+    if (CreateTask(writer, 0) <= 0)
         return 3;
     while (atomic_load(&writes) < 100000)
         ;

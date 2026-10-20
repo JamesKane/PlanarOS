@@ -23,7 +23,7 @@ int main(void)
     main_task = FindTask(nullptr);
     for (int n = 0; n < WORKERS; n++) {
         want |= 1ULL << (20 + n);
-        if (!CreateTask(worker, (uint64_t)n))
+        if (CreateTask(worker, (uint64_t)n) <= 0)
             return 1;
     }
     while (got != want)

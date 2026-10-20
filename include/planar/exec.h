@@ -22,7 +22,7 @@ uint64_t SetSignal(uint64_t bits, uint64_t mask);
 uint64_t Wait(uint64_t mask);
 int64_t Signal(Handle task, uint64_t mask);
 Handle FindTask(const char *name);          /* nullptr: the calling task */
-Handle CreateTask(void (*entry)(uint64_t arg), uint64_t arg);
+int64_t CreateTask(void (*entry)(uint64_t arg), uint64_t arg);     /* handle, or error */
 [[noreturn]] void ExitTask(int64_t code);
 int64_t AllocSignal(int64_t bit);           /* -1: any free one */
 void FreeSignal(int64_t bit);
@@ -51,7 +51,7 @@ struct AreaInfo {
     uint32_t ai_Sharers;        /* processes mapping it */
 };
 
-Handle AllocArea(uint64_t size, uint32_t flags, void **address);
+int64_t AllocArea(uint64_t size, uint32_t flags, void **address);   /* handle, or error */
 int64_t FreeArea(Handle area);
 int64_t ShareArea(Handle area, Handle task, uint32_t rights);
 int64_t UnshareArea(Handle area, Handle task);

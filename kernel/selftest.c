@@ -985,7 +985,13 @@ void selftest_areas(void)
         kprintf("V1.5 areas skipped: no user programs\n");
         return;
     }
-    expect_exit("areas", 0);
+    struct process *areas = run("areas", 0, 20000000);     /* it fills memory, once */
+
+    if (!atomic_load(&areas->dead) || areas->fault != FAULT_NONE || areas->exit_code != 0) {
+        kprintf("areas: exit %lld, fault %d\n", (long long)areas->exit_code, areas->fault);
+        fail("V1.5 areas", "a check failed");
+    }
+    process_free(areas);
     kprintf("V1.5 areas ok (%s layout): allocate, query, protect, run written code, "
             "free, churn\n", layout_name(layout_boot()));
 

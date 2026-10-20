@@ -6,7 +6,7 @@
 int main(void)
 {
     uint8_t *p;
-    Handle a = AllocArea(4096, 0, (void **)&p);
+    int64_t a = AllocArea(4096, 0, (void **)&p);
 
     if ((int64_t)a <= 0 || ProtectArea(a, AREAR_READ) != 0)
         return 1;

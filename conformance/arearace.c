@@ -36,7 +36,7 @@ int main(void)
     Handle me = FindTask(nullptr);
     unsigned bad = 0;
 
-    if (!CreateTask(freer, 0))
+    if (CreateTask(freer, 0) <= 0)
         return 2;
     for (unsigned r = 0; r < ROUNDS; r++) {
         void *p;

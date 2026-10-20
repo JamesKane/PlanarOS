@@ -48,7 +48,7 @@ int main(void)
 {
     struct AreaInfo info;
     uint8_t *p, *q, *slot_at[SLOTS];
-    Handle a, b, slot[SLOTS];
+    int64_t a, b, slot[SLOTS];      /* handles, or errors */
     uint64_t v, slot_size[SLOTS];
     bool kept = true, apart = true;
 
@@ -100,13 +100,27 @@ int main(void)
     CHECK(ProtectArea(a, AREAR_READ) == ERR_BADHANDLE);
 
     /* Bad arguments, and the other flags. */
-    CHECK(AllocArea(0, 0, (void **)&q) == (Handle)ERR_BADARG);
-    CHECK(AllocArea(PAGE, 1u << 20, (void **)&q) == (Handle)ERR_BADARG);
+    CHECK(AllocArea(0, 0, (void **)&q) == ERR_BADARG);
+    CHECK(AllocArea(PAGE, 1u << 20, (void **)&q) == ERR_BADARG);
     b = AllocArea(PAGE, AREAF_LARGE, (void **)&q);
     CHECK((int64_t)b > 0 && ((uint64_t)(uintptr_t)q & ((2u << 20) - 1)) == 0 && FreeArea(b) == 0);
     b = AllocArea(8 * PAGE, AREAF_CONTIG, (void **)&q);
     CHECK((int64_t)b > 0 && FreeArea(b) == 0);
     CHECK(QueryArea((void *)8, &info) == ERR_NOTFOUND);
+
+    /* Allocating until memory runs out fails cleanly, part way through
+     * an Area included; the kernel checks nothing leaked (review M5). */
+    {
+        Handle big[64];
+        unsigned got = 0;
+        int64_t last = 0;
+
+        while (got < 64 && (last = AllocArea(512ULL << 20, 0, (void **)&q)) > 0)
+            big[got++] = (Handle)last;
+        CHECK(last == ERR_NOMEM);
+        while (got)
+            CHECK(FreeArea(big[--got]) == 0);
+    }
 
     /* Churn: each live Area keeps its contents and no two overlap. */
     for (unsigned i = 0; i < SLOTS; i++)
