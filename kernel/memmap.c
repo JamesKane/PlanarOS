@@ -28,6 +28,27 @@ static void add(struct range *list, unsigned *n, uint64_t base, uint64_t size)
     list[(*n)++] = (struct range){ base, size };
 }
 
+static uint64_t unmapped;           /* RAM bytes past the direct map, dropped */
+
+/* Keep RAM below 'top' only (the direct map's end). */
+static void clip(uint64_t top)
+{
+    for (unsigned i = 0; i < nram; i++) {
+        if (ram[i].base >= top) {
+            unmapped += ram[i].size;
+            ram[i--] = ram[--nram];
+        } else if (ram[i].base + ram[i].size > top) {
+            unmapped += ram[i].base + ram[i].size - top;
+            ram[i].size = top - ram[i].base;
+        }
+    }
+}
+
+void memmap_clip(uint64_t top)
+{
+    clip(top);
+}
+
 bool memmap_init(void)
 {
     int32_t node = -1, resv;
@@ -43,6 +64,9 @@ bool memmap_init(void)
                 add(ram, &nram, lo, hi - lo);
         }
     }
+
+    /* The kernel reaches RAM only through the direct map (review M13). */
+    clip((uint64_t)ARCH_DIRECT_MAP_GIB << 30);
 
     for (uint32_t i = 0; fdt_memreserve(i, &base, &size); i++)
         add(reserved, &nreserved, base, size);
@@ -75,6 +99,9 @@ bool memmap_reserved(unsigned index, uint64_t *base, uint64_t *size)
 
 void memmap_report(void)
 {
+    if (unmapped)
+        kprintf("planar: %llu MiB of RAM past the direct map, unused\n",
+                (unsigned long long)(unmapped >> 20));
     for (unsigned i = 0; i < nram; i++)
         kprintf("planar: RAM      %p-%p, %llu MiB\n", (void *)ram[i].base,
                 (void *)(ram[i].base + ram[i].size - 1),

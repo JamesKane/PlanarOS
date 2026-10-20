@@ -495,6 +495,8 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
 
     if (size == 0 || size > (VA_WINDOW_TOP - VA_WINDOW_BASE) / 2 || (flags & ~AREAF_ALL))
         return ERR_BADARG;
+    if ((size + PAGE_SIZE - 1) / PAGE_SIZE > pmm_free_pages())
+        return ERR_NOMEM;           /* can't be had: say so before zeroing it all */
     if (!(a = area_new(layout_boot(), (size + PAGE_SIZE - 1) / PAGE_SIZE, flags, false)))
         return ERR_NOMEM;
     a->owner = p;

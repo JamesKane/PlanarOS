@@ -36,6 +36,10 @@ uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align);
 /* Pages managed in total, and how many are free now. */
 uint64_t pmm_total(void);
 
+/* Tests only: let 'n' more single-page allocations succeed, then fail
+ * one (0: no failures). */
+void pmm_fail_after(uint64_t n);
+
 /* Frees of pages that weren't allocated: always a kernel bug. */
 unsigned pmm_bad_frees(void);
 uint64_t pmm_free_pages(void);

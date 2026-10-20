@@ -19,6 +19,10 @@
  * a device tree). */
 bool memmap_init(void);
 
+/* Forget RAM at and above 'top': the architecture couldn't map it. RAM
+ * past the direct map is never in the map at all. */
+void memmap_clip(uint64_t top);
+
 /* Entry 'index' of RAM, or of the reserved ranges; false past the end. */
 bool memmap_ram(unsigned index, uint64_t *base, uint64_t *size);
 bool memmap_reserved(unsigned index, uint64_t *base, uint64_t *size);

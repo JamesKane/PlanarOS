@@ -985,13 +985,7 @@ void selftest_areas(void)
         kprintf("V1.5 areas skipped: no user programs\n");
         return;
     }
-    struct process *areas = run("areas", 0, 20000000);     /* it fills memory, once */
-
-    if (!atomic_load(&areas->dead) || areas->fault != FAULT_NONE || areas->exit_code != 0) {
-        kprintf("areas: exit %lld, fault %d\n", (long long)areas->exit_code, areas->fault);
-        fail("V1.5 areas", "a check failed");
-    }
-    process_free(areas);
+    expect_exit("areas", 0);
     kprintf("V1.5 areas ok (%s layout): allocate, query, protect, run written code, "
             "free, churn\n", layout_name(layout_boot()));
 
@@ -1011,6 +1005,23 @@ void selftest_areas(void)
             "CPU just after ProtectArea took write away; a reader lived through 2000 rights changes\n");
 
     test_share();
+
+    /* A global Area whose pages run out part way gives back what it
+     * took, its page list included (review M5). The identity layout
+     * takes one run, so fails before taking anything. */
+    {
+        uint64_t before = pmm_free_pages();
+        struct area *a;
+
+        pmm_fail_after(300);
+        a = area_new(LAYOUT_GLOBAL, 600, 0, false);
+        pmm_fail_after(0);
+        if (a)
+            fail("V1.5 nomem", "an Area was made with its pages failing");
+        if (pmm_free_pages() != before)
+            fail("V1.5 nomem", "a failed Area kept pages");
+        kprintf("V1.5 nomem ok: an Area failing part way gave back every page\n");
+    }
 
     expect_exit("arearace", 0);
     kprintf("V1.5 race ok: 3000 FreeAreas raced ShareArea and ProtectArea on the same handle; "

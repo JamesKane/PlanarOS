@@ -211,7 +211,7 @@ void arch_memory_init(void)
             uint64_t *l2;
 
             if (g >= ARCH_DIRECT_MAP_GIB)
-                break;
+                break;              /* memmap_init clipped RAM here already */
             if (pa % GIB == 0 && end - pa >= GIB &&
                 (boot_l1[g] & DESC_VALID_MASK) == DESC_BLOCK) {
                 set_desc(&boot_l1[g], pa | BLOCK_NORMAL);
@@ -221,6 +221,7 @@ void arch_memory_init(void)
             if (!(l2 = l2_for(g))) {
                 kprintf("planar: out of level-2 tables; RAM from %p left unmapped\n",
                         (void *)pa);
+                memmap_clip(pa);    /* and out of the page allocator's way */
                 return;
             }
             for (; pa < end && pa / GIB == g; pa += MIB2) {

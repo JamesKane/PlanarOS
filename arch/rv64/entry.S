@@ -15,7 +15,7 @@
  */
 
 #define KERNEL_VOFFSET  0xffffffc000000000
-#define DIRECT_MAP_GIB  16
+#define DIRECT_MAP_GIB  128                 /* ARCH_DIRECT_MAP_GIB */
 #define ROOT_HIGH       256                 /* root index of KERNEL_VOFFSET */
 #define PTE_KERNEL      0xef                /* V R W X G A D */
 #define SATP_SV39       (8 << 60)

@@ -18,7 +18,7 @@
  * ranges are devices.
  */
 #define ARCH_DIRECT_MAP     0xffffffc000000000ULL
-#define ARCH_DIRECT_MAP_GIB 16
+#define ARCH_DIRECT_MAP_GIB 128     /* of Sv39's 256: RAM above it goes unused */
 
 /* Sv39's user half; everything above belongs to the kernel. */
 #define ARCH_USER_TOP       0x0000004000000000ULL

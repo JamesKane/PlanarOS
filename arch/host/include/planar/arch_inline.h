@@ -13,6 +13,9 @@
 #include <time.h>
 #include <ucontext.h>
 
+/* No physical memory of its own: nothing to clip. */
+#define ARCH_DIRECT_MAP_GIB 0x100000ULL
+
 #define ARCH_DIRECT_MAP     0ULL
 #define ARCH_USER_TOP       0ULL
 

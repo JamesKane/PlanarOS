@@ -107,12 +107,14 @@ test: $(IMAGE)
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
 
 # Both ISAs in both layouts, AArch64 once more entered at EL2 (as the CIX
-# and RK3588 boards enter it), and the hosted build.
+# and RK3588 boards enter it), RV64 with 17 GiB (RAM and the device tree
+# above 16 GiB), and the hosted build.
 test-all:
 	@for p in $(TEST_PLATFORMS); do for l in identity global; do \
 	  $(MAKE) --no-print-directory PLATFORM=$$p LAYOUT=$$l test || exit 1; \
 	done; done
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 LAYOUT=global test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-rv64 QEMU_MEM=17G test
 	@$(MAKE) --no-print-directory PLATFORM=hosted test
 
 # The VQ3 measurement (docs/v1-plan.md): the same random workload against

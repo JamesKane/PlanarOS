@@ -108,19 +108,9 @@ int main(void)
     CHECK((int64_t)b > 0 && FreeArea(b) == 0);
     CHECK(QueryArea((void *)8, &info) == ERR_NOTFOUND);
 
-    /* Allocating until memory runs out fails cleanly, part way through
-     * an Area included; the kernel checks nothing leaked (review M5). */
-    {
-        Handle big[64];
-        unsigned got = 0;
-        int64_t last = 0;
-
-        while (got < 64 && (last = AllocArea(512ULL << 20, 0, (void **)&q)) > 0)
-            big[got++] = (Handle)last;
-        CHECK(last == ERR_NOMEM);
-        while (got)
-            CHECK(FreeArea(big[--got]) == 0);
-    }
+    /* More than there is: refused, as an error (review M5's handle-or-
+     * error return; the kernel tests failing part way itself). */
+    CHECK(AllocArea(31ULL << 30, 0, (void **)&q) == ERR_NOMEM);
 
     /* Churn: each live Area keeps its contents and no two overlap. */
     for (unsigned i = 0; i < SLOTS; i++)
