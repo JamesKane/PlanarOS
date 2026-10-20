@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Run a boot command and check its console transcript.
 
-    boot-check.py --expect 'V0 done' [--timeout 20] [--log FILE] -- CMD...
+    boot-check.py --expect 'V0 done' [--timeout 20] [--log FILE]
+                  [--forbid REGEX]... -- CMD...
 
 Starts CMD (QEMU, or the hosted executable), echoes its output, and
 succeeds as soon as a line containing the expected text appears. Fails
-if the command exits or the timeout passes first. The kernel halts rather
-than powering off, so QEMU is killed once the transcript is complete.
+if the command exits or the timeout passes first, at once if a test says
+FAIL or the kernel meditates, and at the end if any line matches a
+--forbid pattern (a platform that must run every test forbids
+"skipped"). The kernel halts rather than powering off, so QEMU is killed
+once the transcript is complete.
 """
 
 import argparse
 import os
+import re
 import selectors
 import subprocess
 import sys
@@ -22,6 +27,8 @@ def main() -> int:
     ap.add_argument("--expect", required=True, help="text that marks a good boot")
     ap.add_argument("--timeout", type=float, default=20.0, help="seconds")
     ap.add_argument("--log", help="also write the transcript here")
+    ap.add_argument("--forbid", action="append", default=[],
+                    help="a regex no transcript line may match")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
@@ -50,6 +57,8 @@ def main() -> int:
             sys.stdout.flush()
             transcript += chunk
             found = args.expect.encode() in transcript
+            if re.search(rb" FAIL\b|Guru Meditation", transcript):
+                break
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -58,10 +67,19 @@ def main() -> int:
     if args.log:
         with open(args.log, "wb") as f:
             f.write(transcript)
-    if found:
+    text = transcript.decode(errors="replace")
+    bad = [line for line in text.splitlines()
+           for pat in args.forbid if re.search(pat, line)]
+    if found and not bad:
         print(f"\nboot-check: ok ('{args.expect}')")
         return 0
-    why = "timed out" if time.monotonic() >= deadline else f"exited with {proc.returncode}"
+    if bad:
+        print(f"\nboot-check: FAILED: forbidden line: {bad[0].strip()}")
+        return 1
+    if re.search(r" FAIL\b|Guru Meditation", text):
+        why = "a test failed"
+    else:
+        why = "timed out" if time.monotonic() >= deadline else f"exited with {proc.returncode}"
     print(f"\nboot-check: FAILED: {why} before '{args.expect}'")
     return 1
 

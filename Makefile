@@ -49,7 +49,12 @@ PORTABLE_SRCS := \
 	drivers/plic.c \
 	drivers/uart8250.c
 
-# What every boot transcript must end with (tools/boot-check.py).
+# What every boot transcript must end with (tools/boot-check.py). A
+# platform that can run every test sets CHECK_FLAGS to forbid skipping
+# one (the VQ3 soak is skipped unless asked for).
+CHECK_FLAGS :=
+FULL_CHECK := --forbid 'skipped: (?!not asked for)'
+
 EXPECT := V2.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
@@ -94,7 +99,8 @@ $(BUILD)/%.S.o: %.S
 BOOT_TIMEOUT ?= 20
 
 test: $(IMAGE)
-	python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' -- $(RUN_CMD)
+	python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' $(CHECK_FLAGS) \
+	  -- $(RUN_CMD)
 
 
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
@@ -122,7 +128,7 @@ SOAK ?= 100
 
 soak: $(IMAGE)
 	@rm -f $(BUILD)/soak-fail-*.log; fails=0; for i in $$(seq 1 $(SOAK)); do \
-	  python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' \
+	  python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' $(CHECK_FLAGS) \
 	    --log $(BUILD)/soak-last.log -- $(RUN_CMD) >/dev/null || \
 	    { fails=$$((fails + 1)); cp $(BUILD)/soak-last.log $(BUILD)/soak-fail-$$fails.log; }; \
 	done; echo "soak: $$fails of $(SOAK) boots failed ($(PLATFORM))"; test $$fails -eq 0

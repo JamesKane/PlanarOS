@@ -14,7 +14,7 @@ USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/s
 
 $(BUILD)/user/%.o: arch/$(ARCH)/user/%.S
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/user/%.o: arch/$(ARCH)/user/%.c
 	@mkdir -p $(dir $@)
@@ -38,7 +38,9 @@ $(BUILD)/user/%.elf: $(BUILD)/user/%.o $(USER_RT) arch/$(ARCH)/user/user.ld
 $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 	$(OBJCOPY) -O binary $< $@
 
--include $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGS)) $(BUILD)/user/exec/msg.d
+# Every user object's dependencies: programs, runtime, stubs (a call
+# renumbered in planar/syscalls.h must rebuild the stubs too).
+-include $(USER_RT:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGS))
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 

@@ -33,3 +33,5 @@ RUN_CMD := python3 -I tools/serial-boot.py --port $(SERIAL) --image $(IMAGE) \
 run: $(IMAGE)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }
 	$(RUN_CMD)
+
+CHECK_FLAGS := $(FULL_CHECK)

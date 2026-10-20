@@ -14,3 +14,5 @@ RUN_CMD := $(QEMU) -machine virt -cpu rv64,v=true,vlen=256 -smp 4 -m $(QEMU_MEM)
 
 run: $(IMAGE)
 	$(RUN_CMD)
+
+CHECK_FLAGS := $(FULL_CHECK)

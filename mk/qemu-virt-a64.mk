@@ -23,3 +23,5 @@ RUN_CMD := $(QEMU) -machine $(QEMU_MACHINE) -cpu cortex-a76 -smp 4 -m $(QEMU_MEM
 
 run: $(IMAGE)
 	$(RUN_CMD)
+
+CHECK_FLAGS := $(FULL_CHECK)
