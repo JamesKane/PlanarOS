@@ -9,6 +9,7 @@
 #include <stdatomic.h>
 
 #include "arch.h"
+#include "fdt.h"
 #include "kprintf.h"
 #include "kstring.h"
 #include "memmap.h"
@@ -69,9 +70,50 @@ void pmm_reserve(uint64_t start, uint64_t size)
     spin_unlock_irqrestore(&lock, was);
 }
 
+static bool overlaps(uint64_t a, uint64_t an, uint64_t b, uint64_t bn)
+{
+    return an && bn && a < b + bn && b < a + an;
+}
+
+uint64_t pmm_place(uint64_t start, uint64_t bytes, uint64_t avoid, uint64_t avoid_size)
+{
+    uint64_t at = (start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1), base, size;
+
+    for (unsigned rounds = 0; rounds < 64; rounds++) {
+        uint64_t next = at;
+        bool in_ram = false;
+
+        /* Past anything kept, then into RAM. */
+        if (overlaps(at, bytes, avoid, avoid_size))
+            next = avoid + avoid_size;
+        for (unsigned i = 0; memmap_reserved(i, &base, &size); i++)
+            if (overlaps(next, bytes, base, size))
+                next = base + size;
+        next = (next + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (next != at) {
+            at = next;
+            continue;
+        }
+        for (unsigned i = 0; memmap_ram(i, &base, &size) && !in_ram; i++)
+            in_ram = at >= base && at + bytes <= base + size;
+        if (in_ram)
+            return at;
+        /* The next RAM range up. */
+        next = ~0ULL;
+        for (unsigned i = 0; memmap_ram(i, &base, &size); i++)
+            if (base > at && base < next)
+                next = base;
+        if (next == ~0ULL)
+            return 0;
+        at = next;
+    }
+    return 0;
+}
+
 bool pmm_init(void)
 {
-    uint64_t base, size, lo = ~(uint64_t)0, hi = 0, kstart, kend, bytes, first, last;
+    uint64_t base, size, lo = ~(uint64_t)0, hi = 0, kstart, kend, bytes, first, last, at;
+    uint64_t fdt_pa, fdt_bytes;
 
     arch_kernel_extent(&kstart, &kend);
     for (unsigned i = 0; memmap_ram(i, &base, &size); i++) {
@@ -89,8 +131,13 @@ bool pmm_init(void)
     bytes = (nwords * 8 + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
     /* Everything starts taken; then RAM is freed and the reservations
-     * taken back. The bitmap goes in the pages after the kernel. */
-    bitmap = phys_to_virt((kend + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+     * taken back. The bitmap goes after the kernel, clear of what the
+     * firmware keeps and of the device tree (review M15). */
+    fdt_pa = fdt_blob() ? virt_to_phys(fdt_blob()) : 0;
+    fdt_bytes = fdt_size();
+    if (!(at = pmm_place(kend, bytes, fdt_pa, fdt_bytes)))
+        return false;
+    bitmap = phys_to_virt(at);
     memset(bitmap, 0xff, nwords * 8);
     nfree = 0;
     for (unsigned i = 0; memmap_ram(i, &base, &size); i++)
@@ -98,7 +145,9 @@ bool pmm_init(void)
             set_range(first, last, false);
     total = nfree;
 
-    pmm_reserve(kstart, virt_to_phys(bitmap) + bytes - kstart);
+    pmm_reserve(kstart, kend - kstart);
+    pmm_reserve(at, bytes);
+    pmm_reserve(fdt_pa, fdt_bytes);         /* read again later; firmware may not list it */
     for (unsigned i = 0; memmap_reserved(i, &base, &size); i++)
         pmm_reserve(base, size);
     return true;

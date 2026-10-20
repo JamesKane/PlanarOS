@@ -40,6 +40,11 @@ uint64_t pmm_total(void);
  * one (0: no failures). */
 void pmm_fail_after(uint64_t n);
 
+/* Where 'bytes' can go at or after 'start': in RAM, clear of the
+ * reserved ranges and of [avoid, avoid + avoid_size). 0 if nowhere.
+ * pmm_init places its bitmap so; exported for the self-test. */
+uint64_t pmm_place(uint64_t start, uint64_t bytes, uint64_t avoid, uint64_t avoid_size);
+
 /* Frees of pages that weren't allocated: always a kernel bug. */
 unsigned pmm_bad_frees(void);
 uint64_t pmm_free_pages(void);

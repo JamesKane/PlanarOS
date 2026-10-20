@@ -52,6 +52,16 @@ void selftest_pmm(void)
         kprintf("V1.1 pmm skipped: no managed memory\n");
         return;
     }
+    /* Placing the bitmap: past a range it must not cover (review M15). */
+    {
+        uint64_t ks, ke, at, start;
+
+        arch_kernel_extent(&ks, &ke);
+        start = (ke + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        at = pmm_place(start, 3 * PAGE_SIZE, start + PAGE_SIZE, 2 * PAGE_SIZE);
+        if (at < start + 3 * PAGE_SIZE)
+            fail("V1.1 pmm", "placed the bitmap over a range it had to keep clear of");
+    }
     for (int i = 0; i < N; i++) {
         uint64_t *p;
 
