@@ -15,4 +15,10 @@ void selftest_pmm(void);
 void selftest_fault(void);
 void selftest_timer(void);
 
+/* V1 step 2: SMP. */
+void selftest_smp(void);
+void selftest_ipi(void);
+void selftest_cpu_timers(void);
+void selftest_lock(void);
+
 #endif /* KERNEL_SELFTEST_H */

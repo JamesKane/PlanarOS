@@ -14,6 +14,7 @@
 #include <planar/endian.h>
 
 #include "aarch64.h"
+#include "cpu.h"
 #include "fdt.h"
 #include "intc.h"
 
@@ -45,7 +46,9 @@ constexpr uint64_t TYPER_LAST      = 1u << 4;
 constexpr uint32_t SPURIOUS        = 1020;   /* INTIDs 1020-1023 aren't interrupts */
 
 static uintptr_t dist, rdist_base;
-static uintptr_t rdist;         /* the boot CPU's; per CPU in step 2 */
+static uintptr_t rdists[MAX_CPUS];     /* each CPU's redistributor */
+
+#define rdist (rdists[this_cpu()->index])
 static uint32_t nlines;
 
 static volatile uint32_t *d32(uint64_t off) { return (volatile uint32_t *)(dist + off); }
@@ -112,7 +115,7 @@ static uintptr_t find_rdist(uint64_t cpu)
 
 static bool init_cpu(uint64_t cpu)
 {
-    if (!(rdist = find_rdist(cpu)))
+    if (!(rdists[this_cpu()->index] = find_rdist(cpu)))
         return false;
     *r32(GICR_WAKER) &= ~WAKER_PROCESSOR_SLEEP;
     while (*r32(GICR_WAKER) & WAKER_CHILDREN_ASLEEP)
@@ -151,7 +154,7 @@ static void set(uint32_t source, unsigned level)
     }
     if (level) {
         *d8(GICD_IPRIORITYR + source) = priority(level);
-        /* Route to the boot CPU; step 2 routes per CPU. */
+        /* Route to the calling CPU. */
         *d64(GICD_IROUTER + 8 * (uint64_t)source) = sysreg_read(mpidr_el1) & 0xff00ffffffULL;
         *d32(GICD_ISENABLER + source / 32 * 4) = bit;
     } else {

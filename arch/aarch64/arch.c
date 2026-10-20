@@ -3,6 +3,7 @@
  */
 #include "aarch64.h"
 #include "arch.h"
+#include "cpu.h"
 #include "fdt.h"
 #include "intc.h"
 #include "kprintf.h"
@@ -14,6 +15,7 @@ extern const struct intc_driver gicv3_driver;
 const struct intc_driver *const arch_intc_drivers[] = { &gicv3_driver, nullptr };
 
 extern const char vectors[];                    /* vectors.S */
+extern const char secondary_entry[];            /* entry.S */
 extern uint64_t boot_l1[512], boot_l2[512];     /* entry.S */
 extern char _kernel_start[], _kernel_end[];     /* link.ld */
 
@@ -31,7 +33,18 @@ static int l2_used;
 
 static bool have_pmu;
 
+/* The PSCI conduit, from the device tree: hvc or smc. */
+static bool psci_smc;
+
+constexpr uint32_t IPI_SGI = 1;
+
 void arch_early_init(void)
+{
+    arch_cpu_init();
+}
+
+/* Every CPU: vectors, TTBR0 off, the cycle counter, the virtual timer. */
+void arch_cpu_init(void)
 {
     uint64_t dfr0;
 
@@ -56,6 +69,74 @@ void arch_early_init(void)
     sysreg_write(cntv_cval_el0, ~(uint64_t)0);
     sysreg_write(cntv_ctl_el0, 1);
     isb();
+}
+
+void arch_set_this_cpu(struct cpu *c)
+{
+    sysreg_write(tpidr_el1, (uintptr_t)c);
+}
+
+static int64_t psci_call(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
+{
+    register uint64_t x0 __asm__("x0") = fn;
+    register uint64_t x1 __asm__("x1") = a1;
+    register uint64_t x2 __asm__("x2") = a2;
+    register uint64_t x3 __asm__("x3") = a3;
+
+    if (psci_smc)
+        __asm__ volatile("smc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
+    else
+        __asm__ volatile("hvc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
+    return (int64_t)x0;
+}
+
+constexpr uint64_t PSCI_CPU_ON = 0xc4000003;    /* SMC64 */
+
+/*
+ * The conduit comes from the device tree, so it's read here, not in
+ * arch_early_init(), which runs before the tree is. Getting it wrong
+ * isn't benign: from EL1, hvc goes to whatever EL2 has (nothing, once
+ * the entry code has dropped from it), and smc to a firmware that may
+ * not be there.
+ */
+bool arch_cpu_start(struct cpu *c)
+{
+    static bool conduit_known;
+
+    if (!conduit_known) {
+        int32_t psci = fdt_find_compatible(-1, "arm,psci-0.2");
+        uint32_t len;
+        const char *method;
+
+        if (psci < 0)
+            psci = fdt_find_compatible(-1, "arm,psci-1.0");
+        method = psci >= 0 ? fdt_getprop(psci, "method", &len) : nullptr;
+        if (!method)
+            return false;
+        psci_smc = method[0] == 's';
+        conduit_known = true;
+    }
+    return psci_call(PSCI_CPU_ON, c->hwid, virt_to_phys(secondary_entry),
+                     (uint64_t)(uintptr_t)c) == 0;
+}
+
+/* SGI to one CPU by affinity: Aff2 and Aff1 select the cluster, then
+ * RS and TargetList pick Aff0 in groups of 16. */
+void arch_send_ipi(struct cpu *c)
+{
+    uint64_t aff0 = c->hwid & 0xff, aff1 = (c->hwid >> 8) & 0xff, aff2 = (c->hwid >> 16) & 0xff;
+    uint64_t sgi = aff2 << 32 | (aff0 / 16) << 44 | (uint64_t)IPI_SGI << 24 |
+                   aff1 << 16 | 1ULL << (aff0 % 16);
+
+    /* The call record must be visible before the interrupt lands. */
+    __asm__ volatile("dsb ishst" : : : "memory");
+    sysreg_write(ICC_SGI1R_EL1, sgi);
+    isb();
+}
+
+uint32_t arch_ipi_irq(void)
+{
+    return IPI_SGI;
 }
 
 /* Break-before-make: replace a live descriptor. */

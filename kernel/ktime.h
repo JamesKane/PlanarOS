@@ -3,8 +3,8 @@
  *
  * Time is counted in timebase ticks (time_hz() per second). There is no
  * periodic tick: the hardware timer is armed for the earliest pending
- * kernel timer and nothing else. One timer list for now; V1 step 2 gives
- * each CPU its own.
+ * kernel timer and nothing else. Each CPU has its own list and its own
+ * hardware timer; a kernel timer fires on the CPU that started it.
  */
 #ifndef KERNEL_KTIME_H
 #define KERNEL_KTIME_H
@@ -15,6 +15,9 @@
  * there's no timer interrupt; the clock still reads. */
 bool time_init(void);
 uint64_t time_hz(void);
+
+/* Hook up the calling CPU's timer, on a CPU started later. */
+void time_init_cpu(void);
 
 /* Whether kernel timers fire: time_init() found a timer interrupt. */
 bool time_have_timers(void);
@@ -32,7 +35,8 @@ struct ktimer {
     uint64_t deadline;
     void (*fn)(void *data);
     void *data;
-    struct ktimer *next;        /* pending list, sorted by deadline */
+    struct ktimer *next;        /* its CPU's pending list, sorted by deadline */
+    struct cpu *cpu;            /* where it's pending */
     bool pending;
 };
 
@@ -42,7 +46,7 @@ void ktimer_stop(struct ktimer *t);
 /* Timer interrupts taken so far. */
 uint64_t time_interrupts(void);
 
-/* Called from the timer interrupt. */
+/* Called from the timer interrupt, on the CPU whose timer it is. */
 void time_expired(void);
 
 #endif /* KERNEL_KTIME_H */

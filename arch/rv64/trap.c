@@ -55,12 +55,16 @@ void trap_handler(struct trap_frame *f)
     uint64_t scause = csr_read_scause();
     uint64_t stval = csr_read_stval();
 
-    if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER))
+    if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER)) {
         irq_timer();
-    else if (scause == (SCAUSE_INTERRUPT | IRQ_S_EXTERNAL))
+    } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_SOFT)) {
+        __asm__ volatile("csrc sip, %0" : : "r"(SIE_SSIE) : "memory");
+        irq_ipi();
+    } else if (scause == (SCAUSE_INTERRUPT | IRQ_S_EXTERNAL)) {
         irq_external();
-    else
+    } else {
         kernel_trap(f, scause, stval);
+    }
 }
 
 bool arch_probe_read(uint64_t addr, uint64_t *val)

@@ -28,6 +28,11 @@ bool intc_init(uint64_t boot_cpu)
     return false;
 }
 
+bool intc_init_cpu(uint64_t hwid)
+{
+    return drv && drv->init_cpu(hwid);
+}
+
 const struct intc_driver *intc(void)
 {
     return drv;

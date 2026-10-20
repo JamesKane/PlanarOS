@@ -19,11 +19,13 @@ struct intc_driver {
     /* Set up the controller described by device-tree node 'node'. */
     bool (*probe)(int32_t node);
 
-    /* Set up this CPU's side; 'cpu' is its hart ID or MPIDR affinity. */
-    bool (*init_cpu)(uint64_t cpu);
+    /* Set up the calling CPU's side; 'hwid' is its hart ID or MPIDR
+     * affinity. Drivers keep per-CPU state by this_cpu()->index. */
+    bool (*init_cpu)(uint64_t hwid);
 
-    /* Deliver 'source' to this CPU at priority level 1-7 (Exec's
-     * interrupt levels), or mask it with 0. */
+    /* Deliver 'source' to the calling CPU at priority level 1-7 (Exec's
+     * interrupt levels), or mask it there with 0. Per-CPU sources (GIC
+     * SGIs and PPIs) are enabled CPU by CPU; shared ones go to one CPU. */
     void (*set)(uint32_t source, unsigned level);
 
     /* Take the highest-priority pending source (0 if none); it stays
@@ -38,6 +40,9 @@ struct intc_driver {
 
 /* Find and set up the controller, and the boot CPU's side of it. */
 bool intc_init(uint64_t boot_cpu);
+
+/* Set up the calling CPU's side, on a CPU started later. */
+bool intc_init_cpu(uint64_t hwid);
 
 /* The driver in use, or nullptr before intc_init(). */
 const struct intc_driver *intc(void);

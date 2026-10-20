@@ -80,6 +80,44 @@ entry:
 4:  add     sp, sp, t1
     tail    kmain                   /* kmain(boot_hart, device_tree_pa) */
 
+/*
+ * A secondary hart, started by SBI HSM (arch_cpu_start), arrives here in
+ * S-mode with a0 = hart id, a1 = its struct cpu (a kernel address), and
+ * the MMU off. secondary_satp names a table that maps physical memory at
+ * 0 as well as high, so the hart can turn the MMU on and jump; then it
+ * moves to the kernel's own table.
+ */
+    .section .text
+    .balign 4
+    .globl  secondary_entry
+secondary_entry:
+    csrw    sie, zero
+    la      t0, secondary_satp
+    ld      t0, 0(t0)
+    sfence.vma
+    csrw    satp, t0
+    sfence.vma
+    li      t1, KERNEL_VOFFSET
+    la      t0, 5f
+    add     t0, t0, t1
+    jr      t0
+5:  mv      tp, a1                  /* this_cpu() */
+    ld      sp, 0(tp)               /* struct cpu's stack_top */
+    la      t0, kernel_satp
+    ld      t0, 0(t0)
+    csrw    satp, t0
+    sfence.vma
+    mv      a0, tp
+    tail    kmain_secondary         /* kmain_secondary(cpu) */
+
+    .section .data
+    .balign 8
+    .globl  secondary_satp, kernel_satp
+secondary_satp:
+    .dword  0
+kernel_satp:
+    .dword  0
+
     /* The kernel's root page table, whose upper half every domain shares. */
     .section .bss.boot_root, "aw", @nobits
     .balign 4096

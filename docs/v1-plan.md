@@ -7,12 +7,14 @@
 - Context-switch and `Signal` costs are measured.
 - The VQ3 soak and cost data has been collected.
 
-Each step ends with `make test-all` green and a `V1.n done` line in the transcript. The RV2 run comes at the end.
+Each step ends with `make test-all` green and a `V1.n done` line in the transcript. `make test-all` also boots AArch64 entered at EL2. The RV2 run comes at the end.
+
+Step 2's first QEMU numbers are under TCG, so they say nothing about the hardware. They only show the paths work: cross-CPU call round trip about 8–14 µs, and every CPU online whichever RISC-V hart OpenSBI booted.
 
 | Step | Content | Both ISAs? |
 |---|---|---|
-| **1. Kernel memory, traps, interrupts** | Upper-half kernel with a direct map (Sv39 gigapages; AArch64 TTBR1 1 GiB blocks, with RAM split from devices by the device tree). Trap entry and return with fixups, and Guru Meditation on kernel faults. Physical page allocator (omega's bitmap, made SMP-safe). An interrupt controller picked from the device tree (PLIC, GICv3). Tickless timer (Sstc/SBI, generic virtual timer). | yes |
-| **2. SMP** | Start the other CPUs (SBI HSM, PSCI `CPU_ON`). Per-CPU data, spinlocks, IPIs (SBI IPI, GIC SGIs), per-CPU timers and interrupt routing. | yes |
+| **1. Kernel memory, traps, interrupts** ✅ | Upper-half kernel with a direct map (Sv39 gigapages; AArch64 TTBR1 1 GiB blocks, with RAM split from devices by the device tree). Trap entry and return with fixups, and Guru Meditation on kernel faults. Physical page allocator (omega's bitmap, made SMP-safe). An interrupt controller picked from the device tree (PLIC, GICv3). Tickless timer (Sstc/SBI, generic virtual timer). | yes |
+| **2. SMP** ✅ | Start the other CPUs (SBI HSM, PSCI `CPU_ON`). Per-CPU data, spinlocks, IPIs (SBI IPI, GIC SGIs), per-CPU timers and interrupt routing. | yes |
 | **3. Tasks and scheduler** | Kernel tasks; per-CPU run queues with Exec's priorities (−128..127, round robin within a level); preemption; placement by core class; migration and load balancing; signals (`Wait`, `Signal`, `SetSignal`). Measure context switches and cross-CPU `Signal`. | yes |
 | **4. Domains and user mode** | `arch_domain_*`, user entry, system calls, the handle table, processes, lazy FP and vector state, reclamation on exit with deferred kill. | yes |
 | **5. Areas and the two layouts** | Areas over zoned physical memory. User VA allocators: `identity` (VA = PA) and `global` (a VA window, as in omega), chosen at boot. Port the A1 acceptance tests. Measure a soak test for VQ3. | yes |

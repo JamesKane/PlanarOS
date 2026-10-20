@@ -9,6 +9,7 @@
 #include <planar/arch_inline.h>
 #include <planar/endian.h>
 
+#include "cpu.h"
 #include "fdt.h"
 #include "plic.h"
 
@@ -22,7 +23,9 @@ constexpr uint32_t IRQ_S_EXTERNAL = 9;
 static uintptr_t base;
 static int32_t plic_node = -1;
 static uint32_t nsources;
-static uint32_t context;        /* the boot hart's S-mode context; per CPU in step 2 */
+static uint32_t contexts[MAX_CPUS];     /* each CPU's S-mode context */
+
+#define context (contexts[this_cpu()->index])
 
 static volatile uint32_t *reg(uint64_t offset)
 {
@@ -67,7 +70,7 @@ static bool find_context(uint64_t hart, uint32_t *ctx)
 
 static bool init_cpu(uint64_t hart)
 {
-    if (!find_context(hart, &context))
+    if (!find_context(hart, &contexts[this_cpu()->index]))
         return false;
     for (uint32_t src = 0; src <= nsources; src += 32)
         *reg(ENABLE(context, src)) = 0;

@@ -2,8 +2,10 @@
  * arch/rv64/arch.c -- RV64 in S-mode under SBI firmware
  */
 #include "arch.h"
+#include "cpu.h"
 #include "fdt.h"
 #include "intc.h"
+#include "pmm.h"
 #include "riscv.h"
 #include "sbi.h"
 
@@ -13,6 +15,11 @@ extern const struct intc_driver plic_driver;
 const struct intc_driver *const arch_intc_drivers[] = { &plic_driver, nullptr };
 
 extern uint64_t boot_root[512];     /* entry.S */
+extern uint64_t secondary_satp, kernel_satp;
+extern const char secondary_entry[];
+
+constexpr uint64_t SATP_SV39 = 8ULL << 60;
+constexpr uint64_t PTE_KERNEL = 0xef;   /* V R W X G A D, as entry.S */
 extern char _kernel_start[], _kernel_end[];     /* link.ld */
 
 static bool have_sstc;              /* stimecmp works: no SBI call per timer */
@@ -27,17 +34,69 @@ void arch_early_init(void)
         boot_root[g] = 0;
     sfence_vma_all();
 
+    /* The Sstc probe may trap, and arch_cpu_init() needs its answer. */
     trap_init();
-    /* The kernel is built without FP and vector: a stray use faults
-     * instead of clobbering a task's state. */
-    __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_FS | SSTATUS_VS_MASK) : "memory");
-    /* User mode may read the clock and cycle counter without a trap. */
-    __asm__ volatile("csrw scounteren, %0" : : "r"(3UL));
     have_sstc = probe_stimecmp(&v) == 0;
+    kernel_satp = csr_read_satp();
+    arch_cpu_init();
+}
+
+/* Every CPU: traps; no FP or vector in the kernel, so a stray use faults
+ * instead of clobbering a task's state; the clock and cycle counter for
+ * user mode; the timer disarmed; and the interrupts the kernel takes. */
+void arch_cpu_init(void)
+{
+    trap_init();
+    __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_FS | SSTATUS_VS_MASK) : "memory");
+    __asm__ volatile("csrw scounteren, %0" : : "r"(3UL));
     /* stimecmp's reset value is unspecified: disarm before the timer
      * interrupt is enabled. Interrupts stay off until arch_irq_enable(). */
     arch_timer_arm(~(uint64_t)0);
-    csr_write_sie(SIE_STIE | SIE_SEIE);
+    csr_write_sie(SIE_SSIE | SIE_STIE | SIE_SEIE);
+}
+
+void arch_set_this_cpu(struct cpu *c)
+{
+    __asm__ volatile("mv tp, %0" : : "r"(c) : "memory");
+}
+
+/*
+ * Start hart c->hwid at secondary_entry. The first time, build the table
+ * it turns its MMU on with: the kernel's upper half, plus physical memory
+ * mapped at 0 as entry.S did for the boot hart.
+ */
+bool arch_cpu_start(struct cpu *c)
+{
+    struct sbiret r;
+
+    if (!secondary_satp) {
+        uint64_t root = pmm_alloc();
+        uint64_t *t = phys_to_virt(root);
+
+        if (!root)
+            return false;
+        for (unsigned i = 256; i < 512; i++)
+            t[i] = boot_root[i];
+        for (uint64_t g = 0; g < ARCH_DIRECT_MAP_GIB; g++)
+            t[g] = g << 28 | PTE_KERNEL;
+        secondary_satp = SATP_SV39 | root >> 12;
+    }
+    r = sbi_call(SBI_EXT_HSM, SBI_HSM_HART_START, c->hwid,
+                 virt_to_phys(secondary_entry), (uint64_t)(uintptr_t)c);
+    return r.error == 0;
+}
+
+void arch_send_ipi(struct cpu *c)
+{
+    /* The call record must be visible before the interrupt lands. */
+    __asm__ volatile("fence rw, rw" : : : "memory");
+    sbi_call(SBI_EXT_IPI, SBI_IPI_SEND_IPI, 1, c->hwid, 0);
+}
+
+/* IPIs are the supervisor software interrupt, a trap cause of their own. */
+uint32_t arch_ipi_irq(void)
+{
+    return 0;
 }
 
 /* The direct map's gigapages need no memory types (the PMAs give them). */

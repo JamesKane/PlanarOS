@@ -2,6 +2,7 @@
  * kernel/selftest.c -- boot-time self-tests
  */
 #include "arch.h"
+#include "cpu.h"
 #include "kprintf.h"
 #include "ktime.h"
 #include "pmm.h"
@@ -136,4 +137,150 @@ void selftest_timer(void)
         fail("V1.1 timer", "no timer interrupt taken");
     kprintf("V1.1 timer ok: %s at %llu Hz, 10 ms timer took %llu us\n", arch_timer_name(),
             (unsigned long long)time_hz(), (unsigned long long)time_to_us(waited));
+}
+
+/* Every CPU the firmware describes came online, under its own ID. */
+void selftest_smp(void)
+{
+    if (ncpus == 1) {
+        kprintf("V1.2 smp skipped: one CPU\n");
+        return;
+    }
+    for (unsigned i = 0; i < ncpus; i++)
+        if (!atomic_load(&cpus[i].online))
+            fail("V1.2 smp", "a CPU didn't come online");
+    kprintf("V1.2 smp ok: %u CPUs online:", cpus_online());
+    for (unsigned i = 0; i < ncpus; i++)
+        kprintf(" %llx", (unsigned long long)cpus[i].hwid);
+    kprintf("\n");
+}
+
+static void record_cpu(void *arg)
+{
+    *(unsigned *)arg = this_cpu()->index;
+}
+
+/*
+ * Cross-CPU calls: each one runs on the CPU it was sent to, through an
+ * IPI that CPU took. Also times the round trip (send, run, see done).
+ */
+void selftest_ipi(void)
+{
+    constexpr int ROUNDS = 100;
+    uint64_t total = 0;
+
+    if (ncpus == 1) {
+        kprintf("V1.2 ipi skipped: one CPU\n");
+        return;
+    }
+    for (unsigned i = 1; i < ncpus; i++) {
+        unsigned ran_on = ~0u;
+        uint64_t ipis = atomic_load(&cpus[i].ipis);
+        struct cpu_call call = { .fn = record_cpu, .arg = &ran_on };
+
+        uint64_t start = time_now();
+
+        /* The first call waits with a timeout, so a lost IPI fails the
+         * test instead of hanging it. */
+        if (!cpu_call(&cpus[i], &call, false))
+            fail("V1.2 ipi", "call refused");
+        while (!atomic_load(&call.done) && time_now() - start < time_hz())
+            arch_cpu_relax();
+        if (!atomic_load(&call.done))
+            fail("V1.2 ipi", "call never ran");
+        if (ran_on != i)
+            fail("V1.2 ipi", "call ran on the wrong CPU");
+        if (atomic_load(&cpus[i].ipis) == ipis)
+            fail("V1.2 ipi", "no IPI taken");
+        for (int r = 0; r < ROUNDS; r++) {
+            uint64_t t0 = time_now();
+
+            cpu_call(&cpus[i], &call, true);
+            total += time_now() - t0;
+        }
+    }
+    kprintf("V1.2 ipi ok: round trip %llu ns on average\n",
+            (unsigned long long)(time_to_us(total * 1000) / (ROUNDS * (ncpus - 1))));
+}
+
+static struct ktimer cpu_timers[MAX_CPUS];
+static atomic_uint fired_on[MAX_CPUS];
+
+static void cpu_timer_fn(void *arg)
+{
+    unsigned i = (unsigned)(uintptr_t)arg;
+
+    atomic_store(&fired_on[i], this_cpu()->index + 1);
+}
+
+static void start_cpu_timer(void *)
+{
+    unsigned i = this_cpu()->index;
+
+    cpu_timers[i] = (struct ktimer){ .fn = cpu_timer_fn, .data = (void *)(uintptr_t)i };
+    ktimer_start(&cpu_timers[i], time_now() + time_us(2000));
+}
+
+/* Each CPU's own timer: a 2 ms timer started on a CPU fires there. */
+void selftest_cpu_timers(void)
+{
+    uint64_t start;
+
+    if (ncpus == 1 || !time_have_timers()) {
+        kprintf("V1.2 cpu timers skipped: %s\n", ncpus == 1 ? "one CPU" : "no timers");
+        return;
+    }
+    for (unsigned i = 0; i < ncpus; i++) {
+        struct cpu_call call = { .fn = start_cpu_timer };
+
+        atomic_store(&fired_on[i], 0);
+        cpu_call(&cpus[i], &call, true);
+    }
+    start = time_now();
+    for (unsigned i = 0; i < ncpus; i++) {
+        while (!atomic_load(&fired_on[i]) && time_now() - start < time_us(500000))
+            arch_wait_for_interrupt();
+        if (!atomic_load(&fired_on[i]))
+            fail("V1.2 cpu timers", "a CPU's timer never fired");
+        if (atomic_load(&fired_on[i]) != i + 1)
+            fail("V1.2 cpu timers", "a timer fired on the wrong CPU");
+    }
+    kprintf("V1.2 cpu timers ok: %u CPUs\n", ncpus);
+}
+
+static spinlock_t test_lock;
+static uint64_t counter;                /* only under test_lock */
+static atomic_uint lock_done;
+constexpr unsigned LOCK_ROUNDS = 20000;
+
+static void hammer(void *)
+{
+    for (unsigned n = 0; n < LOCK_ROUNDS; n++) {
+        spin_lock(&test_lock);
+        counter++;
+        spin_unlock(&test_lock);
+    }
+    atomic_fetch_add(&lock_done, 1);
+}
+
+/* A spinlock under contention from every CPU: no increment is lost. */
+void selftest_lock(void)
+{
+    static struct cpu_call calls[MAX_CPUS];
+    uint64_t start = time_now();
+
+    counter = 0;
+    atomic_store(&lock_done, 0);
+    for (unsigned i = 1; i < ncpus; i++) {
+        calls[i] = (struct cpu_call){ .fn = hammer };
+        cpu_call(&cpus[i], &calls[i], false);
+    }
+    hammer(nullptr);
+    while (atomic_load(&lock_done) < ncpus && time_now() - start < 10 * time_hz())
+        arch_cpu_relax();
+    if (atomic_load(&lock_done) < ncpus)
+        fail("V1.2 lock", "a CPU never finished");
+    if (counter != (uint64_t)ncpus * LOCK_ROUNDS)
+        fail("V1.2 lock", "increments lost");
+    kprintf("V1.2 lock ok: %u CPUs x %u rounds\n", ncpus, LOCK_ROUNDS);
 }

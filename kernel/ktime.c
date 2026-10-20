@@ -2,15 +2,14 @@
  * kernel/ktime.c -- the monotonic clock and kernel timers
  */
 #include "arch.h"
+#include "cpu.h"
 #include "irq.h"
 #include "ktime.h"
-#include "spinlock.h"
 
 static uint64_t hz;
-static struct ktimer *pending;          /* sorted by deadline */
-static spinlock_t lock;
-static uint64_t interrupts;
+static atomic_uint_fast64_t interrupts;
 static bool have_timers;
+static uint32_t timer_irq;
 
 static void timer_source(void *)
 {
@@ -19,14 +18,21 @@ static void timer_source(void *)
 
 bool time_init(void)
 {
-    uint32_t source;
-
     hz = arch_timebase_hz();
     if (!hz || !arch_timer_name())
         return false;
-    source = arch_timer_irq();
-    have_timers = source == 0 || irq_attach(source, 7, timer_source, nullptr);
+    timer_irq = arch_timer_irq();
+    have_timers = timer_irq == 0 || irq_attach(timer_irq, 7, timer_source, nullptr);
     return have_timers;
+}
+
+/* The timer is a per-CPU source (a PPI) where it goes through the
+ * interrupt controller, so each CPU enables its own. */
+void time_init_cpu(void)
+{
+    arch_timer_arm(~(uint64_t)0);
+    if (have_timers && timer_irq)
+        irq_attach(timer_irq, 7, timer_source, nullptr);
 }
 
 bool time_have_timers(void)
@@ -54,70 +60,85 @@ uint64_t time_to_us(uint64_t ticks)
     return hz ? ticks * 1000000 / hz : 0;
 }
 
-/* Arm the hardware for the head of the list. Lock held. */
-static void rearm(void)
+/* Arm this CPU's hardware for the head of its list. Lock held. */
+static void rearm(struct cpu *c)
 {
-    arch_timer_arm(pending ? pending->deadline : ~(uint64_t)0);
+    arch_timer_arm(c->timers ? c->timers->deadline : ~(uint64_t)0);
+}
+
+/* Take 't' off its CPU's list. That CPU's lock held. */
+static void unlink(struct ktimer *t)
+{
+    struct ktimer **p;
+
+    for (p = &t->cpu->timers; *p != t; p = &(*p)->next)
+        ;
+    *p = t->next;
+    t->pending = false;
 }
 
 void ktimer_start(struct ktimer *t, uint64_t deadline)
 {
-    unsigned long was = spin_lock_irqsave(&lock);
     struct ktimer **p;
+    struct cpu *c;
 
-    if (t->pending) {
-        for (p = &pending; *p != t; p = &(*p)->next)
-            ;
-        *p = t->next;
-    }
+    ktimer_stop(t);
+    unsigned long was = arch_irq_save();
+    c = this_cpu();
+    spin_lock(&c->timer_lock);
     t->deadline = deadline;
-    for (p = &pending; *p && (*p)->deadline <= deadline; p = &(*p)->next)
+    t->cpu = c;
+    for (p = &c->timers; *p && (*p)->deadline <= deadline; p = &(*p)->next)
         ;
     t->next = *p;
     *p = t;
     t->pending = true;
-    rearm();
-    spin_unlock_irqrestore(&lock, was);
+    rearm(c);
+    spin_unlock(&c->timer_lock);
+    arch_irq_restore(was);
 }
 
+/*
+ * A timer stopped from another CPU leaves that CPU's hardware armed for
+ * it; the interrupt then finds nothing due and re-arms for what's left.
+ */
 void ktimer_stop(struct ktimer *t)
 {
-    unsigned long was = spin_lock_irqsave(&lock);
+    struct cpu *c = t->cpu;
 
-    if (t->pending) {
-        struct ktimer **p;
-
-        for (p = &pending; *p != t; p = &(*p)->next)
-            ;
-        *p = t->next;
-        t->pending = false;
-        rearm();
+    if (!c)
+        return;
+    unsigned long was = spin_lock_irqsave(&c->timer_lock);
+    if (t->pending && t->cpu == c) {
+        unlink(t);
+        if (c == this_cpu())
+            rearm(c);
     }
-    spin_unlock_irqrestore(&lock, was);
+    spin_unlock_irqrestore(&c->timer_lock, was);
 }
 
 uint64_t time_interrupts(void)
 {
-    return interrupts;
+    return atomic_load(&interrupts);
 }
 
 void time_expired(void)
 {
-    unsigned long was = spin_lock_irqsave(&lock);
+    struct cpu *c = this_cpu();
+    unsigned long was = spin_lock_irqsave(&c->timer_lock);
     uint64_t now = time_now();
 
-    interrupts++;
-    while (pending && pending->deadline <= now) {
-        struct ktimer *t = pending;
+    atomic_fetch_add(&interrupts, 1);
+    while (c->timers && c->timers->deadline <= now) {
+        struct ktimer *t = c->timers;
 
-        pending = t->next;
-        t->pending = false;
+        unlink(t);
         /* The handler may start timers, so it runs unlocked. */
-        spin_unlock_irqrestore(&lock, was);
+        spin_unlock_irqrestore(&c->timer_lock, was);
         t->fn(t->data);
-        was = spin_lock_irqsave(&lock);
+        was = spin_lock_irqsave(&c->timer_lock);
         now = time_now();
     }
-    rearm();
-    spin_unlock_irqrestore(&lock, was);
+    rearm(c);
+    spin_unlock_irqrestore(&c->timer_lock, was);
 }

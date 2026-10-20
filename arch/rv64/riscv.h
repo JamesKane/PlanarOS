@@ -27,6 +27,7 @@ RISCV_CSR(stval)
 RISCV_CSR(stvec)
 
 constexpr uint64_t SCAUSE_INTERRUPT = 1ULL << 63;
+constexpr uint64_t IRQ_S_SOFT       = 1;
 constexpr uint64_t IRQ_S_TIMER      = 5;
 constexpr uint64_t IRQ_S_EXTERNAL   = 9;
 
@@ -34,6 +35,7 @@ constexpr uint64_t SSTATUS_SIE      = 1ULL << 1;
 constexpr uint64_t SSTATUS_SPP      = 1ULL << 8;
 constexpr uint64_t SSTATUS_VS_MASK  = 3ULL << 9;
 constexpr uint64_t SSTATUS_FS       = 3ULL << 13;
+constexpr uint64_t SIE_SSIE         = 1ULL << IRQ_S_SOFT;
 constexpr uint64_t SIE_STIE         = 1ULL << IRQ_S_TIMER;
 constexpr uint64_t SIE_SEIE         = 1ULL << IRQ_S_EXTERNAL;
 

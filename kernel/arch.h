@@ -69,6 +69,22 @@ void arch_irq_restore(unsigned long was);
 /* Sleep until an enabled interrupt is pending, even with them held off. */
 void arch_wait_for_interrupt(void);
 
+/*
+ * SMP (V1 step 2). arch_set_this_cpu() points this_cpu() at 'c' on the
+ * calling CPU. arch_cpu_start() asks the firmware (SBI HSM, PSCI) to
+ * start c->hwid at the secondary entry, which turns the MMU on, sets
+ * this_cpu() and the stack from c, and calls kmain_secondary(c); that
+ * calls arch_cpu_init() first. arch_send_ipi() interrupts CPU 'c', which
+ * calls ipi_handle(); arch_ipi_irq() is the interrupt-controller source
+ * IPIs arrive on, or 0 if they have a trap cause of their own (RISC-V).
+ */
+struct cpu;
+void arch_set_this_cpu(struct cpu *c);
+bool arch_cpu_start(struct cpu *c);
+void arch_cpu_init(void);
+void arch_send_ipi(struct cpu *c);
+uint32_t arch_ipi_irq(void);
+
 /* Read 64 bits at kernel address 'addr' if that doesn't fault: true and
  * the value, or false. For self-tests and probes. */
 bool arch_probe_read(uint64_t addr, uint64_t *val);

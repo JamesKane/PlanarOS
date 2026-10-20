@@ -72,6 +72,29 @@ void arch_wait_for_interrupt(void)
 {
 }
 
+/* One host process, one CPU: there's nothing else to start or interrupt. */
+void arch_set_this_cpu(struct cpu *)
+{
+}
+
+bool arch_cpu_start(struct cpu *)
+{
+    return false;
+}
+
+void arch_cpu_init(void)
+{
+}
+
+void arch_send_ipi(struct cpu *)
+{
+}
+
+uint32_t arch_ipi_irq(void)
+{
+    return 0;
+}
+
 /* A host process can't take a fault and carry on. */
 bool arch_probe_read(uint64_t, uint64_t *)
 {

@@ -22,6 +22,7 @@ bool irq_attach(uint32_t source, unsigned level, irq_handler_t fn, void *data);
 /* Called by the architecture's trap code. */
 void irq_external(void);        /* the interrupt controller has a source */
 void irq_timer(void);           /* the timer deadline passed (RISC-V) */
+void irq_ipi(void);             /* a software interrupt (RISC-V) */
 
 /* Interrupts taken so far, from the controller and the timer. */
 uint64_t irq_count(void);

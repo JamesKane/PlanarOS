@@ -1,6 +1,7 @@
 /*
  * kernel/irq.c -- interrupt dispatch
  */
+#include "cpu.h"
 #include "intc.h"
 #include "irq.h"
 #include "kprintf.h"
@@ -44,6 +45,12 @@ void irq_timer(void)
 {
     taken++;
     time_expired();
+}
+
+void irq_ipi(void)
+{
+    taken++;
+    ipi_handle();
 }
 
 uint64_t irq_count(void)

@@ -1,0 +1,79 @@
+/*
+ * kernel/cpu.h -- the CPUs, and what each one keeps for itself
+ *
+ * CPUs come from the firmware description (/cpus). Index 0 is always the
+ * CPU that booted, which on RISC-V is whichever hart won OpenSBI's
+ * lottery; the rest follow in device-tree order. this_cpu() is one
+ * register read (tp on RISC-V, TPIDR_EL1 on AArch64).
+ */
+#ifndef KERNEL_CPU_H
+#define KERNEL_CPU_H
+
+#include <stdatomic.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "spinlock.h"
+
+constexpr unsigned MAX_CPUS = 16;
+
+struct ktimer;
+struct cpu_call;
+
+struct cpu {
+    uintptr_t stack_top;        /* first: the secondary entry code loads it */
+    unsigned index;
+    uint64_t hwid;              /* hart ID, or MPIDR Aff2.Aff1.Aff0 */
+    int32_t node;               /* its /cpus node */
+    atomic_bool online;
+
+    spinlock_t timer_lock;      /* kernel timers armed on this CPU */
+    struct ktimer *timers;
+
+    spinlock_t call_lock;       /* cross-CPU calls waiting to run here */
+    struct cpu_call *calls;
+    atomic_uint_fast64_t ipis;  /* IPIs taken */
+};
+
+static_assert(offsetof(struct cpu, stack_top) == 0, "entry code reads stack_top at 0");
+
+extern struct cpu cpus[MAX_CPUS];
+extern unsigned ncpus;
+
+/* The CPU this runs on. Valid from the first line of kmain(). */
+static inline struct cpu *this_cpu(void);
+
+/* Read /cpus. The boot CPU, already running as cpus[0], is found by its
+ * hardware ID. False if the description lists no CPUs. */
+bool cpu_enumerate(uint64_t boot_hwid);
+
+/* Start every other CPU and wait for each to come online. Returns how
+ * many are online, the boot CPU included. */
+unsigned smp_start(void);
+
+/* How many CPUs are online now. */
+unsigned cpus_online(void);
+
+/*
+ * Run fn(arg) on CPU 'c' in its IPI handler, with interrupts off there.
+ * With 'wait', returns once it has run; otherwise 'call' must outlive
+ * the call (static or heap). On this CPU it just runs fn.
+ */
+struct cpu_call {
+    void (*fn)(void *arg);
+    void *arg;
+    struct cpu_call *next;
+    atomic_bool done;
+};
+
+bool cpu_call(struct cpu *c, struct cpu_call *call, bool wait);
+
+/* The IPI arrived: run the calls queued for this CPU. */
+void ipi_handle(void);
+
+/* Take IPIs on this CPU (each CPU, once). */
+void ipi_init_cpu(void);
+
+#include <planar/arch_cpu.h>
+
+#endif /* KERNEL_CPU_H */

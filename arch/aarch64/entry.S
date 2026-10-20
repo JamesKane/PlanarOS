@@ -57,19 +57,18 @@ _start:
     .ascii  "ARM\x64"               /* magic */
     .word   0                       /* res5 */
 
-entry:
-    msr     daifset, #0xf
+/*
+ * EL2_TO_EL1 resume: if running at EL2, drop to EL1h at 'resume' with
+ * interrupts masked. Clearing HCR_EL2 also clears E2H; firmware that
+ * enters with VHE on (CIX) leaves it writable on the A720 (verify on the
+ * board). EL1 gets the physical timer and counter, untrapped FP, and a
+ * known SCTLR_EL1. Uses x9 only.
+ */
+    .macro  EL2_TO_EL1 resume
     mrs     x9, CurrentEL
     lsr     x9, x9, #2
     cmp     x9, #2
-    b.ne    in_el1
-
-    /*
-     * EL2 to EL1. Clearing HCR_EL2 also clears E2H; firmware that enters
-     * with VHE on (CIX) leaves it writable on the A720 (verify on the
-     * board). Give EL1 the physical timer and counter, untrapped FP, and
-     * a known SCTLR_EL1.
-     */
+    b.ne    \resume
     mov     x9, #HCR_EL2_RW
     msr     hcr_el2, x9
     mrs     x9, cnthctl_el2
@@ -83,10 +82,15 @@ entry:
     msr     sctlr_el1, x9
     mov     x9, #SPSR_EL1H_DAIF
     msr     spsr_el2, x9
-    adr     x9, in_el1
+    adr     x9, \resume
     msr     elr_el2, x9
     isb
     eret
+    .endm
+
+entry:
+    msr     daifset, #0xf
+    EL2_TO_EL1 in_el1
 
 in_el1:
     ldr     x9, =SCTLR_EL1_RES1
@@ -147,27 +151,7 @@ in_el1:
     orr     x3, x0, #TABLE
     str     x3, [x6]                /* L0[0] -> L1 */
 
-    /* Translation regime. */
-    ldr     x9, =MAIR_VALUE
-    msr     mair_el1, x9
-    ldr     x9, =TCR_VALUE
-    mrs     x10, id_aa64mmfr0_el1
-    and     x11, x10, #0xf          /* PARange -> IPS */
-    bfi     x9, x11, #32, #3
-    ubfx    x11, x10, #4, #4        /* ASIDBits: 2 means 16-bit ASIDs */
-    cmp     x11, #2
-    b.ne    6f
-    orr     x9, x9, #(1 << 36)      /* AS */
-6:  msr     tcr_el1, x9
-    msr     ttbr0_el1, x6
-    msr     ttbr1_el1, x6
-    isb
-    tlbi    vmalle1
-    dsb     nsh
-    isb
-    ldr     x9, =SCTLR_EL1_MMU
-    msr     sctlr_el1, x9
-    isb
+    bl      mmu_enable
 
     /* Continue at the high alias, with the stack there too. */
     ldr     x9, =high
@@ -183,6 +167,61 @@ high:
     bl      kmain
 7:  wfe
     b       7b
+
+/*
+ * Turn the MMU on with the boot tables in both TTBRs (physical
+ * addresses, no stack). The tables map physical memory at 0 as well as
+ * high, so execution continues here. Uses x9-x11.
+ */
+mmu_enable:
+    ldr     x9, =MAIR_VALUE
+    msr     mair_el1, x9
+    ldr     x9, =TCR_VALUE
+    mrs     x10, id_aa64mmfr0_el1
+    and     x11, x10, #0xf          /* PARange -> IPS */
+    bfi     x9, x11, #32, #3
+    ubfx    x11, x10, #4, #4        /* ASIDBits: 2 means 16-bit ASIDs */
+    cmp     x11, #2
+    b.ne    1f
+    orr     x9, x9, #(1 << 36)      /* AS */
+1:  msr     tcr_el1, x9
+    adrp    x9, boot_l0
+    msr     ttbr0_el1, x9
+    msr     ttbr1_el1, x9
+    isb
+    tlbi    vmalle1
+    dsb     nsh
+    isb
+    ldr     x9, =SCTLR_EL1_MMU
+    msr     sctlr_el1, x9
+    isb
+    ret
+
+/*
+ * A secondary CPU, started by PSCI CPU_ON (arch_cpu_start), arrives here
+ * with x0 = its struct cpu (a kernel address) and the MMU off, at EL2 or
+ * EL1. The boot CPU has already built the tables.
+ */
+    .globl  secondary_entry
+secondary_entry:
+    msr     daifset, #0xf
+    EL2_TO_EL1 secondary_el1
+secondary_el1:
+    ldr     x9, =SCTLR_EL1_RES1
+    msr     sctlr_el1, x9
+    isb
+    mov     x19, x0
+    bl      mmu_enable
+    ldr     x9, =secondary_high
+    br      x9
+secondary_high:
+    msr     tpidr_el1, x19          /* this_cpu() */
+    ldr     x9, [x19]               /* struct cpu's stack_top */
+    mov     sp, x9
+    mov     x0, x19
+    bl      kmain_secondary
+8:  wfe
+    b       8b
 
     .section .bss.boot_tables, "aw", @nobits
     .balign 4096
