@@ -18,6 +18,7 @@ Following P3 (*the kernel provides mechanism and servers provide policy*), neith
  ├─────────────────────────────────────────────────────────────────────────┤
  │ Libraries      ui.library (gadgets, layout, menus, themes)              │
  │ (caller RX)    gfx.library (2D paths, text, blits, damage regions)      │
+ │                font.library (clean-room OpenType/TrueType, §14)         │
  ├─────────────────────────────────────────────────────────────────────────┤
  │ Servers        intuition (screens, windows, hit-testing, composition)   │
  │ (own domain)   display (scanout, DPU planes, vblank flips, cursor)      │
@@ -30,6 +31,7 @@ Following P3 (*the kernel provides mechanism and servers provide policy*), neith
 | `display` | Server | Owns the display controller (K1 DPU, Linlon/komeda, VOP2, MDSS). Exposes hardware scanout planes, the hardware cursor plane, and vblank flip notifications ([§2.4](02-architecture.md#24-servers-initial-set), [§5.3](05-coprocessors.md#53-by-board)). |
 | `input` | Server | Reads USB HID keyboard, mouse and tablet reports and streams normalised `InputEvent` structs into a connection ring held by `intuition`. |
 | `intuition` | Server | Owns the screen stack, window z-order, window chrome, global screen menu bar, focus and pointer hit-testing. Composes client surfaces (or assigns hardware planes) and posts flips to `display`. |
+| `font.library` | Shared library | Clean-room OpenType/TrueType engine written from the spec for English typography (`cmap`, `hmtx`, `glyf`/`CFF `, `GSUB` ligatures/tabular numerals, `GPOS` kerning, analytical rasteriser; [§14](14-font-engine.md)). |
 | `gfx.library` | Shared library | Runs in the caller's protection domain. Renders vector paths, bevels, gradients, damage rects and shaped glyph runs into the window's shared backing `Area`, using CPU SIMD (RVV 1.0 / NEON, VQ22) or the app's GPU queue lease ([§5.1](05-coprocessors.md#51-the-abstraction)). |
 | `ui.library` | Shared library | GadTools-style retained widget toolkit running in the caller's domain: toggles, proportional sliders, segmented controls, scrollers and split panes. |
 | `workbench` | Application | The desktop backdrop, volume and drawer manager, launcher and optional system telemetry badge. |

@@ -185,6 +185,18 @@ How should `intuition` implement the translucent `Shell` background before GPU c
 
 Raised in §13.5 and §13.7.
 
+**VQ34 Base system font files (`System Sans` and `System Mono`).**
+
+Which permissive open-source `.ttf`/`.otf` fonts should ship in the image via `#embed` for V4 (`Shell`) and V5.5 (`Workbench`)? *Leaning:* subsetted OFL builds of a geometric/humanist sans (Inter or IBM Plex Sans) and programmer monospace (JetBrains Mono or IBM Plex Mono) in the boot image, with unmodified full fonts in `tools/font-oracle/`.
+
+Raised in §14.7.
+
+**VQ35 Horizontal subpixel positioning (`1/4 px` bins) vs. whole-pixel glyph placement.**
+
+Should `font.library` cache `4×` horizontal subpixel phases (`0.0`, `0.25`, `0.5`, `0.75 px`) at small UI sizes (`12–16 px`), or snap glyph origins to integer pixels? *Leaning:* `4×` horizontal subpixel bins for `System Sans` at `12–16 px`; integer origins for `System Mono` and sizes $\ge 18\text{ px}$.
+
+Raised in §14.7.
+
 ## Coprocessors
 
 **VQ16 Is the Hexagon CDSP in scope?**
