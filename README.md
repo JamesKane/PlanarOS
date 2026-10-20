@@ -42,6 +42,10 @@ make check                    # portable code must not test arch or platform
 | Orange Pi 6 Plus | CIX P1 / CD8180 (8× A720 + 4× A520) | Armv9.2-A |
 | Radxa Dragon Q8B | Qualcomm SC8280XP (4× X1C + 4× A78C) | Armv8.2-A |
 
+## Reference manuals
+
+[manuals/](manuals/README.md) is Planar's version of the Amiga ROM Kernel Reference Manuals. It covers what's built and how to program against it: Libraries, Devices, Autodocs, Includes, Hardware. The design documents below cover what Planar should be.
+
 ## Design documents
 
 Each design decision is marked **decided**, **proposed** or **open**, as in PlanOmega. Open questions are numbered **VQ*n*** and collected in [questions.md](docs/questions.md).

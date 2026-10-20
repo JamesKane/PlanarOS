@@ -2,6 +2,13 @@
 
 **Proposed.** Each phase ends with a conformance transcript on QEMU *and* on a board, as in Omega's A0/A1/A2 method. Every check is mutation-tested.
 
+**Every phase's exit also includes the [manuals](../manuals/README.md).** Before a phase is called done:
+- each call it added or changed has an autodoc;
+- each chapter it affected is rechecked and its *Checked against* line moved to the phase;
+- anything it built that a manual marked **Planned** loses the marker.
+
+The manuals may lag within a phase, but not across one.
+
 | Phase | Goal | Platforms | Exit criteria |
 |---|---|---|---|
 | **V0. Tree** ✅ 2026-10-19 | Tree, Make, toolchain pin (LLVM 22), `check-portable`; FDT parser and FDT-driven early console (8250, PL011); EL2→EL1 drop | qemu-virt rv64 + aarch64, hosted | Both ISAs boot to the serial console from one tree; `make test-all` passes |
