@@ -1,0 +1,22 @@
+# 8. Roadmap
+
+**Proposed.** Each phase ends with a conformance transcript on QEMU *and* on a board, as in Omega's A0/A1/A2 method. Every check is mutation-tested.
+
+| Phase | Goal | Platforms | Exit criteria |
+|---|---|---|---|
+| **V0. Tree** ✅ 2026-10-19 | Tree, Make, toolchain pin (LLVM 22), `check-portable`; FDT parser and FDT-driven early console (8250, PL011); EL2→EL1 drop | qemu-virt rv64 + aarch64, hosted | Both ISAs boot to the serial console from one tree; `make test-all` passes |
+| **V1. SAS core + SMP** | PMM zones, **both** domain layouts (identity and global-VA) behind `arch_domain_*`, tasks, SMP scheduler with per-CPU run queues, signals, handles | qemu, **RV2** | Omega A1 acceptance tests pass on all 8 harts in both layouts. Context switch and `Signal` costs measured. VQ3 soak and cost data collected |
+| **V2. IPC** | Connections, arenas, SPSC rings with the `waiting` protocol, `DoMsg` handoff, death notices | qemu, RV2 | Zero-trap streaming measured; `DoMsg` ≤ Omega's 3.4k cycles |
+| **V3. First Arm board, ACPI** | AArch64 port: EFI stub, EL2→EL1, GICv3, generic timer and CIX GPT, PSCI SMP, static ACPI parser | **CIX P1** | V1 and V2 suites pass; per-core costs compared with the RV2. **VQ3 decided** using RV2 and Arm data |
+| **V4. Hardware model, drivers, servers** | `hwdb` (FDT and ACPI sources, quirks), `acpid` (ACPICA), `power` (native SCMI, `acpi-pr`), leases and IRQ binding; SD/eMMC/NVMe, FAT32, display scanout (K1 DPU, Linlon) | RV2, CIX | Boot from storage to a shell on the framebuffer on both boards. The same drivers bind through FDT and through ACPI |
+| **V5. Queue leases** | `gpu-panthor`: CSF firmware boot, CSG slots, user doorbells. Then the Zhouyi NPU server | CIX (G720) | An app submits a CSF job and waits on a sync object with no kernel or server in the data path |
+| **V6. RK3588** | `booti` path, RK806/CRU power providers, VOP2, RKNN | **RK3588** | V5 demo running unchanged on the G610 through the FDT path |
+| **V7. Q8B** | EFI stub at EL1 under the hypervisor; ACPI plus DTB merge; RPMh power; Adreno server; FastRPC (VQ16) | **Q8B** | Boots to a shell; GPU queue lease through the server provider |
+| **V8. PMP profile** | Vectra M-mode monitor or an OpenSBI fork; `pmp` back end | RV2 | Paper's PMP model demonstrated with its region budget measured |
+
+Board order (**VQ19**, decided): RV2 → CIX → RK3588 → Q8B.
+- **RV2** reuses Omega's facts.
+- **CIX** proves the ACPI path, UEFI and Panthor early. It has no hypervisor and the cleanest ACPI.
+- **RK3588** proves the FDT path on Arm and reuses the Panthor server.
+- **Q8B** comes last, with the hypervisor and Qualcomm's stack.
+- **K3** (VQ21) joins as soon as it's revived, as the test case for ACPI on RISC-V.

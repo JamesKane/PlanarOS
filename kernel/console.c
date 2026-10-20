@@ -1,0 +1,110 @@
+/*
+ * kernel/console.c -- the kernel's early console, from the firmware description
+ *
+ * The UART drivers here are the polled kind the firmware leaves set up;
+ * the kernel never programs baud rates. The serial server takes over
+ * later.
+ */
+#include <stdint.h>
+
+#include "console.h"
+#include "fdt.h"
+#include "kprintf.h"
+#include "pl011.h"
+#include "plat.h"
+#include "uart8250.h"
+
+enum console_kind { CONSOLE_PLAT, CONSOLE_8250, CONSOLE_PL011 };
+
+static enum console_kind kind = CONSOLE_PLAT;
+static struct uart8250 u8250;
+static struct pl011 pl011;
+static int32_t console_node = -1;
+
+/* Device-tree compatibles of 8250-family UARTs the firmware leaves usable
+ * by register writes alone. The K1's UART is an XScale variant; the
+ * RK3588's a DesignWare APB UART. */
+static const char *const compat_8250[] = {
+    "ns16550a", "ns16550", "ns8250", "snps,dw-apb-uart", "intel,xscale-uart",
+    nullptr,
+};
+
+static bool try_node(int32_t node)
+{
+    uint64_t base, size;
+
+    if (node < 0 || !fdt_reg(node, 0, &base, &size))
+        return false;
+    if (fdt_is_compatible(node, "arm,pl011")) {
+        pl011 = (struct pl011){ .base = (uintptr_t)base };
+        kind = CONSOLE_PL011;
+        console_node = node;
+        return true;
+    }
+    for (const char *const *c = compat_8250; *c; c++) {
+        if (fdt_is_compatible(node, *c)) {
+            u8250 = (struct uart8250){
+                .base = (uintptr_t)base,
+                .reg_shift = (uint8_t)fdt_getprop_u32(node, "reg-shift", 0),
+                .reg_width = (uint8_t)fdt_getprop_u32(node, "reg-io-width", 1),
+            };
+            kind = CONSOLE_8250;
+            console_node = node;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool console_init(void)
+{
+    uint32_t len;
+    const char *path = fdt_getprop(fdt_path("/chosen"), "stdout-path", &len);
+
+    if (!path)
+        path = fdt_getprop(fdt_path("/chosen"), "linux,stdout-path", &len);
+    if (path) {
+        /* "serial0:115200n8" or "/soc/serial@10000000": the node is the
+         * part before any ':' options. */
+        uint32_t n = 0;
+
+        while (n < len && path[n] && path[n] != ':')
+            n++;
+        if (try_node(fdt_path_or_alias(path, n)))
+            return true;
+    }
+    return false;
+}
+
+void console_report(void)
+{
+    switch (kind) {
+    case CONSOLE_8250:
+        kprintf("vectra: console %s, 8250 at %p, reg-shift %u, width %u\n",
+                fdt_node_name(console_node), (void *)u8250.base,
+                (unsigned)u8250.reg_shift, (unsigned)u8250.reg_width);
+        break;
+    case CONSOLE_PL011:
+        kprintf("vectra: console %s, PL011 at %p\n",
+                fdt_node_name(console_node), (void *)pl011.base);
+        break;
+    case CONSOLE_PLAT:
+        kprintf("vectra: console from the platform (%s)\n", plat_name);
+        break;
+    }
+}
+
+void console_putc(char c)
+{
+    switch (kind) {
+    case CONSOLE_8250:
+        uart8250_putc(&u8250, c);
+        break;
+    case CONSOLE_PL011:
+        pl011_putc(&pl011, c);
+        break;
+    case CONSOLE_PLAT:
+        plat_console_putc(c);
+        break;
+    }
+}

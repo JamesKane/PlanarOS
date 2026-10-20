@@ -1,0 +1,133 @@
+# 2. Architecture overview
+
+## 2.1 Layers
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │ Applications           (own their GPU/NPU queue leases directly) │
+ ├──────────────────────────────────────────────────────────────────┤
+ │ Libraries   exec.library · dos.library · gfx · queue · alloc     │  user mode, shared RX
+ │             (run in the caller's domain; published via ExecBase) │  region, global-mapped
+ ├──────────────────────────────────────────────────────────────────┤
+ │ Servers     dos/fs · display · input · net · audio · power/clock │  user mode, one
+ │ Drivers     uart · sd/emmc · nvme · pcie · usb · gpu · npu · dpu │  domain each
+ ├──────────────────────────────────────────────────────────────────┤
+ │ Kernel      domains · tasks · scheduler · ports/rings · signals  │  S-mode / EL1
+ │             handles · timers · IRQ routing · leases · KLog       │  ~40 calls
+ ├──────────────────────────────────────────────────────────────────┤
+ │ arch/       rv64 · aarch64 · (hellfire)    plat/  ky-x1 · rk3588 │
+ │             · cix-p1 · sc8280xp · qemu-virt · hosted             │
+ ├──────────────────────────────────────────────────────────────────┤
+ │ Firmware    OpenSBI · TF-A · UEFI · Qualcomm hyp/TZ (not ours)   │  M-mode / EL2 / EL3
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+## 2.2 Kernel responsibilities
+
+**Proposed.** This follows Omega's ~40-call kernel. The target is 10–15k lines of C, excluding `arch/` and `plat/`.
+
+| Group | Calls (indicative) | Notes |
+|---|---|---|
+| Domains and memory | `AllocArea`, `ShareArea`, `UnshareArea`, `ProtectArea`, `FreeArea`, `QueryArea` | The Area is the only memory abstraction the kernel has (§3). |
+| Tasks and processes | `CreateProcess`, `CreateTask`, `ExitTask`, `KillProcess`, `SetTaskPri`, `SetAffinity` | There is no fork. The ELF loader runs in the parent's `dos.library`. |
+| Signals and waiting | `Wait`, `Signal`, `SetSignal`, `WaitAddr`, `WakeAddr` | Futex-style waiting is the basis of the trap-free fast path (§4). |
+| Ports and connections | `CreatePort`, `PublishPort`, `OpenPort`, `ClosePort`, `PutMsg`, `DoMsg` | Rings live in user memory. The kernel creates them, tears them down and wakes waiters. |
+| Time | `CreateTimer`, `ArmTimer`, `CurrentTime` | Tickless. The time counter can be read from user mode (`rdtime` / `CNTVCT_EL0`). |
+| Interrupts and leases | `GrantLease`, `RevokeLease`, `BindIrq`, `AckIrq` | A lease bundles MMIO pages, IRQs, an IOMMU context and a doorbell (§5). |
+| Handles | `CloseHandle`, `DupHandle`, `SendHandle` | Handles are generation plus index, in one system-wide table (as in 3DO and Omega). |
+| Diagnostics | `KLog`, `QuerySystem` | |
+
+Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU scheduling, and power and clock policy. The kernel does keep an early console and the kernel log.
+
+## 2.3 Process model
+
+**Proposed. Inherited from Omega.**
+- A **process** is a protection domain plus everything it owns. A **task** is the unit that gets scheduled. A process holds one or more tasks.
+- Each task has a fixed user stack with an unmapped guard region, and its own kernel stack.
+- Exit reclaims resources in this order:
+  1. Stop the tasks. A task that is inside a kernel call is killed when it reaches a safe point; omega learned this when a test leaked 441 pages without it.
+  2. Return unreplied messages with `ERR_PORT_DIED`.
+  3. Send death notices to peers.
+  4. Revoke leases. This drains or resets coprocessor queues (§5.4).
+  5. Free Areas.
+  6. Wake futex waiters.
+  7. Free the domain and its ASID.
+
+## 2.4 Servers (initial set)
+
+| Server | Role | First board |
+|---|---|---|
+| `power` | Clocks, regulators, resets and power domains, using SCMI (CIX), the RK806 PMIC with the CRU (RK3588), the K1 PMU, or RPMh (Q8B). Drivers ask `power` for their unit before touching its registers. CIX raises SError if anything reads a GPU register too early. | all |
+| `dos` + handlers | Namespace and assigns. The FAT32 handler is needed for the EFI system partition. Later a modern native filesystem: journaled or CoW metadata, extents and checksums, but no snapshots or encryption (**VQ14**, **VQ14a**). | RV2 |
+| `blk` drivers | SDHCI, eMMC, NVMe (PCIe), and later UFS. | RV2 / RK3588 |
+| `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. | RV2 (Omega A2 already has flips and a sprite plane) |
+| `input` | USB HID through an xHCI/DWC3 driver. | CIX |
+| `net` | RTL8125 (PCIe), the K1 EMAC, and a TCP/IP stack (**VQ15**). | later |
+| `gpu-*` | One per GPU family, granting queue leases (§5). | CIX (Panthor, G720), then RK3588 |
+| `npu-*` | Per NPU family. | CIX / RK3588 |
+
+## 2.5 Boot
+
+**Proposed.** All boot paths converge on one kernel entry contract.
+
+```
+RV2:      BROM → U-Boot SPL → OpenSBI (M) → U-Boot (S) → booti vectra.bin      [FDT]
+RK3588:   BROM → TPL/SPL → TF-A (EL3) → U-Boot → booti vectra.bin              [FDT]
+CIX P1:   UEFI (EL2, VHE) → vectra.efi stub                                    [ACPI only]
+Q8B:      Qualcomm XBL/UEFI → vectra.efi stub at EL1 under hypervisor          [ACPI + DTB]
+QEMU:     -kernel vectra.bin (riscv64 virt / aarch64 virt)                     [FDT]
+```
+
+Kernel entry contract (`arch_entry`):
+- The CPU is at S-mode or EL1. The EFI stub drops from EL2 to EL1 when it starts at EL2 (**VQ11**).
+- The MMU is off, or identity-mapped by the firmware.
+- One boot hart or CPU.
+- A pointer to the boot description, which is an FDT, or an ACPI RSDP plus the EFI memory map.
+- The boot framebuffer, if the firmware left one running.
+
+The EFI stub's job:
+1. Collect the memory map, the ACPI tables and the GOP framebuffer.
+2. `ExitBootServices`.
+3. Jump to the shared entry point.
+
+The stub is a separate compile unit under `arch/aarch64/efi/`.
+
+Hardware description: **VQ7. Needs a design session.** ACPI and FDT are both first-class sources:
+- **ACPI** on the newer boards: Q8B, CIX P1, and the SpacemiT K3. Most SBCs from the last year ship ACPI.
+- **FDT** on the older ones: RV2 and RK3588.
+
+The working assumption is that both sources feed **one hardware model**: a device graph whose devices carry resources (MMIO, IRQ, DMA, clocks, power). Drivers bind to that graph, never to ACPI or FDT directly.
+
+The kernel parses only what early boot needs:
+- the memory map;
+- the interrupt controller, from MADT or the DT;
+- timers;
+- the console, from SPCR or `stdout-path`;
+- the CPU topology.
+
+The session must still decide:
+- where the rest of the parsing happens;
+- how AML is executed, if at all;
+- what the Q8B uses for power, since its ACPI power methods are Windows PEP.
+
+## 2.6 arch and plat contract
+
+**Decided: Omega's model.**
+- Portable code lives in `kernel/`, `lib/`, `servers/`, `drivers/` and `include/vectra/`, and is never compiled per platform with `#ifdef`.
+- `arch/<isa>/` implements `kernel/arch.h`. `plat/<board>/` implements `kernel/plat.h`.
+- Inline hot paths go in `arch/<isa>/include/vectra/arch_inline.h`.
+- A missing function is a link error.
+- `make check` enforces the no-`#ifdef` rule.
+
+What changes from Omega:
+- `arch_domain_*` is defined in terms of a **protection back end** (§3.5) rather than assuming a page table.
+- `plat_*` gains SMP bring-up (`plat_cpu_start`, using SBI HSM or PSCI), an IPI hook, and a description of the CPU topology (clusters, core classes).
+- One `plat/` per SoC, not per board. Boards are data: a DTB and a small `board.mk`.
+
+## 2.7 SMP
+
+**Decided (VQ8, 2026-10-19): SMP from the first kernel milestone.** Getting the scheduler and messaging right on all cores early pays off later.
+- Every target has 8–12 cores, and the paper's IPC story depends on crossing cores.
+- Per-CPU run queues. Tasks are placed by core class, with priority bands mapped to big or little cores and the policy coming from user space.
+- Fine-grained locks from day one. There is no big kernel lock to retire later.
+- Omega's single-core v1 has already validated the data structures it would build on.
