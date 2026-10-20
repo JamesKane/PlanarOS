@@ -631,6 +631,8 @@ void selftest_tasks(void *)
     kprintf("V1.5 done\n");
     selftest_ipc();
     kprintf("V2.1 done\n");
+    selftest_rings();
+    kprintf("V2.2 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1130,4 +1132,69 @@ void selftest_ipc(void)
     if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0)
         fail("V2.1 reclaim", "handles, ports, connections or Areas leaked");
     kprintf("V2.1 reclaim ok\n");
+}
+
+/* ---------------------------------------------------------------------
+ * V2 step 2: rings, run from the selftest task.
+ */
+
+constexpr uint64_t STREAM = 20000;
+
+/* Start the echo server and run 'client' with 'arg' against it. Returns
+ * the kernel calls each made meanwhile: [0] the server, [1] the client. */
+static void with_echo(uint64_t arg, uint64_t calls[2])
+{
+    struct process *echo, *client;
+    uint64_t before;
+
+    task_set_signal(0, SIGF_DEAD);
+    if (!(echo = process_create("echo", 5, 0, task_self(), SIGF_DEAD)))
+        fail("V2.2 echo", "process_create failed");
+    task_sleep_until(time_now() + time_us(2000));       /* let it make its port */
+    before = atomic_load(&echo->calls);
+    client = run("client", arg, 10000000);
+    calls[0] = atomic_load(&echo->calls) - before;
+    calls[1] = atomic_load(&client->calls);
+    if (!atomic_load(&client->dead) || client->fault != FAULT_NONE || client->exit_code != 0) {
+        kprintf("V2.2 echo: client exit %lld\n", (long long)client->exit_code);
+        fail("V2.2 echo", "the client failed");
+    }
+    if (atomic_load(&echo->dead))
+        fail("V2.2 echo", "the echo server died");
+    process_free(client);
+    process_kill(echo);
+    while (!atomic_load(&echo->dead))
+        wait_test_dead();
+    process_free(echo);
+}
+
+void selftest_rings(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages(), calls[2];
+    unsigned handles_before = handle_count();
+
+    if (!user_images[0].name) {
+        kprintf("V2.2 rings skipped: no user programs\n");
+        return;
+    }
+    with_echo(0, calls);
+    kprintf("V2.2 echo ok: 2000 PutMsg/WaitPort and 2000 DoMsg round trips, every reply "
+            "right\n");
+
+    with_echo(STREAM, calls);
+    /* Busy on both sides, a stream needs a kernel call only when one
+     * side runs dry and sleeps: far fewer than one per message. */
+    if (calls[0] + calls[1] > STREAM / 4)
+        fail("V2.2 stream", "a kernel call for most messages");
+    kprintf("V2.2 stream ok: %llu messages; kernel calls per 1000 messages: server %llu, "
+            "client %llu\n", (unsigned long long)STREAM,
+            (unsigned long long)(calls[0] * 1000 / STREAM),
+            (unsigned long long)(calls[1] * 1000 / STREAM));
+
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V2.2 reclaim", "pages leaked");
+    if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0)
+        fail("V2.2 reclaim", "handles, ports, connections or Areas leaked");
+    kprintf("V2.2 reclaim ok\n");
 }

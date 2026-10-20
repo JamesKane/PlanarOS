@@ -10,7 +10,7 @@ USER_LDFLAGS := $(USER_FLAGS) -nostdlib -static --ld-path=$(LD_PATH) \
 	-Wl,-T,arch/$(ARCH)/user/user.ld -Wl,--no-dynamic-linker
 USER_ARCH_C  := $(basename $(notdir $(wildcard arch/$(ARCH)/user/*.c)))
 USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/string.o \
-	$(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
+	$(BUILD)/user/exec/msg.o $(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
 
 $(BUILD)/user/%.o: arch/$(ARCH)/user/%.S
 	@mkdir -p $(dir $@)
@@ -24,6 +24,10 @@ $(BUILD)/user/rt/%.o: lib/rt/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
+$(BUILD)/user/exec/%.o: lib/exec/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
 $(BUILD)/user/%.o: conformance/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
@@ -34,7 +38,7 @@ $(BUILD)/user/%.elf: $(BUILD)/user/%.o $(USER_RT) arch/$(ARCH)/user/user.ld
 $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 	$(OBJCOPY) -O binary $< $@
 
--include $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGS))
+-include $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGS)) $(BUILD)/user/exec/msg.d
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 

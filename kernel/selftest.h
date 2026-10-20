@@ -36,4 +36,7 @@ void selftest_vq3(void);
 /* V2 step 1: ports and connections. Called from selftest_tasks. */
 void selftest_ipc(void);
 
+/* V2 step 2: rings, with the echo server and its client. */
+void selftest_rings(void);
+
 #endif /* KERNEL_SELFTEST_H */

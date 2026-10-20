@@ -5,29 +5,29 @@
 | Primitive | Status | Notes |
 |---|---|---|
 | **Signals** | Decided (Omega) | 64 bits per task, 16 of them reserved for the system. `Wait(mask)` is how every task blocks. |
-| **Ports** | Proposed | A port is a named rendezvous kept in the kernel's name table, and the server holds a handle to it. **A port has no ring.** Clients reach it through connections. |
-| **Connections** | Proposed | Made by `OpenPort(name)`. The kernel allocates an **arena** Area and maps it RW into exactly the client and the server. It puts a **request ring** and a **reply ring** at the start of the arena, and assigns the server a signal bit for the connection. It also registers death notices in both directions. |
-| **Messages** | Proposed | Live inside an arena or inside an Area shared with the peer. They are passed by pointer and replied to in place. |
+| **Ports** | Built (V2) | A port is a named rendezvous kept in the kernel's name table, and the server holds a handle to it. **A port has no ring.** Clients reach it through connections. |
+| **Connections** | Built (V2) | Made by `OpenPort(name)`. The kernel allocates an **arena** Area and maps it RW into exactly the client and the server. It puts a **request ring** and a **reply ring** at the start of the arena, and assigns the server a signal bit for the connection. It also registers death notices in both directions. |
+| **Messages** | Built (V2) | Live inside an arena (V2), or later inside an Area lent to the peer. They are passed by pointer and replied to in place. |
 | **Futex** | Proposed | `WaitAddr`/`WakeAddr` on a word in shared memory. Higher-level locks are built on it. |
 
 ## 4.2 Message header
 
 ```c
 struct Message {
-    struct MinNode mn_Node;     /* free for the owner's use; queue links are NOT here */
-    Handle   mn_ReplyPort;      /* handle, not an address: replies can't be forged */
+    struct MinNode mn_Node;     /* the owner's; DoMsg borrows it */
     uint32_t mn_Length;         /* total length including the header */
     int32_t  mn_Error;          /* set by the replier; ERR_PORT_DIED on peer death */
     uint32_t mn_Flags;
+    uint32_t mn_Pad;
     void    *mn_Payload;        /* universal pointer; must lie in memory both sides map */
     uint64_t mn_PayloadLen;
 };
 ```
 
-How this differs from the paper's struct:
-- The reply port is a handle, not a physical address.
+How this differs from the paper's struct (V2, `include/planar/ipc.h`):
+- **There is no reply port.** A reply goes back on the connection the request came in on. A message can't name somewhere else to reply to, so replies can't be forged.
 - There is an error field.
-- The payload pointer must lie inside an Area that both sides can map. `IOF_LEND` (from Omega) maps a buffer Area into the server for the duration of a request.
+- The payload pointer must lie inside an Area that both sides can map. `IOF_LEND` (from Omega) maps a buffer Area into the server for the duration of a request; it comes after V2.
 
 ## 4.3 Fast path: no trap while the receiver is awake
 

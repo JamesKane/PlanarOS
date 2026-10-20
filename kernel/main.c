@@ -94,6 +94,8 @@
         kprintf("V1.5 done\n");
         kprintf("V2.1 ipc skipped: no tasks\n");
         kprintf("V2.1 done\n");
+        kprintf("V2.2 rings skipped: no tasks\n");
+        kprintf("V2.2 done\n");
         arch_halt();
     }
     sched_idle();

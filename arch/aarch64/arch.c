@@ -65,6 +65,7 @@ void arch_cpu_init(void)
     if (have_pmu) {
         sysreg_write(pmcr_el0, sysreg_read(pmcr_el0) | 1);     /* E */
         sysreg_write(pmcntenset_el0, 1ULL << 31);              /* PMCCNTR */
+        sysreg_write(pmuserenr_el0, 1 | 4);     /* EN, CR: user mode reads it */
     }
 
     /* FP/SIMD traps until a task's state is loaded (lazy.c). */
