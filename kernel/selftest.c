@@ -635,6 +635,8 @@ void selftest_tasks(void *)
     kprintf("V2.2 done\n");
     selftest_domsg();
     kprintf("V2.3 done\n");
+    selftest_death();
+    kprintf("V2.4 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1334,4 +1336,171 @@ void selftest_domsg(void)
             (unsigned long long)(calls[0] / 20000), (unsigned long long)(calls[0] % 20000 / 200),
             (unsigned long long)(calls[1] / 20000), (unsigned long long)(calls[1] % 20000 / 200),
             (unsigned long long)ns);
+}
+
+/* ---------------------------------------------------------------------
+ * V2 step 4: death notices and load, run from the selftest task.
+ */
+
+static struct process *start(const char *test, const char *name, uint64_t arg)
+{
+    struct process *p = process_create(name, 5, arg, task_self(), SIGF_DEAD);
+
+    if (!p)
+        fail(test, "process_create failed");
+    return p;
+}
+
+/* Wait (at most 'us') for 'p' to die. */
+static bool wait_dead(struct process *p, uint64_t us)
+{
+    uint64_t begin = time_now();
+
+    while (!atomic_load(&p->dead) && time_now() - begin < time_us(us))
+        wait_test_dead();
+    return atomic_load(&p->dead);
+}
+
+static void kill_and_free(struct process *p)
+{
+    process_kill(p);
+    if (!wait_dead(p, 1000000))
+        fail("V2.4", "a killed process never ended");
+    process_free(p);
+}
+
+static void expect_clean_exit(const char *test, struct process *p, uint64_t us)
+{
+    if (!wait_dead(p, us))
+        fail(test, "a process never ended");
+    if (p->fault != FAULT_NONE || p->exit_code != 0) {
+        kprintf("%s: %s exit %lld\n", test, p->name, (long long)p->exit_code);
+        fail(test, "a process failed a check");
+    }
+    process_free(p);
+}
+
+/* Is the first task of 'p' blocked in a wait? */
+static bool blocked(struct process *p)
+{
+    unsigned long was = spin_lock_irqsave(&p->lock);
+    bool b = p->tasks && p->tasks->state == TASK_WAITING && !atomic_load(&p->tasks->on_cpu);
+
+    spin_unlock_irqrestore(&p->lock, was);
+    return b;
+}
+
+/* Signal the first task of 'p'. */
+static void signal_first(struct process *p, uint64_t sig)
+{
+    unsigned long was = spin_lock_irqsave(&p->lock);
+
+    if (p->tasks)
+        task_signal(p->tasks, sig);
+    spin_unlock_irqrestore(&p->lock, was);
+}
+
+/* A client blocked in DoMsg hears that its server died. */
+static void test_server_dies(void)
+{
+    struct process *sink, *doomed;
+    unsigned tries = 0;
+
+    task_set_signal(0, SIGF_DEAD);
+    sink = start("V2.4 server", "sink", 0);
+    doomed = start("V2.4 server", "doomed", 0);
+    /* Both asleep for a while: the message sits with the server. */
+    do {
+        task_sleep_until(time_now() + time_us(5000));
+        if (++tries > 400)
+            fail("V2.4 server", "client and server never settled");
+    } while (!blocked(sink) || !blocked(doomed));
+    kill_and_free(sink);
+    expect_clean_exit("V2.4 server", doomed, 1000000);
+    kprintf("V2.4 server ok: a client blocked in DoMsg got ERR_PORT_DIED when its server "
+            "was killed\n");
+}
+
+/* A server drops a client that dies, or that breaks the rules, and goes
+ * on serving others. */
+static void test_client_dies(void)
+{
+    struct process *echo, *talker;
+    uint64_t begin;
+
+    task_set_signal(0, SIGF_DEAD);
+    echo = start("V2.4 client", "echo", 0);
+    talker = start("V2.4 client", "talker", 0);
+    task_sleep_until(time_now() + time_us(20000));
+    if (atomic_load(&talker->dead) || ipc_count() != 2)
+        fail("V2.4 client", "the talker isn't talking");
+    kill_and_free(talker);
+    for (begin = time_now(); ipc_count() != 1 && time_now() - begin < time_hz();)
+        task_sleep_until(time_now() + time_us(1000));
+    if (ipc_count() != 1)
+        fail("V2.4 client", "the server kept a dead client's connection");
+
+    for (uint64_t how = 0; how < 3; how++)
+        expect_clean_exit("V2.4 rogue", start("V2.4 rogue", "rogue", how), 1000000);
+    if (atomic_load(&echo->dead))
+        fail("V2.4 rogue", "a rogue client killed the server");
+    expect_clean_exit("V2.4 rogue", start("V2.4 rogue", "client", 0), 10000000);
+    kill_and_free(echo);
+    kprintf("V2.4 client ok: the server dropped a killed client, and three rogue ones "
+            "(a pointer outside the heap, a broken ring, scribbling), and served on\n");
+}
+
+/* omega's run under load: two conversations go on while competitors
+ * hog the CPUs and other processes crash, and every reply is right. */
+static void test_load(void)
+{
+    struct process *echo, *talkers[2], *hog;
+    uint64_t end;
+    unsigned crashes = 0;
+
+    task_set_signal(0, SIGF_DEAD);
+    echo = start("V2.4 load", "echo", 0);
+    talkers[0] = start("V2.4 load", "talker", 0);
+    talkers[1] = start("V2.4 load", "talker", 0);
+    hog = start("V2.4 load", "spin", 0);
+    for (end = time_now() + time_us(300000); time_now() < end; crashes++) {
+        struct process *p = start("V2.4 load", crashes % 2 ? "wild" : "wx", 0);
+
+        if (!wait_dead(p, 1000000) || p->fault != FAULT_WRITE)
+            fail("V2.4 load", "a crash didn't end its process");
+        process_free(p);
+        task_sleep_until(time_now() + time_us(10000));
+    }
+    kill_and_free(hog);
+    for (int i = 0; i < 2; i++)
+        signal_first(talkers[i], SIGBREAKF_CTRL_C);
+    for (int i = 0; i < 2; i++)
+        expect_clean_exit("V2.4 load", talkers[i], 2000000);
+    if (atomic_load(&echo->dead))
+        fail("V2.4 load", "the server died");
+    kill_and_free(echo);
+    kprintf("V2.4 load ok: two conversations kept every reply right past a hog and %u "
+            "crashes\n", crashes);
+}
+
+void selftest_death(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    unsigned handles_before = handle_count();
+
+    if (!user_images[0].name) {
+        kprintf("V2.4 death skipped: no user programs\n");
+        return;
+    }
+    test_server_dies();
+    test_client_dies();
+    test_load();
+
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V2.4 reclaim", "pages leaked");
+    if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0 ||
+        process_count() != 0)
+        fail("V2.4 reclaim", "handles, ports, connections, Areas or processes leaked");
+    kprintf("V2.4 reclaim ok\n");
 }

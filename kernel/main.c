@@ -98,6 +98,8 @@
         kprintf("V2.2 done\n");
         kprintf("V2.3 domsg skipped: no tasks\n");
         kprintf("V2.3 done\n");
+        kprintf("V2.4 death skipped: no tasks\n");
+        kprintf("V2.4 done\n");
         arch_halt();
     }
     sched_idle();

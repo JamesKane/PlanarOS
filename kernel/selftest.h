@@ -42,4 +42,7 @@ void selftest_rings(void);
 /* V2 step 3: DoMsg's handoff and priority loan, and its cost. */
 void selftest_domsg(void);
 
+/* V2 step 4: death notices from both ends, rogue clients, and load. */
+void selftest_death(void);
+
 #endif /* KERNEL_SELFTEST_H */

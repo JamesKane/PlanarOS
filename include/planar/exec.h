@@ -13,6 +13,9 @@
 
 typedef uint32_t Handle;
 
+/* Exec's break signals, among the system's 16. */
+#define SIGBREAKF_CTRL_C    (1ULL << 12)
+
 int64_t KLog(const char *text);
 [[noreturn]] void ExitProcess(int64_t code);
 uint64_t SetSignal(uint64_t bits, uint64_t mask);
