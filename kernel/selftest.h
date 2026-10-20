@@ -62,4 +62,7 @@ void selftest_costs(void);
 /* V3 step 6: user mode's TLB misses (VQ3). Called from selftest_tasks. */
 void selftest_tlb(void);
 
+/* V4 step 1: the kernel calls drivers need. Called from selftest_tasks. */
+void selftest_processes(void);
+
 #endif /* KERNEL_SELFTEST_H */

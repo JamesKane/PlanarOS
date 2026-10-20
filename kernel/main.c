@@ -130,6 +130,8 @@
         kprintf("V3.5 done\n");
         kprintf("V3.6 tlb skipped: no tasks\n");
         kprintf("V3.6 done\n");
+        kprintf("V4.1 drivers skipped: no tasks\n");
+        kprintf("V4.1 done\n");
         arch_halt();
     }
     sched_idle();

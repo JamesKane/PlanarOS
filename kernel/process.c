@@ -15,10 +15,14 @@
 #include "port.h"
 #include "process.h"
 #include "sched.h"
+#include "syscall.h"
 #include "userimg.h"
 
 constexpr uint32_t IMAGE_MAGIC = 0x524e4c50;    /* "PLNR" */
 constexpr unsigned STACK_PAGES = 4;             /* 16 KiB user stacks */
+constexpr unsigned NAME_MAX = 32;
+
+static_assert(FAULT_OTHER == PFAULT_OTHER && FAULT_WRITE == PFAULT_WRITE, "fault codes are the ABI's");
 
 static atomic_uint live_records;
 
@@ -111,14 +115,14 @@ static int64_t launch(struct process *p, struct task *t)
     return 0;
 }
 
-struct process *process_create(const char *name, int pri, uint64_t arg,
-                               struct task *watcher, uint64_t sig)
-{
-    return process_create_on(name, pri, arg, watcher, sig, TASK_ANY_CPU);
-}
+static void reclaim(struct process *p);
+static void signal_task_handle(Handle h, uint64_t sig);
 
-struct process *process_create_on(const char *name, int pri, uint64_t arg,
-                                  struct task *watcher, uint64_t sig, uint64_t affinity)
+/* Load built-in program 'name' into a new process, watched by 'watcher'
+ * or the task 'watch_task' names. With 'held', its first task waits in
+ * p->held for StartProcess. */
+static struct process *create(const char *name, int pri, uint64_t arg, struct task *watcher,
+                              Handle watch_task, uint64_t sig, uint64_t affinity, bool held)
 {
     const struct user_image *img = find_image(name);
     const uint8_t *file;
@@ -141,9 +145,10 @@ struct process *process_create_on(const char *name, int pri, uint64_t arg,
     if (!(page = pmm_alloc()))
         return nullptr;
     p = phys_to_virt(page);
+    /* Two references: the watcher's, and its own while it lives. */
     *p = (struct process){ .name = img->name, .pri = pri, .affinity = affinity,
-                           .watcher = watcher, .watch_sig = sig, .refs = 1,
-                           .klog_tokens = 32, .klog_at = time_now() };
+                           .watcher = watcher, .watch_task = watch_task, .watch_sig = sig,
+                           .refs = 2, .klog_tokens = 32, .klog_at = time_now() };
     if (!arch_domain_create(&p->domain)) {
         pmm_free(page);
         return nullptr;
@@ -170,11 +175,27 @@ struct process *process_create_on(const char *name, int pri, uint64_t arg,
     if (!t) {
         area_process_died(p);
         arch_domain_destroy(&p->domain);
+        atomic_store(&p->refs, 1);
         process_free(p);
         return nullptr;
     }
-    launch(p, t);
+    if (held)
+        p->held = t;
+    else
+        launch(p, t);
     return p;
+}
+
+struct process *process_create(const char *name, int pri, uint64_t arg,
+                               struct task *watcher, uint64_t sig)
+{
+    return create(name, pri, arg, watcher, 0, sig, TASK_ANY_CPU, false);
+}
+
+struct process *process_create_on(const char *name, int pri, uint64_t arg,
+                                  struct task *watcher, uint64_t sig, uint64_t affinity)
+{
+    return create(name, pri, arg, watcher, 0, sig, affinity, false);
 }
 
 /* --- Ending. --- */
@@ -220,10 +241,33 @@ static void kill_tasks(struct process *p, struct task *except)
     task_exit();                /* finish_switch then calls process_task_finished */
 }
 
+/* A held process's first task, never started: it goes without running,
+ * and the process with it. */
+static void discard_held(struct process *p, struct task *t)
+{
+    atomic_store(&p->dying, true);
+    handle_free(t->handle);
+    task_discard(t);            /* its stack goes with the process's Areas */
+    reclaim(p);
+}
+
 void process_kill(struct process *p)
 {
+    struct task *held = __atomic_exchange_n(&p->held, nullptr, __ATOMIC_ACQ_REL);
+
     if (!atomic_load(&p->dying))
+        atomic_store(&p->killed, true);
+    if (held)
+        discard_held(p, held);
+    else if (!atomic_load(&p->dying))
         kill_tasks(p, nullptr);
+}
+
+void process_release(struct process *p)
+{
+    if (!atomic_load(&p->dead))
+        process_kill(p);
+    process_put(p);
 }
 
 static void set_result(struct process *p, int64_t code, enum fault kind, uint64_t pc,
@@ -288,6 +332,119 @@ int64_t process_create_task(uint64_t entry, uint64_t arg)
     leave();
 }
 
+/* --- Processes from user mode. --- */
+
+static void signal_fn(void *obj, void *arg)
+{
+    task_signal(obj, *(uint64_t *)arg);
+}
+
+static void signal_task_handle(Handle h, uint64_t sig)
+{
+    handle_with(h, HANDLE_TASK, signal_fn, &sig);
+}
+
+int64_t process_create_call(uint64_t user_name, uint64_t arg, int64_t sigbit, uint32_t flags)
+{
+    struct task *self = task_self();
+    struct process *parent = self->process, *p;
+    char name[NAME_MAX];
+    Handle h;
+
+    if (!syscall_copy_string(name, user_name, sizeof name))
+        return ERR_BADADDR;
+    if (!syscall_sigbit(sigbit) || (flags & ~PROCF_HELD))
+        return ERR_BADARG;
+    if (!find_image(name))
+        return ERR_NOTFOUND;
+    if (!(p = create(name, parent->pri, arg, nullptr, self->handle, 1ULL << sigbit,
+                     parent->affinity, true)))
+        return ERR_NOMEM;
+    if (!(h = handle_new(HANDLE_PROCESS, p, parent))) {
+        int64_t err = handle_error(parent);
+
+        process_release(p);
+        return err;
+    }
+    /* From here a sibling task may close the handle under us; the
+     * process is then killed, and starting it does nothing. */
+    if (!(flags & PROCF_HELD))
+        process_start_call(h);
+    return h;
+}
+
+static void hold_fn(void *obj, void *arg)
+{
+    process_get(obj);
+    *(struct process **)arg = obj;
+}
+
+/* The process 'h' names, held, if the caller's process owns the handle. */
+static struct process *get_child(Handle h)
+{
+    struct process *p = nullptr;
+
+    if (!handle_with(h, HANDLE_PROCESS, hold_fn, &p))
+        return nullptr;
+    if (handle_get(h, HANDLE_PROCESS, task_self()->process) != p) {
+        process_put(p);
+        return nullptr;
+    }
+    return p;
+}
+
+int64_t process_start_call(uint32_t h)
+{
+    struct process *p = get_child(h);
+    struct task *t;
+
+    if (!p)
+        return ERR_BADHANDLE;
+    t = __atomic_exchange_n(&p->held, nullptr, __ATOMIC_ACQ_REL);
+    if (t && launch(p, t) != 0)
+        reclaim(p);             /* killed while starting: it never ran */
+    process_put(p);
+    return t ? 0 : ERR_EXISTS;
+}
+
+int64_t process_kill_call(uint32_t h)
+{
+    struct process *p = get_child(h);
+
+    if (!p)
+        return ERR_BADHANDLE;
+    process_kill(p);
+    process_put(p);
+    return 0;
+}
+
+int64_t process_query_call(uint32_t h, uint64_t info_out)
+{
+    struct process *p = get_child(h);
+    struct ProcessInfo info = { 0 };
+
+    if (!p)
+        return ERR_BADHANDLE;
+    if (__atomic_load_n(&p->held, __ATOMIC_ACQUIRE))
+        info.pi_State = PROCS_HELD;
+    else if (!atomic_load(&p->dead))
+        info.pi_State = PROCS_RUNNING;
+    else if (atomic_load(&p->killed))
+        info.pi_State = PROCS_KILLED;
+    else if (p->fault != FAULT_NONE)
+        info.pi_State = PROCS_FAULTED;
+    else
+        info.pi_State = PROCS_EXITED;
+    if (info.pi_State >= PROCS_EXITED) {
+        info.pi_ExitCode = p->exit_code;
+        info.pi_Fault = p->fault;
+        info.pi_FaultAddress = p->fault_addr;
+        info.pi_FaultPC = p->fault_pc;
+    }
+    process_put(p);
+    return arch_copy_to_user(info_out, &info, sizeof info) ? 0 : ERR_BADADDR;
+}
+
 void user_return(void)
 {
     if (atomic_load_explicit(&task_self()->killed, memory_order_relaxed))   /* a hint: the kill signals too */
@@ -301,13 +458,23 @@ void user_return(void)
  */
 static void reclaim(struct process *p)
 {
-    /* Handles first: once its Areas go, no handle may still find them. */
+    struct task *watcher = p->watcher;
+    Handle watch_task = p->watch_task;
+    uint64_t sig = p->watch_sig;
+
+    /* Handles first: once its Areas go, no handle may still find them.
+     * The processes it created die with it. */
     handle_free_owner(p);
     area_process_died(p);
     arch_domain_destroy(&p->domain);
+    /* Its own reference, before 'dead': from then on the watcher may
+     * let the record go. */
+    process_put(p);
     atomic_store(&p->dead, true);
-    if (p->watcher)
-        task_signal(p->watcher, p->watch_sig);
+    if (watcher)
+        task_signal(watcher, sig);
+    else if (watch_task)
+        signal_task_handle(watch_task, sig);
 }
 
 void process_task_finished(struct process *p)

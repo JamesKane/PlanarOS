@@ -31,6 +31,11 @@
 #define SYS_SIGNAL_CONN     21
 #define SYS_SIGNAL_WAIT_CONN 22
 #define SYS_CLOSE_CONN      23
+#define SYS_CREATE_PROCESS  24
+#define SYS_START_PROCESS   25
+#define SYS_KILL_PROCESS    26
+#define SYS_QUERY_PROCESS   27
+#define SYS_CLOSE_HANDLE    28
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

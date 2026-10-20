@@ -113,14 +113,36 @@ void *handle_get(Handle h, enum handle_type type, const struct process *owner)
     return __atomic_load_n(&e->obj, __ATOMIC_RELAXED);
 }
 
-void handle_free_owner(struct process *owner)
+void *handle_take(Handle h, enum handle_type type, const struct process *owner)
 {
     unsigned long was = spin_lock_irqsave(&lock);
+    struct entry *e = lookup(h);
+    void *obj = nullptr;
 
-    for (unsigned i = 1; i < HANDLES; i++)
-        if (table[i].type != HANDLE_FREE && table[i].owner == owner)
-            release(&table[i]);
+    if (e && e->type == type && e->owner == owner) {
+        obj = e->obj;
+        release(e);
+    }
     spin_unlock_irqrestore(&lock, was);
+    return obj;
+}
+
+void handle_free_owner(struct process *owner)
+{
+    struct process *children[PROCESS_HANDLES];
+    unsigned n = 0;
+    unsigned long was = spin_lock_irqsave(&lock);
+
+    for (unsigned i = 1; i < HANDLES; i++) {
+        if (table[i].type == HANDLE_FREE || table[i].owner != owner)
+            continue;
+        if (table[i].type == HANDLE_PROCESS && n < PROCESS_HANDLES)
+            children[n++] = table[i].obj;
+        release(&table[i]);
+    }
+    spin_unlock_irqrestore(&lock, was);
+    while (n)
+        process_release(children[--n]);
 }
 
 int64_t handle_error(const struct process *owner)

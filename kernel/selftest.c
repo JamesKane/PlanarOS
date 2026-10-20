@@ -1331,6 +1331,8 @@ void selftest_tasks(void *)
     kprintf("V3.5 done\n");
     selftest_tlb();
     kprintf("V3.6 done\n");
+    selftest_processes();
+    kprintf("V4.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2507,4 +2509,41 @@ void selftest_death(void)
         process_count() != 0)
         fail("V2.4 reclaim", "handles, ports, connections, Areas or processes leaked");
     kprintf("V2.4 reclaim ok\n");
+}
+
+/* ---------------------------------------------------------------------
+ * V4 step 1: what drivers need from the kernel.
+ */
+
+/* Wait up to 'us' for no more than 'n' processes to be left. */
+static bool processes_down_to(unsigned n, uint64_t us)
+{
+    uint64_t end = time_now() + time_us(us);
+
+    while (process_count() > n && time_now() < end)
+        task_sleep_until(time_now() + time_us(1000));
+    return process_count() <= n;
+}
+
+/* Processes made by a process (conformance/spawner.c): every way one
+ * ends, and none outliving its handle. */
+void selftest_processes(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    unsigned procs = process_count(), handles = handle_count();
+
+    if (!user_images[0].name) {
+        kprintf("V4.1 processes skipped: no user programs\n");
+        return;
+    }
+    expect_exit("spawner", 0);
+    if (!processes_down_to(procs, 1000000))
+        fail("V4.1 processes", "a process outlived its handle");
+    task_sleep_until(time_now() + time_us(5000));
+    if (handle_count() != handles || area_count() != 0)
+        fail("V4.1 processes", "handles or Areas leaked");
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V4.1 processes", "pages leaked");
+    kprintf("V4.1 processes ok: created, held and started, exited, faulted, killed, closed; "
+            "none outlived its handle or its owner\n");
 }

@@ -11,6 +11,11 @@
  * the last time, so no CPU still has its domain loaded: memory, page
  * tables, ASID and handles go back, and whoever watches it is signalled.
  *
+ * A process created by another (CreateProcess) is watched through a
+ * handle its creator's process owns, and never outlives that handle:
+ * closing it, or the owner dying, kills the process. The record lives
+ * while the process does and while its watcher holds it.
+ *
  * Built-in programs (conformance/) are flat images. A process's memory
  * is Areas (kernel/area.c): its image (code read and execute, the rest
  * read and write), a stack per task with a guard below, and what it
@@ -21,6 +26,8 @@
 
 #include <stdatomic.h>
 #include <stdint.h>
+
+#include <planar/exec.h>
 
 #include "arch.h"
 #include "spinlock.h"
@@ -69,7 +76,10 @@ struct process {
     bool fault_mapped;              /* the faulting page was mapped (a rights fault) */
     uint64_t fault_pc, fault_addr;
     struct task *watcher;           /* signalled with watch_sig when dead */
+    Handle watch_task;              /* or this task, by handle (CreateProcess) */
     uint64_t watch_sig;
+    struct task *held;              /* its first task, until StartProcess */
+    atomic_bool killed;             /* ended by process_kill */
     uint64_t stack_base;            /* the first task's stack, for the overrun test */
     atomic_uint_fast64_t calls_done;    /* kernel calls made by tasks that have left */
 };
@@ -88,6 +98,10 @@ struct process *process_create_on(const char *name, int pri, uint64_t arg,
 /* End a process from outside it. Returns at once; the watcher hears
  * when it's dead. */
 void process_kill(struct process *p);
+
+/* Its handle is gone (CloseHandle, or the owner died): kill it, and let
+ * the record go once it's dead. */
+void process_release(struct process *p);
 
 /* The watcher's last word on a dead process: its record goes once no
  * kernel call is using it either. process_get/process_put are for those
@@ -109,6 +123,13 @@ unsigned process_count(void);
 /* The kernel calls behind CreateTask and ExitTask. */
 int64_t process_create_task(uint64_t entry, uint64_t arg);
 [[noreturn]] void process_exit_task(void);
+
+/* The kernel calls behind CreateProcess, StartProcess, KillProcess and
+ * QueryProcess. */
+int64_t process_create_call(uint64_t name, uint64_t arg, int64_t sigbit, uint32_t flags);
+int64_t process_start_call(uint32_t process);
+int64_t process_kill_call(uint32_t process);
+int64_t process_query_call(uint32_t process, uint64_t info_out);
 
 /* Last thing on every return to user mode: a killed task stops here. */
 void user_return(void);

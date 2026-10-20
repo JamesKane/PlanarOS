@@ -35,6 +35,11 @@ bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
     return false;
 }
 
+bool syscall_sigbit(int64_t bit)
+{
+    return bit >= 16 && bit < 64;
+}
+
 /*
  * The console is polled: a line holds the log, and interrupts, for about
  * 19 ms at 115200 baud. So a process gets KLOG_BURST lines at once and
@@ -131,6 +136,19 @@ static int64_t sys_alloc_signal(struct task *t, int64_t bit)
     return bit;
 }
 
+/* CloseHandle: for the handles that have no call of their own. Tasks,
+ * Areas, ports and connections are let go by ExitTask, FreeArea,
+ * DeletePort and CloseConn. */
+static int64_t sys_close_handle(struct task *self, Handle h)
+{
+    struct process *p = handle_take(h, HANDLE_PROCESS, self->process);
+
+    if (!p)
+        return ERR_BADHANDLE;
+    process_release(p);
+    return 0;
+}
+
 static int64_t dispatch(uint64_t nr, const uint64_t a[6])
 {
     struct task *self = task_self();
@@ -187,6 +205,16 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return (int64_t)conn_signal_wait_call((uint32_t)a[0], a[1] & ~SIGF_KERNEL);
     case SYS_CLOSE_CONN:
         return conn_close_call((uint32_t)a[0]);
+    case SYS_CREATE_PROCESS:
+        return process_create_call(a[0], a[1], (int64_t)a[2], (uint32_t)a[3]);
+    case SYS_START_PROCESS:
+        return process_start_call((uint32_t)a[0]);
+    case SYS_KILL_PROCESS:
+        return process_kill_call((uint32_t)a[0]);
+    case SYS_QUERY_PROCESS:
+        return process_query_call((uint32_t)a[0], a[1]);
+    case SYS_CLOSE_HANDLE:
+        return sys_close_handle(self, (Handle)a[0]);
     default:
         return ERR_NOSYS;
     }

@@ -58,4 +58,46 @@ int64_t UnshareArea(Handle area, Handle task);
 int64_t ProtectArea(Handle area, uint32_t rights);
 int64_t QueryArea(const void *address, struct AreaInfo *info);
 
+/*
+ * Processes (docs §2.3). CreateProcess starts a built-in program in a new
+ * process, with 'arg' as its first argument, and returns a handle the
+ * caller's process owns. The calling task gets signal 'sigbit' when the
+ * process is dead. PROCF_HELD creates it without starting it, for
+ * StartProcess once the caller has granted it what it needs (a lease).
+ * A process never outlives its handle: CloseHandle kills it if it's
+ * still running, and so does its owner's death.
+ */
+#define PROCF_HELD      (1u << 0)
+
+/* ProcessInfo.pi_State */
+#define PROCS_HELD      1
+#define PROCS_RUNNING   2           /* or ending */
+#define PROCS_EXITED    3           /* pi_ExitCode says how */
+#define PROCS_FAULTED   4           /* pi_Fault says how */
+#define PROCS_KILLED    5
+
+/* ProcessInfo.pi_Fault */
+#define PFAULT_NONE     0
+#define PFAULT_READ     1
+#define PFAULT_WRITE    2
+#define PFAULT_EXEC     3
+#define PFAULT_ILLEGAL  4
+#define PFAULT_ALIGN    5
+#define PFAULT_BREAK    6
+#define PFAULT_OTHER    7
+
+struct ProcessInfo {
+    int64_t pi_ExitCode;
+    uint32_t pi_State;
+    uint32_t pi_Fault;
+    uint64_t pi_FaultAddress;       /* the address it touched */
+    uint64_t pi_FaultPC;
+};
+
+int64_t CreateProcess(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);
+int64_t StartProcess(Handle process);
+int64_t KillProcess(Handle process);
+int64_t QueryProcess(Handle process, struct ProcessInfo *info);
+int64_t CloseHandle(Handle handle);
+
 #endif /* PLANAR_EXEC_H */

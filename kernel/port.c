@@ -215,18 +215,13 @@ bool ipc_connected(const struct process *a, const struct process *b)
 
 /* --- The kernel calls. --- */
 
-static bool user_sigbit(int64_t bit)
-{
-    return bit >= 16 && bit < 64;
-}
-
 int64_t port_create_call(uint64_t user_name, int64_t sigbit)
 {
     struct task *self = task_self();
     struct port *pt;
     unsigned long was;
 
-    if (!user_sigbit(sigbit))
+    if (!syscall_sigbit(sigbit))
         return ERR_BADARG;
     if (!(pt = kmalloc(sizeof *pt)))
         return ERR_NOMEM;
@@ -290,7 +285,7 @@ int64_t port_open_call(uint64_t user_name, int64_t sigbit, uint64_t slots, uint6
         slots = CONN_SLOTS_DEFAULT;
     if (!heap)
         heap = CONN_HEAP_DEFAULT;
-    if (!user_sigbit(sigbit) || slots < 2 || slots > CONN_SLOTS_MAX || (slots & (slots - 1)) ||
+    if (!syscall_sigbit(sigbit) || slots < 2 || slots > CONN_SLOTS_MAX || (slots & (slots - 1)) ||
         heap > CONN_HEAP_MAX)
         return ERR_BADARG;
     if (!syscall_copy_string(name, user_name, sizeof name) ||
@@ -369,7 +364,7 @@ int64_t port_accept_call(uint32_t h, int64_t sigbit, uint64_t arena_out)
     int64_t err = 0;
     unsigned long was;
 
-    if (!user_sigbit(sigbit))
+    if (!syscall_sigbit(sigbit))
         return ERR_BADARG;
     if (!arch_copy_to_user(arena_out, &va, sizeof va))
         return ERR_BADADDR;

@@ -15,6 +15,9 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t args[6]);
  * from user memory. False if it faults or doesn't fit. */
 bool syscall_copy_string(char *dst, uint64_t src, unsigned size);
 
+/* A signal bit user code may name: one of the task's own, 16-63. */
+bool syscall_sigbit(int64_t bit);
+
 /* KLog lines dropped by the rate limit, for the self-tests. */
 uint64_t syscall_klog_drops(void);
 

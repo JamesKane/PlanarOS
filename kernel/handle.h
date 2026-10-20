@@ -18,6 +18,7 @@ enum handle_type : uint8_t {
     HANDLE_AREA,
     HANDLE_PORT,
     HANDLE_CONN,
+    HANDLE_PROCESS,                 /* a process its owner created */
 };
 
 struct process;
@@ -43,7 +44,15 @@ bool handle_with(Handle h, enum handle_type type, void (*fn)(void *obj, void *ar
  */
 void *handle_get(Handle h, enum handle_type type, const struct process *owner);
 
-/* Free every handle 'owner' holds. */
+/*
+ * Take 'h' out of the table if it's of 'type' and 'owner' holds it, and
+ * return its object; nullptr otherwise. Of two tasks closing the same
+ * handle, one gets the object.
+ */
+void *handle_take(Handle h, enum handle_type type, const struct process *owner);
+
+/* Free every handle 'owner' holds. Processes it created are released
+ * (process_release) once the table is unlocked. */
 void handle_free_owner(struct process *owner);
 
 /* Handles in use, for leak checks. */

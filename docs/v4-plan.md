@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: proposed (2026-10-20).** Nothing in it is built. The decisions at the end are open.
+**Status: in progress (2026-10-20).** The four decisions at the end are made, as leaned. Step 1 is under way.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -95,7 +95,7 @@ hwdb's graph logic is pure C (§11.5), so it's built and tested on the `hosted` 
 - **`display`** leases the firmware's framebuffer: the GOP's on the CIX and on QEMU through edk2 (`-device ramfb`), and U-Boot's on the RV2. A text console draws on it, with omega's 8×8 font to start.
 - **A shell** in the Amiga style: commands from FAT, run as processes, with their output on the console.
 - **`power`** with the providers these boards need: the K1 PMU on the RV2 and native SCMI on the CIX (§9.4 Layer 3). Its first job is the kill test's check that a dead driver's votes go.
-- **Native scanout** (the K1 DPU, the CIX's Linlon) only if a firmware framebuffer can't meet the exit. Otherwise it moves to V5, next to the GPU it composes with.
+- **Native scanout** (the K1 DPU, the CIX's Linlon) moves to V5, next to the GPU it composes with (decision 2).
 
 ## Carried in from V3
 
@@ -109,7 +109,7 @@ hwdb's graph logic is pure C (§11.5), so it's built and tested on the `hosted` 
    - (a) the serial console, with output on both;
    - (b) a USB keyboard, which means an xHCI driver (DWC3 on the RV2, the CIX's controllers) and USB HID first.
 
-   *Leaning:* (a) for the V4 exit, and USB in V5 alongside `input`.
-2. **Scanout.** Is the firmware's framebuffer enough for the exit, or does V4 need native DPU drivers (the roadmap names the K1 DPU and Linlon)? *Leaning:* the firmware framebuffer for the exit, with native scanout in V5, where the GPU and compositing need it.
-3. **Program format.** Keep flat images for programs on storage, or load ELF? *Leaning:* ELF, through a loader in user mode, since programs on storage are no longer built with the kernel.
-4. **Where the boot bundle comes from.** Built into the image, as the conformance programs are now, or a separate file the firmware loads next to it? *Leaning:* built into the image for V4. A separate file comes when programs outgrow it.
+   **Decided (2026-10-20): (a)** for the V4 exit, and USB in V5 alongside `input`.
+2. **Scanout.** Is the firmware's framebuffer enough for the exit, or does V4 need native DPU drivers (the roadmap names the K1 DPU and Linlon)? **Decided (2026-10-20): the firmware framebuffer** for the exit, with native scanout in V5, where the GPU and compositing need it.
+3. **Program format.** Keep flat images for programs on storage, or load ELF? **Decided (2026-10-20): ELF**, through a loader in user mode, since programs on storage are no longer built with the kernel.
+4. **Where the boot bundle comes from.** Built into the image, as the conformance programs are now, or a separate file the firmware loads next to it? **Decided (2026-10-20): built into the image** for V4. A separate file comes when programs outgrow it.
