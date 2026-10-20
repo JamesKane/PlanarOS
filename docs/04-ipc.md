@@ -72,6 +72,8 @@ Rules:
 
 **Decided (Omega).** By default the kernel masks the source, signals the driver task, and unmasks on `AckIrq`. That is a PLIC claim/complete or a GIC EOI. A user-mode fast handler running inside the driver's domain is optional and comes later.
 
+**Proposed (§11.7):** `AckIrq` and the next `Wait` become one call, as reply-and-wait did for IPC. Edge-triggered and MSI sources aren't masked, so they need no ack. Interrupts behind a bus transaction (GPIO over I2C, ACPI GED) are delivered by their controller's driver as signals on a connection.
+
 ## 4.7 Public surface
 
 - `exec.library` wraps all of this: `PutMsg`, `GetMsg`, `ReplyMsg`, `WaitPort` and `DoIO`/`SendIO` with `IORequest`. Code written to RKM habits reads naturally.

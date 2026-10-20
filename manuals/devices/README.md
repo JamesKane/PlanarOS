@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 2.* How programs do I/O, and one chapter per device.
 
-**Planned. Nothing in this volume is built yet.** The design is in [docs §4.7](../../docs/04-ipc.md), [§5](../../docs/05-coprocessors.md) and [§9](../../docs/09-hardware-description.md); devices arrive with V4 ([roadmap](../../docs/08-roadmap.md)).
+**Planned. Nothing in this volume is built yet.** The design is in [docs §4.7](../../docs/04-ipc.md), [§5](../../docs/05-coprocessors.md), [§9](../../docs/09-hardware-description.md) and [§11](../../docs/11-driver-model.md); devices arrive with V4 ([roadmap](../../docs/08-roadmap.md)).
 
 ## Expected chapters
 

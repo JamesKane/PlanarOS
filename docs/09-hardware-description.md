@@ -156,5 +156,5 @@ struct hw_node {
 - **Dump the CIX tables** with redaction (192.168.0.27). Count how many devices actually need method execution, and whether `_CPC` and `_LPI` are static packages.
 - **K3:** revive the board, then dump RHCT and MADT and confirm it uses AIA.
 - **SCI and ACPI events.** Hardware-reduced ACPI uses GED or GPIO-signalled events. Does any target need them in v1? (Power button, lid.)
-- **Who owns PCIe enumeration:** the hwdb (ECAM from MCFG, or DT `ranges`) or a separate `pci` server. VectraOS-Odin ran devmgr's PCI scan before ACPI.
+- **Who owns PCIe enumeration:** the hwdb (ECAM from MCFG, or DT `ranges`) or a separate `pci` server. VectraOS-Odin ran devmgr's PCI scan before ACPI. *Proposed in [§11.6](11-driver-model.md#116-binding):* a `pci` server that is an hwdb source, as `acpid` is, publishing a child node per function.
 - **Should `hw_node` and the property API mirror Linux's `fwnode` names** to make driver ports from Linux easier?

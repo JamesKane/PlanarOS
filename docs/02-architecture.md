@@ -48,8 +48,8 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
   1. Stop the tasks. A task that is inside a kernel call is killed when it reaches a safe point; omega learned this when a test leaked 441 pages without it.
   2. Return unreplied messages with `ERR_PORT_DIED`.
   3. Send death notices to peers.
-  4. Revoke leases. This drains or resets coprocessor queues (§5.4).
-  5. Free Areas.
+  4. Revoke leases. This drains or resets coprocessor queues (§5.4), and runs each device lease's stop method: bus mastering off, a reset asserted, or the power domain off (§11.4, proposed).
+  5. Free Areas. Areas tied to a device lease are quarantined until the stop method has run, and are never reused if the device can't be stopped (§11.4, proposed).
   6. Wake futex waiters.
   7. Free the domain and its ASID.
 
@@ -57,7 +57,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 
 | Server | Role | First board |
 |---|---|---|
-| `power` | Clocks, regulators, resets and power domains, using SCMI (CIX), the RK806 PMIC with the CRU (RK3588), the K1 PMU, or RPMh (Q8B). Drivers ask `power` for their unit before touching its registers. CIX raises SError if anything reads a GPU register too early. | all |
+| `power` | Clocks, regulators, resets and power domains, using SCMI (CIX), the RK806 PMIC with the CRU (RK3588), the K1 PMU, or RPMh (Q8B). The hwdb asks `power` to turn a node on before it grants the node's MMIO lease, so a driver never touches an unpowered device (§11.5, proposed). CIX raises SError if anything reads a GPU register too early. | all |
 | `dos` + handlers | Namespace and assigns. The FAT32 handler is needed for the EFI system partition. Later a modern native filesystem: journaled or CoW metadata, extents and checksums, but no snapshots or encryption (**VQ14**, **VQ14a**). | RV2 |
 | `blk` drivers | SDHCI, eMMC, NVMe (PCIe), and later UFS. | RV2 / RK3588 |
 | `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. | RV2 (Omega A2 already has flips and a sprite plane) |

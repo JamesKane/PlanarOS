@@ -113,6 +113,38 @@ Write our own or port lwIP?
 
 Raised in §2.4.
 
+## Drivers
+
+**VQ23 Driver restart.**
+
+Should the hwdb restart a driver that dies, MINIX-style, from V4? *Leaning:* yes, with backoff and a cap. The node keeps its unit, and class libraries reconnect and retry what is safe to retry.
+
+Raised in §11.10.
+
+**VQ24 Devices with no stop method.**
+
+When a driver dies, something must stop its device before its DMA Areas are reused. What happens for a device with no reset line, no power domain of its own, no bus-master bit and no IOMMU? *Leaning:* its Areas stay quarantined for the rest of the boot, and the hwdb logs it. Each board's device list should be checked for such devices before V4.
+
+Raised in §11.4.
+
+**VQ25 Where match tables live.**
+
+An ELF note section in each driver binary, read by the hwdb from the boot image, or one central table built into the hwdb? *Leaning:* ELF notes, with `make check` failing on ambiguous matches.
+
+Raised in §11.6.
+
+**VQ26 Lent buffers and the IOMMU.**
+
+On boards with an IOMMU, a client buffer lent to a driver (`IOF_LEND`) must be mapped into the device's context. Map each lent Area per request, keep mappings cached while the Area lives, or bounce through the driver's pool? *Leaning:* cache the mapping for the Area's life under the identity layout, and measure.
+
+Raised in §11.8.
+
+**VQ27 Storage queue leases.**
+
+Should the filesystem hold an NVMe I/O queue pair as a lease, taking the driver out of the data path? NVMe doorbells usually share one page, so the filesystem could ring other queues' doorbells. *Leaning:* not in V4. Decide after the queue-depth-1 measurement in §11.8.
+
+Raised in §11.8.
+
 ## Coprocessors
 
 **VQ16 Is the Hexagon CDSP in scope?**
