@@ -85,17 +85,22 @@ static struct task *new_user_task(struct process *p, uint64_t pc, struct area *s
     return t;
 }
 
-/* Add a new task to 'p' and start it; false if 'p' is ending. */
-static bool launch(struct process *p, struct task *t)
+/* Add a new task to 'p' and start it: 0, or ERR_NOTFOUND if 'p' is
+ * ending, or ERR_LIMIT if it has its fill of tasks (counted here, under
+ * the lock, so racing CreateTasks can't pass the limit). */
+static int64_t launch(struct process *p, struct task *t)
 {
     unsigned long was = spin_lock_irqsave(&p->lock);
+    int64_t err = atomic_load(&p->dying)          ? ERR_NOTFOUND
+                  : p->ntasks >= PROCESS_TASKS    ? ERR_LIMIT
+                                                  : 0;
 
-    if (atomic_load(&p->dying)) {
+    if (err) {
         spin_unlock_irqrestore(&p->lock, was);
         handle_free(t->handle);
         area_release(t->user_stack, p);
         task_discard(t);
-        return false;
+        return err;
     }
     t->next_in_proc = p->tasks;
     p->tasks = t;
@@ -103,7 +108,7 @@ static bool launch(struct process *p, struct task *t)
     atomic_fetch_add(&p->unfinished, 1);
     spin_unlock_irqrestore(&p->lock, was);
     task_launch(t);
-    return true;
+    return 0;
 }
 
 struct process *process_create(const char *name, int pri, uint64_t arg,
@@ -259,7 +264,7 @@ int64_t process_create_task(uint64_t entry, uint64_t arg)
     Handle h;
 
     if (__atomic_load_n(&p->ntasks, __ATOMIC_RELAXED) >= PROCESS_TASKS)
-        return ERR_LIMIT;
+        return ERR_LIMIT;       /* early, cheap; launch() decides */
     if (!new_stack(p, &stack))
         return ERR_NOMEM;
     if (!(t = new_user_task(p, entry, stack, arg, 0))) {
@@ -267,9 +272,9 @@ int64_t process_create_task(uint64_t entry, uint64_t arg)
         return handle_error(p);
     }
     h = t->handle;              /* once launched, it may end at once */
-    if (!launch(p, t))
-        return ERR_NOTFOUND;
-    return h;
+    int64_t err = launch(p, t);
+
+    return err ? err : h;
 }
 
 [[noreturn]] void process_exit_task(void)

@@ -292,8 +292,12 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m)
                 goto replied;
             stash(mp, r);
         }
-        if (mp->mp_StashCount == MSGPORT_STASH && pending(mp))
+        if (mp->mp_StashCount == MSGPORT_STASH && pending(mp)) {
+            /* put() cleared cr_Waiting: the wake is ours to send. */
+            if (asleep)
+                SignalConn(mp->mp_Conn);
             return ERR_FULL;
+        }
         if (PortGone(mp))
             break;
         atomic_store_explicit(&mp->mp_In->cr_Waiting, 1, memory_order_relaxed);

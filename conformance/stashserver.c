@@ -4,7 +4,8 @@
  * Serves one client on the port "stash": takes its three messages,
  * answers them in order, and all the while keeps writing the first
  * one's mn_Node, the link a careless client would keep its set-aside
- * replies in (docs/10-code-review.md H5). Exits 0 once the client goes.
+ * replies in (docs/10-code-review.md H5). Then answers MSGPORT_STASH + 2
+ * more, each as it comes. Exits 0 once the client goes.
  */
 #include <planar/msg.h>
 #include <planar/syscalls.h>
@@ -35,6 +36,13 @@ int main(void)
     for (unsigned i = 0; i < 3; i++) {
         ReplyMsg(&mp, m[i]);
         tamper(m[0], 200000);
+    }
+    for (unsigned i = 0; i < MSGPORT_STASH + 2; i++) {
+        struct Message *f = WaitPort(&mp);
+
+        if (!f)
+            return 4;
+        ReplyMsg(&mp, f);
     }
     while (!PortGone(&mp))
         tamper(m[0], 1);
