@@ -35,7 +35,8 @@ bool handle_with(Handle h, enum handle_type type, void (*fn)(void *obj, void *ar
 /*
  * The object 'h' names, if it's of 'type' and 'owner' holds it; nullptr
  * otherwise. Only for objects the caller's own lock keeps alive (the
- * owner frees the handle under that lock before freeing the object).
+ * owner frees the handle under that lock before freeing the object): it
+ * doesn't take the table's lock.
  */
 void *handle_get(Handle h, enum handle_type type, const struct process *owner);
 

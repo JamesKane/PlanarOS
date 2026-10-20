@@ -56,7 +56,11 @@ static int server(void)
     port = (Handle)r;
     CHECK(CreatePort("conn", psig) == ERR_EXISTS);
     CHECK(CreatePort("other", 3) == ERR_BADARG);       /* a system signal */
-    CHECK(AcceptConn(port, csig, &a) == ERR_NOTFOUND);
+    /* Left for the kernel to drop. Nobody can have connected to it yet:
+     * the client tries only after its first round trip. */
+    r = CreatePort("conn2", psig);
+    CHECK(r > 0);
+    CHECK(AcceptConn((Handle)r, csig, &a) == ERR_NOTFOUND);
 
     /* A client connecting signals the port. */
     while ((r = AcceptConn(port, csig, &a)) == ERR_NOTFOUND)
@@ -67,7 +71,6 @@ static int server(void)
     CHECK(a->ca_Slots == 16 && a->ca_HeapSize >= 8192);
     CHECK(DeletePort(port) == 0);
     CHECK(DeletePort(port) == ERR_BADHANDLE);
-    CHECK(CreatePort("conn2", psig) > 0);       /* left for the kernel to drop */
 
     /* The client's writes, through the same arena. */
     for (unsigned i = 0; i < ROUNDS; i++) {

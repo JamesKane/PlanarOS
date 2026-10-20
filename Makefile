@@ -121,8 +121,8 @@ vq3:
 SOAK ?= 100
 
 soak: $(IMAGE)
-	@fails=0; for i in $$(seq 1 $(SOAK)); do \
-	  python3 -I tools/boot-check.py --timeout 10 --expect '$(EXPECT)' \
+	@rm -f $(BUILD)/soak-fail-*.log; fails=0; for i in $$(seq 1 $(SOAK)); do \
+	  python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' \
 	    --log $(BUILD)/soak-last.log -- $(RUN_CMD) >/dev/null || \
 	    { fails=$$((fails + 1)); cp $(BUILD)/soak-last.log $(BUILD)/soak-fail-$$fails.log; }; \
 	done; echo "soak: $$fails of $(SOAK) boots failed ($(PLATFORM))"; test $$fails -eq 0

@@ -405,7 +405,6 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
     struct cpu *c = nullptr, *here;
     struct end *e, *peer = nullptr;
     unsigned long was;
-    uint64_t got;
 
     was = spin_lock_irqsave(&lock);
     if ((e = end_of(h))) {
@@ -423,12 +422,11 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
     if (!peer)
         return 0;
     /* Woken here, the peer runs as soon as this task waits. */
-    if (c && c != here)
+    if (c && c != here) {
         sched_kick(c);
-    got = task_wait(mask);
-    if (c == here)
-        sched_kick(c);
-    return got;
+        c = nullptr;
+    }
+    return task_wait_kick(mask, c);
 }
 
 int64_t conn_close_call(uint32_t h)

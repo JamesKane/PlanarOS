@@ -46,6 +46,10 @@ make check                    # portable code must not test arch or platform
 
 [manuals/](manuals/README.md) is Planar's version of the Amiga ROM Kernel Reference Manuals. It covers what's built and how to program against it: Libraries, Devices, Autodocs, Includes, Hardware. The design documents below cover what Planar should be.
 
+## Planar and the web
+
+Don't expect a modern browser. Networking isn't in any roadmap phase yet. The `net` server (wired Ethernet only: RTL8125 and the K1 EMAC, no Wi-Fi) is marked "later", and its TCP/IP stack is still open (VQ15). Nothing yet covers TLS, DNS, an entropy source, or reading the real-time clock, and certificates can't be checked without the time. When those arrive, the realistic target is a curl-class client: an app fetching HTTPS from endpoints you chose, built on lwIP, a small TLS library and a thin POSIX layer. Chromium, Firefox and WebKit are out of reach. They need POSIX, Mesa-class GPU userspace and a sandbox, and the vision rules out all three as design drivers (§0.3). Treat anything that serves the internet with care too: the design has no adversary model (P1), so there's no ASLR, no stack canaries and no sandboxing, and some drivers get unconfined DMA. Protection domains contain bugs, not attackers. Put Planar behind a trusted LAN or a proxy.
+
 ## Design documents
 
 Each design decision is marked **decided**, **proposed** or **open**, as in PlanOmega. Open questions are numbered **VQ*n*** and collected in [questions.md](docs/questions.md).

@@ -24,11 +24,11 @@ Handle handle_new(enum handle_type type, void *obj, struct process *owner)
         unsigned i = 1 + (next - 1 + n) % (HANDLES - 1);
 
         if (table[i].type == HANDLE_FREE) {
-            table[i].type = type;
-            table[i].obj = obj;
-            table[i].owner = owner;
+            __atomic_store_n(&table[i].type, type, __ATOMIC_RELAXED);
+            __atomic_store_n(&table[i].obj, obj, __ATOMIC_RELAXED);
+            __atomic_store_n(&table[i].owner, owner, __ATOMIC_RELAXED);
             if (!table[i].gen)
-                table[i].gen = 1;
+                __atomic_store_n(&table[i].gen, 1, __ATOMIC_RELEASE);
             next = i + 1;
             used++;
             spin_unlock_irqrestore(&lock, was);
@@ -53,11 +53,12 @@ static struct entry *lookup(Handle h)
 /* Lock held. */
 static void release(struct entry *e)
 {
-    e->type = HANDLE_FREE;
-    e->obj = nullptr;
-    e->owner = nullptr;
-    if (!++e->gen)
-        e->gen = 1;
+    uint16_t gen = (uint16_t)(e->gen + 1);
+
+    __atomic_store_n(&e->gen, gen ? gen : 1, __ATOMIC_RELEASE);    /* first: see handle_get */
+    __atomic_store_n(&e->type, HANDLE_FREE, __ATOMIC_RELAXED);
+    __atomic_store_n(&e->obj, nullptr, __ATOMIC_RELAXED);
+    __atomic_store_n(&e->owner, nullptr, __ATOMIC_RELAXED);
     used--;
 }
 
@@ -83,14 +84,22 @@ bool handle_with(Handle h, enum handle_type type, void (*fn)(void *, void *), vo
     return ran;
 }
 
+/*
+ * Without the table's lock: the caller's lock keeps the entry from being
+ * freed, and an entry freed earlier has moved on to another generation,
+ * so a stale handle can't match whatever is being written there now.
+ */
 void *handle_get(Handle h, enum handle_type type, const struct process *owner)
 {
-    unsigned long was = spin_lock_irqsave(&lock);
-    struct entry *e = lookup(h);
-    void *obj = e && e->type == type && e->owner == owner ? e->obj : nullptr;
+    unsigned i = h & 0xffff;
+    struct entry *e = &table[i];
 
-    spin_unlock_irqrestore(&lock, was);
-    return obj;
+    if (i == 0 || i >= HANDLES ||
+        __atomic_load_n(&e->gen, __ATOMIC_ACQUIRE) != (uint16_t)(h >> 16) ||
+        __atomic_load_n(&e->type, __ATOMIC_RELAXED) != type ||
+        __atomic_load_n(&e->owner, __ATOMIC_RELAXED) != owner)
+        return nullptr;
+    return __atomic_load_n(&e->obj, __ATOMIC_RELAXED);
 }
 
 void handle_free_owner(struct process *owner)

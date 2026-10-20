@@ -50,7 +50,8 @@ Facts are cited to where they were measured. *(verify)* marks anything that hasn
 - Never PAS-shutdown a running DSP.
 - The ACPI clocks are Windows PEP (`QCOM0617`), which we can't use. Power needs a DT-based RPMh path, or leaving what UEFI set up.
 - Scanout must be contiguous and below 4 GB.
-- UEFI variables live in TrustZone, and there is no RTC.
+- UEFI variables live in TrustZone, behind the `uefisecapp` trusted app. Runtime services can't reach them; Linux uses SCM calls through QSEECOM (`qcom_qseecom`, `qcom_uefisecapp`), and Planar would need the same.
+- The clock is an ST M41T11 (DS1307-compatible) at `0x68` on I²C (QUP 1 SE 4, `\_SB.IC13`). Linux reads it directly with `rtc-ds1307`. UEFI `GetTime` is unsupported, ACPI's Time and Alarm device is disabled, and ACPI doesn't describe the chip, so it comes in as a board quirk (§9.4). The PMIC RTC (`pmk8350-rtc`) is disabled in the vendor DT.
 
 ## 6.3 QEMU
 

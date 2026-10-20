@@ -122,6 +122,10 @@ void task_end_loan(void);
 uint64_t task_wait(uint64_t mask);
 void task_signal(struct task *t, uint64_t mask);
 
+/* task_wait(), then sched_kick('c') if it didn't have to wait (if it
+ * did, the switch has done what the kick was for). */
+uint64_t task_wait_kick(uint64_t mask, struct cpu *c);
+
 /*
  * task_signal() for a caller that holds a lock: signals 't' and returns
  * the CPU to pass to sched_kick() once the lock is let go, or nullptr.

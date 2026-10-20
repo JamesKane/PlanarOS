@@ -219,11 +219,16 @@ static struct cpu *place(uint64_t affinity, struct cpu *prefer)
  */
 static void finish_switch(struct task *prev)
 {
+    /* Read before letting go: once on_cpu is clear, another CPU may take
+     * a ready 'prev' and run it to its end, and its state would say dead
+     * here while that CPU still runs on its stack. */
+    bool migrating = prev->migrating, dead = prev->state == TASK_DEAD;
+
+    prev->migrating = false;
     atomic_store_explicit(&prev->on_cpu, false, memory_order_release);
-    if (prev->migrating) {
+    if (migrating) {
         struct cpu *to = place(prev->affinity, nullptr);
 
-        prev->migrating = false;
         if (to) {
             spin_lock(&to->rq_lock);
             enqueue(to, prev);
@@ -232,12 +237,15 @@ static void finish_switch(struct task *prev)
             if (notify)
                 kick(to, false);
         }
-    } else if (prev->state == TASK_DEAD) {
+    } else if (dead) {
+        /* The task lives in the first page of its stack: once that's
+         * free, another CPU may have it, so nothing is read after. */
         struct process *p = prev->process;
+        uint64_t stack = prev->stack;
 
         arch_context_free(&prev->ctx);
         for (unsigned i = 0; i < TASK_STACK_PAGES; i++)
-            pmm_free(prev->stack + i * PAGE_SIZE);
+            pmm_free(stack + i * PAGE_SIZE);
         if (p)
             process_task_finished(p);
     }
@@ -472,10 +480,18 @@ void task_set_affinity(uint64_t affinity)
  * the CPU to kick, or nullptr. */
 static struct cpu *set_pri(struct task *t, int pri)
 {
-    struct cpu *c = t->cpu;
+    struct cpu *c;
     bool notify;
 
-    spin_lock(&c->rq_lock);
+    /* steal() moves a ready task between queues holding only the two
+     * queues' locks: lock where it is, then make sure it's still there. */
+    for (;;) {
+        c = t->cpu;
+        spin_lock(&c->rq_lock);
+        if (t->cpu == c)
+            break;
+        spin_unlock(&c->rq_lock);
+    }
     if (t->on_rq) {
         unlink_rq(c, t);
         t->pri = (int8_t)pri;
@@ -533,7 +549,7 @@ void task_end_loan(void)
 
 /* --- Signals. --- */
 
-uint64_t task_wait(uint64_t mask)
+uint64_t task_wait_kick(uint64_t mask, struct cpu *kick_cpu)
 {
     /* Kicked only if it doesn't wait: waiting switches anyway. */
     struct cpu *loan = end_loan(task_self());
@@ -552,6 +568,8 @@ uint64_t task_wait(uint64_t mask)
             arch_irq_restore(was);
             if (loan)
                 sched_kick(loan);
+            if (kick_cpu && kick_cpu != loan)
+                sched_kick(kick_cpu);
             return got;
         }
         self->sig_waiting = mask | SIGF_KILL;
@@ -559,10 +577,15 @@ uint64_t task_wait(uint64_t mask)
         self->state = TASK_WAITING;
         spin_unlock(&self->cpu->rq_lock);
         spin_unlock(&self->lock);
-        loan = nullptr;
+        loan = kick_cpu = nullptr;
         schedule();
         arch_irq_restore(was);
     }
+}
+
+uint64_t task_wait(uint64_t mask)
+{
+    return task_wait_kick(mask, nullptr);
 }
 
 struct cpu *task_post(struct task *t, uint64_t mask, unsigned how)
@@ -580,10 +603,13 @@ struct cpu *task_post(struct task *t, uint64_t mask, unsigned how)
             t->sig_waiting = 0;
             t->state = TASK_READY;
             if ((how & POST_HANDOFF) && !t->on_rq && (t->affinity & bit(self)) &&
-                me != self->idle) {
+                me != self->idle && !atomic_load(&t->on_cpu)) {
                 /* Here, next: the caller is about to wait for it. Its
                  * state keeps everyone else off while it moves (they
-                 * take t->lock first anyway). */
+                 * take t->lock first anyway). Never one still switching
+                 * away elsewhere: that CPU may be waiting, in schedule(),
+                 * for a task this CPU is switching away from, and each
+                 * would wait for the other for ever. */
                 if (c != self) {
                     spin_unlock(&c->rq_lock);
                     c = self;
@@ -643,6 +669,7 @@ void task_sleep_until(uint64_t deadline)
     self->sleep = (struct ktimer){ .fn = sleep_fire, .data = self };
     ktimer_start(&self->sleep, deadline);
     task_wait(SIGF_SLEEP);
+    ktimer_stop(&self->sleep);  /* woken early (killed): don't leave it armed */
 }
 
 uint64_t sched_switches(void)

@@ -170,7 +170,8 @@ void pmm_free(uint64_t page)
 
     if (!bitmap || n >= npages || !taken(n)) {
         spin_unlock_irqrestore(&lock, was);
-        kprintf("planar: pmm_free of a page not allocated: %p\n", (void *)page);
+        kprintf("planar: pmm_free of a page not allocated: %p (from %p)\n", (void *)page,
+                __builtin_return_address(0));
         return;
     }
     bitmap[n / 64] &= ~(1ULL << (n % 64));

@@ -443,23 +443,25 @@ static atomic_uint_fast64_t spin_counts[2];
 static atomic_uint_fast64_t woke_at;
 static atomic_uint spin_finished;
 
-/* Signal bits don't count, so finishers count themselves. */
+/* Signal bits don't count, so finishers count themselves, after
+ * signalling: once the count is complete no signal is still on its way
+ * to arrive after stop_spinners() has cleared it. */
 static void spinner(void *arg)
 {
     unsigned slot = (unsigned)(uintptr_t)arg;
 
     while (!atomic_load(&spin_stop))
         atomic_fetch_add(&spin_counts[slot], 1);
-    atomic_fetch_add(&spin_finished, 1);
     task_signal(tester, SIGF_TEST);
+    atomic_fetch_add(&spin_finished, 1);
 }
 
 static void stop_spinners(unsigned n)
 {
     atomic_store(&spin_stop, true);
     while (atomic_load(&spin_finished) < n)
-        task_wait(SIGF_TEST);
-    task_set_signal(0, SIGF_TEST);
+        task_sleep_until(time_now() + time_us(200));
+    task_set_signal(0, SIGF_TEST);      /* every spinner's signal is in by now */
 }
 
 static void urgent(void *)
@@ -1144,6 +1146,20 @@ void selftest_ipc(void)
 
 constexpr uint64_t STREAM = 20000;
 
+/* For a hang: where each task of 'p' is. */
+static void dump_tasks(struct process *p)
+{
+    for (struct task *t = p->tasks; t; t = t->next_in_proc)
+        kprintf("  %s: state %d on_rq %d on_cpu %d cpu %u pri %d/%d received %llx waiting %llx\n",
+                t->name, t->state, t->on_rq, atomic_load(&t->on_cpu), t->cpu->index, t->pri,
+                t->base_pri, (unsigned long long)t->sig_received,
+                (unsigned long long)t->sig_waiting);
+    for (unsigned i = 0; i < ncpus; i++)
+        kprintf("  cpu %u: current %s ready %u need_resched %d quantum %d\n", i,
+                cpus[i].current->name, cpus[i].nr_ready, atomic_load(&cpus[i].need_resched),
+                cpus[i].quantum_on);
+}
+
 /* Start the echo server and run 'client' with 'arg' against it. Returns
  * the kernel calls each made meanwhile: [0] the server, [1] the client. */
 static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
@@ -1159,7 +1175,12 @@ static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
     client = run(prog, arg, 10000000);
     calls[0] = process_calls(echo) - before;
     calls[1] = process_calls(client);
-    if (!atomic_load(&client->dead) || client->fault != FAULT_NONE || client->exit_code != 0) {
+    if (!atomic_load(&client->dead)) {
+        dump_tasks(client);
+        dump_tasks(echo);
+        fail("V2.2 echo", "the client never finished");
+    }
+    if (client->fault != FAULT_NONE || client->exit_code != 0) {
         kprintf("V2.2 echo: client exit %lld\n", (long long)client->exit_code);
         fail("V2.2 echo", "the client failed");
     }
@@ -1412,10 +1433,16 @@ static void kill_and_free(struct process *p)
     process_free(p);
 }
 
+static struct process *also_dump;   /* for a hang: another process to show */
+
 static void expect_clean_exit(const char *test, struct process *p, uint64_t us)
 {
-    if (!wait_dead(p, us))
+    if (!wait_dead(p, us)) {
+        dump_tasks(p);
+        if (also_dump)
+            dump_tasks(also_dump);
         fail(test, "a process never ended");
+    }
     if (p->fault != FAULT_NONE || p->exit_code != 0) {
         kprintf("%s: %s exit %lld\n", test, p->name, (long long)p->exit_code);
         fail(test, "a process failed a check");
@@ -1517,8 +1544,10 @@ static void test_load(void)
     kill_and_free(hog);
     for (int i = 0; i < 2; i++)
         signal_first(talkers[i], SIGBREAKF_CTRL_C);
+    also_dump = echo;
     for (int i = 0; i < 2; i++)
         expect_clean_exit("V2.4 load", talkers[i], 2000000);
+    also_dump = nullptr;
     if (atomic_load(&echo->dead))
         fail("V2.4 load", "the server died");
     kill_and_free(echo);

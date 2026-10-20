@@ -15,7 +15,7 @@ Boards from the last year ship ACPI (the Q8B, the Orange Pi 6 Plus with the CIX 
 - **Quirks:**
   - SPCR has a bad access width and the wrong IRQ.
   - GPIO consumers describe the Qualcomm reference board (QRD08280), not this one, and the `_AEI` is bogus.
-  - The RTC is missing.
+  - The RTC (an M41T11 on I²C) isn't described, and the ACPI Time and Alarm device is disabled.
   - Some IRQs exist only in the DT.
   - Two GPU resources overlap.
 - Source: `AbyssBSD/docs/boards/radxa-dragon-q8b/dumps/acpi/`.
