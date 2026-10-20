@@ -1653,6 +1653,8 @@ static void test_client_dies(void)
     if (atomic_load(&echo->dead))
         fail("V2.4 rogue", "a rogue client killed the server");
     expect_clean_exit("V2.4 rogue", start("V2.4 rogue", "client", 0), 10000000);
+    expect_clean_exit("V2.4 limits", start("V2.4 limits", "limits", 0), 5000000);
+    kprintf("V2.4 limits ok: a process stopped at 64 tasks, 256 handles and 32 connections\n");
     kill_and_free(echo);
     kprintf("V2.4 client ok: the server dropped a killed client, and four rogue ones "
             "(a pointer outside the heap, a broken ring, scribbling, a message running off the heap), and served on\n");

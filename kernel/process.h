@@ -40,12 +40,21 @@ struct task;
 
 struct mapping;
 
+/* What one process may hold at once (review M11), so none can use up
+ * what every process shares. */
+constexpr unsigned PROCESS_HANDLES = 256;
+constexpr unsigned PROCESS_TASKS = 64;
+constexpr unsigned PROCESS_CONNS = 32;  /* connection ends, open or waiting */
+
 struct process {
     struct arch_domain domain;
     const char *name;
     int pri;
     spinlock_t lock;                /* tasks */
     struct task *tasks;             /* by next_in_proc */
+    unsigned ntasks;                /* on 'tasks' (lock) */
+    unsigned handles;               /* held (kernel/handle.c's lock) */
+    unsigned conns;                 /* connection ends (kernel/port.c's lock) */
     atomic_uint unfinished;         /* tasks not yet switched away for good */
     struct mapping *maps;           /* the Areas it maps (kernel/area.c's lock) */
     atomic_bool dying;

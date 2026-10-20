@@ -22,6 +22,7 @@
 #include "syscall.h"
 
 constexpr unsigned PORT_NAME = 32;
+constexpr unsigned PORT_QUEUE = 32;     /* connections waiting to be accepted */
 
 enum side { CLIENT, SERVER };
 
@@ -50,6 +51,7 @@ struct port {
     uint64_t sig;
     Handle handle;
     struct conn *queue;             /* oldest first */
+    unsigned queued;
     struct port *next;
 };
 
@@ -106,6 +108,7 @@ static void unqueue(struct conn *c)
 {
     struct conn **pp;
 
+    c->port->queued--;
     for (pp = &c->port->queue; *pp != c; pp = &(*pp)->next_queued)
         ;
     *pp = c->next_queued;
@@ -136,6 +139,7 @@ static void close_end(struct end *e, uint64_t *kicks)
     if (peer->open)
         post(peer->task, peer->sig, kicks);
     handle_free(e->handle);
+    e->proc->conns--;
     e->open = false;
     e->task = nullptr;
     area_release(c->arena, e->proc);
@@ -239,7 +243,7 @@ int64_t port_create_call(uint64_t user_name, int64_t sigbit)
     if (!(pt->handle = handle_new(HANDLE_PORT, pt, self->process))) {
         spin_unlock_irqrestore(&lock, was);
         kfree(pt);
-        return ERR_NOMEM;
+        return handle_error(self->process);
     }
     pt->next = ports;
     ports = pt;
@@ -320,8 +324,12 @@ int64_t port_open_call(uint64_t user_name, int64_t sigbit, uint64_t slots, uint6
         err = ERR_NOTFOUND;
     else if (pt->proc == p)
         err = ERR_BADARG;           /* a process needs no connection to itself */
+    else if (p->conns >= PROCESS_CONNS)
+        err = ERR_LIMIT;
+    else if (pt->queued >= PORT_QUEUE)
+        err = ERR_FULL;             /* the server isn't accepting: try later */
     else if (!(c->end[CLIENT].handle = handle_new(HANDLE_CONN, &c->end[CLIENT], p)))
-        err = ERR_NOMEM;
+        err = handle_error(p);
     if (err) {
         spin_unlock_irqrestore(&lock, was);
         area_release(arena, p);
@@ -334,6 +342,8 @@ int64_t port_open_call(uint64_t user_name, int64_t sigbit, uint64_t slots, uint6
         ;
     *pp = c;
     c->port = pt;
+    pt->queued++;
+    p->conns++;
     c->next = conns;
     conns = c;
     atomic_fetch_add(&live, 1);
@@ -367,6 +377,8 @@ int64_t port_accept_call(uint32_t h, int64_t sigbit, uint64_t arena_out)
         err = ERR_BADHANDLE;
     else if (!(c = pt->queue))
         err = ERR_NOTFOUND;
+    else if (p->conns >= PROCESS_CONNS)
+        err = ERR_LIMIT;
     else if (area_share(c->arena, p, AREAR_READ | AREAR_WRITE) != 0)
         err = ERR_NOMEM;
     if (err) {
@@ -377,9 +389,10 @@ int64_t port_accept_call(uint32_t h, int64_t sigbit, uint64_t arena_out)
     if (!(e->handle = handle_new(HANDLE_CONN, e, p))) {
         area_release(c->arena, p);
         spin_unlock_irqrestore(&lock, was);
-        return ERR_NOMEM;
+        return handle_error(p);
     }
     unqueue(c);
+    p->conns++;
     e->open = true;
     e->task = self;
     e->proc = p;

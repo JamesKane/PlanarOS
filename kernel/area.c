@@ -501,7 +501,7 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
     a->refs = 1;                    /* ours, until the call is done */
     if (!(h = a->handle = handle_new(HANDLE_AREA, a, p))) {
         area_destroy(a);
-        return ERR_NOMEM;
+        return handle_error(p);
     }
     /* From here a sibling task may FreeArea(h) under us. */
     if ((err = map_into(a, p, AREAR_READ | AREAR_WRITE, 0, h)) != 0) {

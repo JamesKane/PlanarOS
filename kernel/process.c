@@ -98,6 +98,7 @@ static bool launch(struct process *p, struct task *t)
     }
     t->next_in_proc = p->tasks;
     p->tasks = t;
+    p->ntasks++;
     atomic_fetch_add(&p->unfinished, 1);
     spin_unlock_irqrestore(&p->lock, was);
     task_launch(t);
@@ -194,6 +195,7 @@ static void kill_tasks(struct process *p, struct task *except)
     for (pp = &p->tasks; *pp != self; pp = &(*pp)->next_in_proc)
         ;
     *pp = self->next_in_proc;
+    p->ntasks--;
     atomic_fetch_add(&p->calls_done, atomic_load(&self->calls));
     spin_unlock_irqrestore(&p->lock, was);
     handle_free(self->handle);
@@ -252,16 +254,20 @@ int64_t process_create_task(uint64_t entry, uint64_t arg)
     struct process *p = task_self()->process;
     struct area *stack;
     struct task *t;
+    Handle h;
 
+    if (__atomic_load_n(&p->ntasks, __ATOMIC_RELAXED) >= PROCESS_TASKS)
+        return ERR_LIMIT;
     if (!new_stack(p, &stack))
         return ERR_NOMEM;
     if (!(t = new_user_task(p, entry, stack, arg, 0))) {
         area_release(stack, p);
-        return ERR_NOMEM;
+        return handle_error(p);
     }
+    h = t->handle;              /* once launched, it may end at once */
     if (!launch(p, t))
         return ERR_NOTFOUND;
-    return t->handle;
+    return h;
 }
 
 [[noreturn]] void process_exit_task(void)

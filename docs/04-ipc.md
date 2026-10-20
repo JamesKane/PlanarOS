@@ -58,7 +58,13 @@ Rules:
 ## 4.4 Synchronous path: `DoMsg`
 
 `DoMsg` is send, then wait for this message's reply.
-- If the server is blocked on the connection, the kernel hands the CPU straight to it (handoff scheduling, as in L4 and QNX) with priority inheritance.
+- If the server is blocked on the connection, the kernel hands the CPU straight to it (handoff scheduling, as in L4 and QNX).
+- **Handoff boosting, not full priority inheritance (V2.5, review M7).** A server woken this way runs at least at the client's priority until it next signals or waits. That is all:
+  - a server that is already running or ready when the request arrives is lent nothing;
+  - there are no chains: when C waits on S1 and S1 waits on S2, S2 gets S1's priority, not C's;
+  - the loan ends at the server's next signal or wait, not when the request is answered.
+
+  Real inheritance would record the loan on the connection and re-apply it while the lender is blocked. It is worth doing once servers stack (V4).
 - Omega measured a 3,361-cycle round trip on the X60. Planar's target is to stay at or below that on the RV2, and to measure the same thing on each Arm board.
 
 ## 4.5 Cross-core notification

@@ -1,7 +1,10 @@
 /*
  * kernel/handle.c -- handles
  */
+#include <planar/syscalls.h>
+
 #include "handle.h"
+#include "process.h"
 #include "spinlock.h"
 
 constexpr unsigned HANDLES = 4096;  /* index 0 is never handed out */
@@ -20,6 +23,10 @@ Handle handle_new(enum handle_type type, void *obj, struct process *owner)
 {
     unsigned long was = spin_lock_irqsave(&lock);
 
+    if (owner && owner->handles >= PROCESS_HANDLES) {
+        spin_unlock_irqrestore(&lock, was);
+        return 0;
+    }
     for (unsigned n = 0; n < HANDLES - 1; n++) {
         unsigned i = 1 + (next - 1 + n) % (HANDLES - 1);
 
@@ -31,6 +38,8 @@ Handle handle_new(enum handle_type type, void *obj, struct process *owner)
                 __atomic_store_n(&table[i].gen, 1, __ATOMIC_RELEASE);
             next = i + 1;
             used++;
+            if (owner)
+                owner->handles++;
             spin_unlock_irqrestore(&lock, was);
             return (Handle)table[i].gen << 16 | i;
         }
@@ -55,6 +64,8 @@ static void release(struct entry *e)
 {
     uint16_t gen = (uint16_t)(e->gen + 1);
 
+    if (e->owner)
+        e->owner->handles--;
     __atomic_store_n(&e->gen, gen ? gen : 1, __ATOMIC_RELEASE);    /* first: see handle_get */
     __atomic_store_n(&e->type, HANDLE_FREE, __ATOMIC_RELAXED);
     __atomic_store_n(&e->obj, nullptr, __ATOMIC_RELAXED);
@@ -110,6 +121,12 @@ void handle_free_owner(struct process *owner)
         if (table[i].type != HANDLE_FREE && table[i].owner == owner)
             release(&table[i]);
     spin_unlock_irqrestore(&lock, was);
+}
+
+int64_t handle_error(const struct process *owner)
+{
+    return owner && __atomic_load_n(&owner->handles, __ATOMIC_RELAXED) >= PROCESS_HANDLES
+               ? ERR_LIMIT : ERR_NOMEM;
 }
 
 unsigned handle_count(void)

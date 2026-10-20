@@ -77,6 +77,6 @@ This happens whether the end closed by `CloseConn`, by its task ending, or by it
 
 **Handoff.** `SignalWaitConn(conn, mask)` signals the other end and waits.
 - If that wakes the peer, and the peer may run on this CPU, the kernel queues it at the front of this CPU's queue, so the wait switches straight to it.
-- The peer works at least at the caller's priority until it next signals or waits (priority inheritance).
+- The peer works at least at the caller's priority until it next signals or waits. This is handoff boosting, not full priority inheritance; docs/04-ipc.md §4.4 lists what it doesn't cover.
 
 `DoMsg` is `PutMsg`, then `SignalWaitConn` if the server is asleep, then collecting this message's reply. Any other reply that comes back first is set aside for `GetMsg`.

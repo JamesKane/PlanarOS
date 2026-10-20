@@ -42,5 +42,6 @@
 #define ERR_RIGHTS          (-8)        /* rights the Area's flags don't allow */
 #define ERR_FULL            (-9)        /* a ring is full */
 #define ERR_PORT_DIED       (-10)       /* the other end of a connection went */
+#define ERR_LIMIT           (-11)       /* a per-process limit (handles, tasks, connections) */
 
 #endif /* PLANAR_SYSCALLS_H */

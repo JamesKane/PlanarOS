@@ -22,8 +22,11 @@ enum handle_type : uint8_t {
 
 struct process;
 
-/* A handle for 'obj', owned by 'owner' (nullptr: the kernel). 0 if full. */
+/* A handle for 'obj', owned by 'owner' (nullptr: the kernel). 0 if the
+ * table is full or 'owner' holds PROCESS_HANDLES; handle_error() says
+ * which, as the error a kernel call returns. */
 Handle handle_new(enum handle_type type, void *obj, struct process *owner);
+int64_t handle_error(const struct process *owner);
 void handle_free(Handle h);
 
 /*
