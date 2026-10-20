@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: in progress (2026-10-20).** Steps 1 to 3 done. All three decisions are made (end of this plan).
+**Status: in progress (2026-10-20).** Steps 1 to 4 done. All three decisions are made (end of this plan).
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -26,7 +26,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 | **1. UEFI entry, on QEMU** ✅ | The image is also an EFI application. A stub takes the memory map and the configuration tables, exits boot services and enters the kernel. It runs under edk2 on QEMU, at EL1 and at EL2. |
 | **2. ACPI, on QEMU** ✅ | `kernel/acpi.c` parses the static tables into the same facts `fdt.c` gives. Both sources are compared on one machine. |
 | **3. The board** ✅ | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
-| **4. Big and little** | Core classes from the PPTT and MIDR, and costs per class. |
+| **4. Big and little** ✅ | Core classes from the PPTT and MIDR, and costs per class. |
 | **5. Arm costs** | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
 | **6. VQ3** | The `vq3` workload on the CIX, again on the RV2, and switch and TLB-miss costs per layout. Then the decision. |
 
@@ -169,7 +169,45 @@ UART2 carries the firmware's log as well as ours, so the first boot shows UEFI's
 
 While the cable is on the CIX, the RV2 has no console and no serial boot. Step 6's RV2 runs need it moved back, or a second adapter.
 
-## 4. Big and little
+## 4. Big and little ✅
+
+**Done (2026-10-20).** Every CPU has a core class. Each class has a capacity measured at boot, and placement fills big cores first and spills onto little ones. On the CIX: `planar: 2 core classes`, the eight Cortex-A720s at 1024 and the four Cortex-A520s at 626. Both layouts pass on the board (a soak of 10 boots, 5 in each layout, had no failures). The transcript ends with `V3.4 done`.
+
+- **The core type** is `arch_cpu_type()`, read by each CPU on itself as it comes up: MIDR_EL1's implementer and part number on AArch64, and `marchid` (through SBI) on RISC-V. CPUs of one type are one class (`kernel/cpuclass.c`). AArch64 names the Arm parts it knows; QEMU's rv64 shows as `core type 2a`.
+- **The PPTT gives clusters** (`acpi_cluster`): the leaf node for each UID, and its parent. On the CIX that's five clusters, `0,1 2,3,4,5 6,7 8,9 10,11` by UID; the four A520s are one cluster. The CIX's package node carries processor ID 0, as UID 0 does, so a node is taken as a CPU only if it's flagged a leaf or is nobody's parent. Clusters are a cross-check for now: `V3.4 classes` fails if one holds two core types. The device tree's `cpu-map` isn't read yet. It comes with the first device-tree board with big and little cores (the RK3588), and `capacity-dmips-mhz` is no longer read.
+- **Capacity is measured, not read.** The CIX gives speeds only in AML (`_CPC` in SSDT2; static packages, docs/09 §9.6), which the kernel doesn't run. The boot CPU has each CPU in turn time one fixed workload, best of 5 runs with interrupts off: a sort, a hash and a walk of a linked cycle, about 110 µs on an A720. A class's capacity is its median time against the fastest class's, which is 1024.
+  - **One capacity per class, not per CPU.** The A720s come in four clock grades, but per-CPU numbers would make placement on a symmetric machine follow timing noise. The spread is printed, per CPU, in the boot log.
+  - **The measurement disagrees with `_CPC`.** `_CPC`'s highest performance puts an A520 at 0.27 of the fastest A720 (2232 against 8192); the workload gives 0.61. The firmware leaves the clocks below their maximum. By the cycle counter, the A720 at `a00` runs at 1.9 GHz and the A520s at 1.8 GHz. The grades don't follow `_CPC` either:
+
+    | UIDs | MPIDR | `_CPC` highest | Workload |
+    |---|---|---|---|
+    | 0, 1 | a00, b00 | 8192 | 109.8 µs |
+    | 10, 11 | 800, 900 | 7876 | 109.6 µs |
+    | 6, 7 | 400, 500 | 7246 | 115.8 µs |
+    | 8, 9 | 600, 700 | 6931 | 130.2 µs |
+    | 2–5 | 0–300 (A520) | 2232 | 189.2 µs |
+
+    So until a power server sets the clocks (V4, SCMI), the measurement is the honest number. Per clock, an A520 does 0.61 of the work of the A720 at `a00` on this workload, and 0.53 on a Signal and Wait round trip. That is more than the 0.39 this plan assumed: the workload is mostly dependent loads and branches, where a wide core gains least.
+- **Placement** (`place()` and `nudge_idle()` in `kernel/sched.c`):
+  - An idle CPU beats a busy one, and a faster idle one beats a slower one. So big cores fill first, and work spills onto idle little ones before any big core takes a second task.
+  - Among busy CPUs, the task goes where it gets the most capacity per task: capacity over tasks, counting itself.
+  - With equal capacities this is the old least-loaded rule, so QEMU and the RV2 place tasks as before.
+  - The CPU nudged to take a task stuck behind a higher priority is now the fastest idle one, not the first.
+- **`V3.4 classes`** checks that every online CPU has a class, the classes add up to the CPUs online, the fastest is 1024, and no cluster mixes types.
+- **`V3.4 placement`** makes CPUs 1 and 2 a big and a little core for the test (capacities 1024 and 256), so it runs on any machine with three CPUs. Three tasks that may run on either land on the big core, the little core, then the big core again.
+- **`V3.4 costs`**: a Signal and Wait round trip on one CPU and across two, per class (identity layout):
+
+  | Class | One CPU | Across two |
+  |---|---|---|
+  | Cortex-A720 | 465 ns (884 cycles) | 2.9 µs |
+  | Cortex-A520 | 921 ns (1658 cycles) | 3.7 µs |
+
+- **`V3.2 acpi`** builds a PPTT too: a package with an ID of its own, a cluster, one CPU flagged a leaf and one that is only childless. Two more broken sets make 15: a parent past the table's end, and a parent inside a node rather than at its start.
+- **Later:**
+  - Moving a running task up. A task running alone on a little core stays there when a big core goes idle; only ready tasks are taken.
+  - A real policy: which servers go where, and energy (V4).
+
+### The plan, as written before the step
 
 - **What the CIX has:** eight A720s, at four clock grades from 2.2 to 2.6 GHz, and four A520s at 1.8 GHz. The A520 does 0.39 of an A720's work per clock. VQ8 asks for placement by core class.
 - **In V3:**

@@ -7,6 +7,7 @@
 #include "acpi.h"
 #include "arch.h"
 #include "cpu.h"
+#include "cpuclass.h"
 #include "fdt.h"
 #include "hw.h"
 #include "kprintf.h"
@@ -825,13 +826,13 @@ void selftest_boot(void)
 
 /* The tables: an RSDP, an XSDT and what it lists, at these offsets. */
 enum { T_RSDP = 0, T_XSDT = 64, T_MADT = 256, T_GTDT = 768, T_SPCR = 1024, T_FACP = 1152,
-       T_SIZE = 2048 };
+       T_PPTT = 1408, T_SIZE = 2048 };
 
 /* Ways to break them. */
 enum acpi_break {
     B_NONE, B_RSDP_SUM, B_RSDP_REV, B_TABLE_SUM, B_FAR, B_XSDT_TAIL, B_MADT_ZERO,
     B_MADT_PAST, B_GICC_SHORT, B_GTDT_COUNT, B_GTDT_SHORT, B_GTDT_PAST, B_LEN_HUGE,
-    B_LEN_SHORT, B_COUNT,
+    B_LEN_SHORT, B_PPTT_PARENT, B_PPTT_MIDDLE, B_COUNT,
 };
 
 static uint8_t acpi_buf[T_SIZE] __attribute__((aligned(16)));
@@ -875,7 +876,7 @@ static uint64_t pa_of(uint32_t off)
  * over HVC and an SBSA watchdog; broken as 'b' says. */
 static void build_acpi(enum acpi_break b)
 {
-    uint32_t madt_len = 44 + 24 + 16 + 80 + 80, xsdt_len = 36 + 4 * 8, m, w, gtdt_len;
+    uint32_t madt_len = 44 + 24 + 16 + 80 + 80, xsdt_len = 36 + 5 * 8, m, w, gtdt_len;
 
     memset(acpi_buf, 0, sizeof acpi_buf);
 
@@ -938,6 +939,26 @@ static void build_acpi(enum acpi_break b)
     put(T_FACP + 129, 3, 2);                /* PSCI, over HVC */
     seal(T_FACP, 140, T_FACP + 9);
 
+    /* A package with an ID of its own, as the CIX's has, a cluster, and
+     * both CPUs in it: one flagged a leaf, one a leaf only by having no
+     * children (before ACPI 6.3). Broken, CPU 1's parent is past the
+     * end, or inside the cluster's node rather than at its start. */
+    header(T_PPTT, "PPTT", 116);
+    put(T_PPTT + 36, 0 | 20 << 8, 2);
+    put(T_PPTT + 40, 0x3, 4);               /* physical package, ID valid */
+    put(T_PPTT + 56, 0 | 20 << 8, 2);
+    put(T_PPTT + 60, 0x10, 4);              /* identical implementation */
+    put(T_PPTT + 64, 36, 4);
+    for (unsigned cpu = 0; cpu < 2; cpu++) {
+        uint32_t n = T_PPTT + 76 + 20 * cpu;
+
+        put(n, 0 | 20 << 8, 2);
+        put(n + 4, cpu ? 0x2 : 0xa, 4);     /* ID valid; the first a leaf */
+        put(n + 8, cpu && b == B_PPTT_PARENT ? 200 : cpu && b == B_PPTT_MIDDLE ? 60 : 56, 4);
+        put(n + 12, cpu, 4);
+    }
+    seal(T_PPTT, 116, T_PPTT + 9);
+
     if (b == B_FAR)
         xsdt_len += 16;
     if (b == B_XSDT_TAIL)
@@ -947,12 +968,13 @@ static void build_acpi(enum acpi_break b)
     put(T_XSDT + 44, pa_of(T_GTDT), 8);
     put(T_XSDT + 52, pa_of(T_SPCR), 8);
     put(T_XSDT + 60, pa_of(T_FACP), 8);
+    put(T_XSDT + 68, pa_of(T_PPTT), 8);
     if (b == B_FAR) {
-        put(T_XSDT + 68, ((uint64_t)ARCH_DIRECT_MAP_GIB << 30) - 8, 8);
-        put(T_XSDT + 76, ~0ULL, 8);
+        put(T_XSDT + 76, ((uint64_t)ARCH_DIRECT_MAP_GIB << 30) - 8, 8);
+        put(T_XSDT + 84, ~0ULL, 8);
     }
     if (b == B_XSDT_TAIL)
-        put(T_XSDT + 68, 0xffffffff, 4);
+        put(T_XSDT + 76, 0xffffffff, 4);
     seal(T_XSDT, xsdt_len, T_XSDT + 9);
 
     put_sig(T_RSDP, "RSD PTR ", 8);
@@ -975,6 +997,7 @@ static bool acpi_case_ok(enum acpi_break b)
     struct acpi_watchdog w;
     struct acpi_console con;
     unsigned found = 0;
+    uint32_t cl0, cl1;
     bool smc = true, ok;
 
     build_acpi(b);
@@ -1000,6 +1023,9 @@ static bool acpi_case_ok(enum acpi_break b)
         return acpi_timer(&t) && !acpi_watchdog(0, &w);
     case B_LEN_SHORT:
         return !acpi_console(&con) && found == 2;
+    case B_PPTT_PARENT:
+    case B_PPTT_MIDDLE:
+        return found == 2 && acpi_cluster(0, &cl0) && !acpi_cluster(1, &cl1);
     default:
         break;
     }
@@ -1010,7 +1036,8 @@ static bool acpi_case_ok(enum acpi_break b)
            acpi_watchdog(0, &w) && w.refresh == 0x2a450000 && w.gsiv == 59 &&
            !acpi_watchdog(1, &w) &&
            acpi_console(&con) && con.kind == ACPI_UART_PL011 && con.base == 0x9000000 &&
-           acpi_psci(&smc) && !smc;
+           acpi_psci(&smc) && !smc &&
+           acpi_cluster(0, &cl0) && acpi_cluster(1, &cl1) && cl0 == cl1 && !acpi_cluster(2, &cl1);
 }
 
 /*
@@ -1079,7 +1106,9 @@ static void ponger(void *)
     }
 }
 
-static void pingpong(const char *what, unsigned ping_cpu, unsigned pong_cpu)
+/* PINGS round trips between this task on 'ping_cpu' and a task on
+ * 'pong_cpu': the mean round trip, in ns and cycles. */
+static void pingpong_run(unsigned ping_cpu, unsigned pong_cpu, uint64_t *ns, uint64_t *cyc)
 {
     uint64_t t0, c0, ticks, cycles;
 
@@ -1097,9 +1126,17 @@ static void pingpong(const char *what, unsigned ping_cpu, unsigned pong_cpu)
     cycles = arch_read_cycles() - c0;
     ticks = time_now() - t0;
     task_set_affinity(1);
+    *ns = time_to_us(ticks * 1000) / PINGS;
+    *cyc = cycles / PINGS;
+}
+
+static void pingpong(const char *what, unsigned ping_cpu, unsigned pong_cpu)
+{
+    uint64_t ns, cycles;
+
+    pingpong_run(ping_cpu, pong_cpu, &ns, &cycles);
     kprintf("V1.3 pingpong ok: %s: round trip %llu ns, %llu cycles\n", what,
-            (unsigned long long)(time_to_us(ticks * 1000) / PINGS),
-            (unsigned long long)(cycles / PINGS));
+            (unsigned long long)ns, (unsigned long long)cycles);
 }
 
 static void test_pingpong(void)
@@ -1111,6 +1148,135 @@ static void test_pingpong(void)
         fail("V1.3 pingpong", "fewer switches than round trips");
     if (ncpus > 2)
         pingpong("across CPUs (Signal + IPI + wake)", 1, 2);
+}
+
+/* --- V3 step 4: core classes --- */
+
+static void print_class(const struct cpu_class *k)
+{
+    if (k->name)
+        kprintf("%s", k->name);
+    else
+        kprintf("type %llx", (unsigned long long)k->type);
+}
+
+/* Every online CPU is in a class, the fastest class is 1024, and no
+ * PPTT cluster mixes core types. */
+void selftest_classes(void)
+{
+    unsigned in_classes = 0;
+    bool top = false;
+
+    for (unsigned i = 0; i < ncpus; i++)
+        if (atomic_load(&cpus[i].online) && cpus[i].cls == CPU_NO_CLASS)
+            fail("V3.4 classes", "an online CPU has no core class");
+    for (unsigned k = 0; cpu_class(k); k++) {
+        in_classes += cpu_class(k)->ncpus;
+        top |= cpu_class(k)->capacity == 1024;
+    }
+    if (in_classes != cpus_online())
+        fail("V3.4 classes", "the classes don't add up to the CPUs online");
+    if (!top)
+        fail("V3.4 classes", "no class has capacity 1024");
+    if (cpu_clusters_mixed())
+        fail("V3.4 classes", "a PPTT cluster holds more than one core type");
+    kprintf("V3.4 classes ok: %u CPU%s in %u class%s:", in_classes, in_classes == 1 ? "" : "s",
+            cpu_nclasses(), cpu_nclasses() == 1 ? "" : "es");
+    for (unsigned k = 0; cpu_class(k); k++) {
+        kprintf("%s ", k ? "," : "");
+        print_class(cpu_class(k));
+        kprintf(" x%u at %llu", cpu_class(k)->ncpus, (unsigned long long)cpu_class(k)->capacity);
+    }
+    kprintf("\n");
+}
+
+/*
+ * Placement, with CPUs 1 and 2 made a big and a little core for the
+ * test (capacities 1024 and 256), so it runs on any machine with three
+ * CPUs. Three spinners that may run on either: the first goes to the
+ * big core, idle; the second to the little one, idle, rather than share
+ * the big one; the third back to the big one, where half of 1024 beats
+ * half of 256.
+ */
+static struct task *spin_launch(uint64_t affinity, unsigned slot)
+{
+    struct task *t = task_create("placed", 5, affinity, spinner, (void *)(uintptr_t)slot);
+
+    if (!t)
+        fail("V3.4 placement", "task_create failed");
+    while (atomic_load(&spin_counts[slot]) == 0)
+        task_sleep_until(time_now() + time_us(1000));
+    return t;
+}
+
+static void test_placement(void)
+{
+    uint64_t saved[2] = { cpus[1].capacity, cpus[2].capacity }, both;
+    struct cpu *big = &cpus[1], *little = &cpus[2];
+    struct task *t;
+    bool first, second, third;
+
+    if (ncpus < 3 || cpus_online() < 3) {
+        kprintf("V3.4 placement skipped: fewer than three CPUs\n");
+        return;
+    }
+    both = cpu_mask(1) | cpu_mask(2);
+    big->capacity = 1024;
+    little->capacity = 256;
+    atomic_store(&spin_stop, false);
+    atomic_store(&spin_finished, 0);
+    atomic_store(&spin_counts[0], 0);
+    atomic_store(&spin_counts[1], 0);
+    t = spin_launch(both, 0);
+    first = t->cpu == big;
+    t = spin_launch(both, 1);
+    second = t->cpu == little;
+    t = task_create("placed", 5, both, spinner, (void *)0);
+    if (!t)
+        fail("V3.4 placement", "task_create failed");
+    third = t->cpu == big;
+    stop_spinners(3);
+    big->capacity = saved[0];
+    little->capacity = saved[1];
+    if (!first)
+        fail("V3.4 placement", "the first task didn't go to the idle big core");
+    if (!second)
+        fail("V3.4 placement", "the second task shared the big core while a little one idled");
+    if (!third)
+        fail("V3.4 placement", "the third task went to the little core, not the faster share");
+    kprintf("V3.4 placement ok: an idle big core first, then an idle little one, then the "
+            "most capacity per task\n");
+}
+
+/* Ping-pong on one CPU, and across two, of each class. */
+static void test_class_costs(void)
+{
+    for (unsigned k = 0; cpu_class(k); k++) {
+        const struct cpu_class *cl = cpu_class(k);
+        unsigned a = ~0u, b = ~0u;
+        uint64_t ns, cyc;
+
+        for (unsigned i = 0; i < ncpus; i++) {
+            if (cpus[i].cls != k || !atomic_load(&cpus[i].online))
+                continue;
+            if (a == ~0u)
+                a = i;
+            else if (b == ~0u)
+                b = i;
+        }
+        pingpong_run(a, a, &ns, &cyc);
+        kprintf("V3.4 costs: ");
+        print_class(cl);
+        kprintf(" (capacity %llu): Signal + Wait round trip %llu ns (%llu cycles) on one CPU",
+                (unsigned long long)cl->capacity, (unsigned long long)ns,
+                (unsigned long long)cyc);
+        if (b != ~0u) {
+            pingpong_run(a, b, &ns, &cyc);
+            kprintf(", %llu ns (%llu cycles) across two", (unsigned long long)ns,
+                    (unsigned long long)cyc);
+        }
+        kprintf("\n");
+    }
 }
 
 void selftest_tasks(void *)
@@ -1146,6 +1312,10 @@ void selftest_tasks(void *)
     kprintf("V3.2 done\n");
     selftest_board();
     kprintf("V3.3 done\n");
+    selftest_classes();
+    test_placement();
+    test_class_costs();
+    kprintf("V3.4 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

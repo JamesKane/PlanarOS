@@ -83,6 +83,32 @@ void arch_cpu_init(void)
     isb();
 }
 
+uint64_t arch_cpu_type(void)
+{
+    return sysreg_read(midr_el1) & 0xff00fff0;      /* implementer, part number */
+}
+
+const char *arch_cpu_type_name(uint64_t type)
+{
+    static const struct { uint16_t part; const char *name; } arm[] = {
+        { 0xd03, "Cortex-A53" },  { 0xd04, "Cortex-A35" },  { 0xd05, "Cortex-A55" },
+        { 0xd07, "Cortex-A57" },  { 0xd08, "Cortex-A72" },  { 0xd09, "Cortex-A73" },
+        { 0xd0a, "Cortex-A75" },  { 0xd0b, "Cortex-A76" },  { 0xd0c, "Neoverse-N1" },
+        { 0xd0d, "Cortex-A77" },  { 0xd40, "Neoverse-V1" }, { 0xd41, "Cortex-A78" },
+        { 0xd44, "Cortex-X1" },   { 0xd46, "Cortex-A510" }, { 0xd47, "Cortex-A710" },
+        { 0xd48, "Cortex-X2" },   { 0xd49, "Neoverse-N2" }, { 0xd4d, "Cortex-A715" },
+        { 0xd4e, "Cortex-X3" },   { 0xd80, "Cortex-A520" }, { 0xd81, "Cortex-A720" },
+        { 0xd82, "Cortex-X4" },
+    };
+
+    if (type >> 24 != 0x41)                         /* Arm Ltd */
+        return nullptr;
+    for (size_t i = 0; i < sizeof arm / sizeof arm[0]; i++)
+        if (arm[i].part == ((type >> 4) & 0xfff))
+            return arm[i].name;
+    return nullptr;
+}
+
 void arch_set_this_cpu(struct cpu *c)
 {
     sysreg_write(tpidr_el1, (uintptr_t)c);

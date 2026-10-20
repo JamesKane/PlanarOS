@@ -36,6 +36,11 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 | 2–5 | `0x000`–`0x300` | A520 |
 | 6–11 | `0x400`–`0x900` | A720 |
 
+**Clusters and speeds** (V3 step 4):
+- The PPTT has one package and five clusters, by UID `0,1 2,3,4,5 6,7 8,9 10,11`. No caches are described. The package node carries processor ID 0 with the "ID valid" flag, the same ID as UID 0's leaf.
+- SSDT2 gives each processor a static `_CPC` package. Its highest performance is 8192 for UIDs 0–1, 7876 for 10–11, 7246 for 6–7, 6931 for 8–9, and 2232 for the A520s (2–5). FreeBSD attaches one CPPC frequency driver per cluster (on CPUs 0, 2, 6, 8 and 10).
+- At boot the clocks are below those levels: the A720 at `a00` runs at 1.9 GHz and the A520s at 1.8 GHz, by the cycle counter. Measured, an A520 has 0.61 of the fastest A720s' speed, and the A720 grades span 18% (docs/v3-plan.md, step 4).
+
 **Timers.**
 - The generic timer runs at 1 GHz. Its GSIVs are 29 (secure), 30 (non-secure), 27 (virtual) and 26 (EL2).
 - There's no memory-mapped timer.

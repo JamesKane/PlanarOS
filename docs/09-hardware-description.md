@@ -91,6 +91,7 @@ Two small parsers fill one `struct bootinfo`. The kernel uses nothing else.
   - Each consumer asks the chosen parser directly. `acpi.c` is 490 lines.
   - Every boot prints the facts it took as `hw:` lines, and `make compare-hw` checks that QEMU gives the same lines from both sources.
   - The early quirk table lives in `acpi.c`: the CIX's DBG2 console and RSVL ranges.
+- **Built (V3 step 4):** the PPTT's clusters, read per CPU (`acpi_cluster`). Speeds aren't read from the firmware: the kernel measures them (`kernel/cpuclass.c`).
 - **Built (V3 step 3):** on the CIX P1, every fact the kernel uses comes from ACPI and the quirk entry. The GTDT's watchdog is driven (`drivers/sbsa_wdt.c`).
 - The raw blobs are then handed to user space as a read-only Area.
 
@@ -159,7 +160,7 @@ struct hw_node {
 
 ## 9.6 Open items for the session
 
-- **The CIX tables are dumped** ([boards/cix-p1](boards/cix-p1/README.md)). Still to do: count how many devices actually need method execution, and whether `_CPC` and `_LPI` are static packages.
+- **The CIX tables are dumped** ([boards/cix-p1](boards/cix-p1/README.md)). Still to do: count how many devices actually need method execution, and whether `_LPI` is a static package. **`_CPC` is static** (V3 step 4): in SSDT2 each processor device has a `Name(_CPC, Package)` whose performance levels are integer constants, so acpid can read it once without running a method.
 - **K3:** revive the board, then dump RHCT and MADT and confirm it uses AIA.
 - **SCI and ACPI events.** Hardware-reduced ACPI uses GED or GPIO-signalled events. Does any target need them in v1? (Power button, lid.)
 - **Who owns PCIe enumeration:** the hwdb (ECAM from MCFG, or DT `ranges`) or a separate `pci` server. VectraOS-Odin ran devmgr's PCI scan before ACPI. *Proposed in [§11.6](11-driver-model.md#116-binding):* a `pci` server that is an hwdb source, as `acpid` is, publishing a child node per function.

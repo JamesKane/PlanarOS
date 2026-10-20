@@ -17,6 +17,7 @@
 #include "spinlock.h"
 
 constexpr unsigned MAX_CPUS = 16;
+constexpr uint32_t CPU_NO_CLUSTER = ~0u;
 
 struct cpu_call;
 struct task;
@@ -60,7 +61,11 @@ struct cpu {
     atomic_bool quantum_check;  /* a peer of current may be waiting */
     struct ktimer quantum;
     bool quantum_on;
-    uint64_t capacity;          /* relative speed: capacity-dmips-mhz, or 1024 */
+    uint64_t type;              /* core type: arch_cpu_type(), read on the CPU itself */
+    uint32_t cluster;           /* the PPTT's cluster ID; CPU_NO_CLUSTER if none says */
+    unsigned cls;               /* its core class (kernel/cpuclass.c) */
+    uint64_t work_ticks;        /* the class workload's best time here, in timer ticks */
+    uint64_t capacity;          /* its class's speed; the fastest class is 1024 */
     const void *loaded_domain;  /* arch: the domain this CPU has loaded */
     struct arch_cpu arch;       /* arch: lazily switched register state */
 };

@@ -16,6 +16,7 @@
 #include "kstring.h"
 
 constexpr unsigned MAX_TABLES = 32;
+constexpr unsigned ACPI_REPORT_CLUSTERS = 16;
 constexpr uint32_t HEADER = 36;              /* every table's header */
 constexpr uint32_t MAX_LENGTH = 16u << 20;   /* larger than any static table */
 
@@ -422,6 +423,69 @@ bool acpi_pci(unsigned index, struct acpi_pci *p)
     return true;
 }
 
+/* --- The PPTT: which cluster each CPU is in. --- */
+
+constexpr uint32_t PPTT_ENTRIES = 36;
+constexpr uint8_t PPTT_PROCESSOR = 0;
+constexpr uint32_t PPTT_PROC_LEN = 20;
+constexpr uint32_t PPTT_ID_VALID = 1u << 1, PPTT_THREAD = 1u << 2, PPTT_LEAF = 1u << 3;
+
+/* Whether a processor node starts at 'off', whole, inside the table. */
+static bool pptt_node(const void *t, uint32_t len, uint32_t off)
+{
+    return off >= PPTT_ENTRIES && off <= len - PPTT_PROC_LEN && rd8(t, off) == PPTT_PROCESSOR &&
+           rd8(t, off + 1) >= PPTT_PROC_LEN && rd8(t, off + 1) <= len - off;
+}
+
+/* Whether any processor node names 'off' as its parent. */
+static bool pptt_has_child(const void *t, uint32_t len, uint32_t off)
+{
+    for (uint32_t at = PPTT_ENTRIES, n; at + 2 <= len; at += n) {
+        n = rd8(t, at + 1);
+        if (n < 2 || n > len - at)
+            return false;
+        if (pptt_node(t, len, at) && rd32(t, at + 8) == off)
+            return true;
+    }
+    return false;
+}
+
+/*
+ * The leaf for ACPI processor 'uid', and its parent: a core's parent is
+ * its cluster, a thread's is a core, whose parent is the cluster. A
+ * leaf is flagged as one (ACPI 6.3) or is nobody's parent; a package or
+ * cluster may carry an ID of its own that matches a CPU's UID, as the
+ * CIX's package does. Every parent must be a whole processor node, or
+ * the CPU has no cluster.
+ */
+bool acpi_cluster(uint32_t uid, uint32_t *cluster)
+{
+    uint32_t len, flags, up;
+    const void *t = acpi_table("PPTT", &len);
+
+    if (!t)
+        return false;
+    for (uint32_t at = PPTT_ENTRIES, n; at + 2 <= len; at += n) {
+        n = rd8(t, at + 1);
+        if (n < 2 || n > len - at)
+            return false;
+        if (!pptt_node(t, len, at))
+            continue;
+        flags = rd32(t, at + 4);
+        if (!(flags & PPTT_ID_VALID) || rd32(t, at + 12) != uid ||
+            (!(flags & PPTT_LEAF) && pptt_has_child(t, len, at)))
+            continue;
+        up = rd32(t, at + 8);
+        if (flags & PPTT_THREAD)
+            up = pptt_node(t, len, up) && up != at ? rd32(t, up + 8) : 0;
+        if (!pptt_node(t, len, up) || up == at)
+            return false;
+        *cluster = up;
+        return true;
+    }
+    return false;
+}
+
 /* --- The report. --- */
 
 void acpi_report(void)
@@ -475,6 +539,33 @@ void acpi_report(void)
     for (unsigned i = 0; acpi_cpu(i, &c); i++)
         kprintf(" %u:%llx%s", c.uid, (unsigned long long)c.mpidr, c.enabled ? "" : "(off)");
     kprintf("\n");
+    if (acpi_table("PPTT", nullptr)) {
+        /* Each cluster's UIDs, in the MADT's order of its first CPU. */
+        uint32_t seen[ACPI_REPORT_CLUSTERS], cl, cl2;
+        unsigned nseen = 0;
+
+        kprintf("planar: ACPI PPTT clusters, by UID:");
+        for (unsigned i = 0; acpi_cpu(i, &c); i++) {
+            bool dup = false;
+
+            if (!acpi_cluster(c.uid, &cl)) {
+                kprintf(" %u(none)", c.uid);
+                continue;
+            }
+            for (unsigned k = 0; k < nseen; k++)
+                dup |= seen[k] == cl;
+            if (dup || nseen == ACPI_REPORT_CLUSTERS)
+                continue;
+            seen[nseen++] = cl;
+            kprintf(" ");
+            for (unsigned j = 0, first = 1; acpi_cpu(j, &c); j++)
+                if (acpi_cluster(c.uid, &cl2) && cl2 == cl) {
+                    kprintf("%s%u", first ? "" : ",", c.uid);
+                    first = 0;
+                }
+        }
+        kprintf("\n");
+    }
     if (acpi_timer(&t))
         kprintf("planar: ACPI timer: EL1 physical %u, virtual %u, EL2 %u\n", t.el1_phys,
                 t.el1_virt, t.el2_phys);

@@ -34,11 +34,11 @@ static bool cpu_node_ok(int32_t node)
 
 /* One more CPU, 'hwid', from node 'node' (-1 from ACPI). False if it's
  * the boot CPU, which is cpus[0] already. */
-static bool add_cpu(uint64_t boot_hwid, uint64_t hwid, int32_t node, uint64_t capacity)
+static bool add_cpu(uint64_t boot_hwid, uint64_t hwid, int32_t node, uint32_t cluster)
 {
     if (hwid == boot_hwid) {
         cpus[0].node = node;
-        cpus[0].capacity = capacity;
+        cpus[0].cluster = cluster;
         return false;
     }
     if (ncpus == MAX_CPUS) {
@@ -47,23 +47,27 @@ static bool add_cpu(uint64_t boot_hwid, uint64_t hwid, int32_t node, uint64_t ca
         return true;
     }
     cpus[ncpus] = (struct cpu){
-        .index = ncpus, .hwid = hwid, .node = node, .capacity = capacity,
+        .index = ncpus, .hwid = hwid, .node = node, .cluster = cluster, .capacity = 1024,
     };
     ncpus++;
     return true;
 }
 
 /* The MADT's enabled CPUs; online-capable ones aren't started (no
- * hot-plug). Capacities come with the PPTT (V3 step 4). */
+ * hot-plug). Clusters come from the PPTT. */
 static bool acpi_cpus(uint64_t boot_hwid)
 {
     struct acpi_cpu c;
     bool boot_found = false;
 
     for (unsigned i = 0; acpi_cpu(i, &c); i++) {
+        uint32_t cluster;
+
         if (!c.enabled)
             continue;
-        if (!add_cpu(boot_hwid, c.mpidr & 0xffffff, -1, 1024))
+        if (!acpi_cluster(c.uid, &cluster))
+            cluster = CPU_NO_CLUSTER;
+        if (!add_cpu(boot_hwid, c.mpidr & 0xffffff, -1, cluster))
             boot_found = true;
     }
     return boot_found;
@@ -78,6 +82,8 @@ bool cpu_enumerate(uint64_t boot_hwid)
     cpus[0].index = 0;
     cpus[0].hwid = boot_hwid;
     cpus[0].node = -1;
+    cpus[0].cluster = CPU_NO_CLUSTER;
+    cpus[0].type = arch_cpu_type();
     cpus[0].capacity = 1024;
     atomic_store(&cpus[0].online, true);
     ncpus = 1;
@@ -89,7 +95,7 @@ bool cpu_enumerate(uint64_t boot_hwid)
         if (!cpu_node_ok(n) || !fdt_reg(n, 0, &hwid, &size))
             continue;
         hwid &= 0xffffff;               /* MPIDR: Aff2.Aff1.Aff0 */
-        if (!add_cpu(boot_hwid, hwid, n, fdt_getprop_u32(n, "capacity-dmips-mhz", 1024)))
+        if (!add_cpu(boot_hwid, hwid, n, CPU_NO_CLUSTER))
             boot_found = true;
     }
     return boot_found;
@@ -136,6 +142,7 @@ unsigned smp_start(void)
     /* Each step is counted, for smp_start to say where one stopped. */
     atomic_store(&c->boot_step, 1);
     arch_cpu_init();
+    c->type = arch_cpu_type();
     atomic_store(&c->boot_step, 2);
     sched_init_cpu();
     atomic_store(&c->boot_step, 3);

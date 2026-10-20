@@ -149,15 +149,19 @@ static void quantum_update(struct cpu *c)
  */
 static void nudge_idle(struct cpu *c, struct task *t)
 {
+    struct cpu *best = nullptr;
+
+    /* The fastest idle one: big cores first. */
     for (unsigned i = 0; i < ncpus; i++) {
         struct cpu *o = &cpus[i];
 
         if (o != c && (t->affinity & bit(o)) && atomic_load(&o->online) &&
-            o->current == o->idle && o->nr_ready == 0) {
-            arch_send_ipi(o);
-            return;
-        }
+            o->current == o->idle && o->nr_ready == 0 &&
+            (!best || o->capacity > best->capacity))
+            best = o;
     }
+    if (best)
+        arch_send_ipi(best);
 }
 
 static bool wake_check_how(struct cpu *c, struct task *t, bool nudge)
@@ -223,7 +227,28 @@ void sched_kick(struct cpu *c)
 
 /* --- Switching. --- */
 
-/* The least-loaded online CPU in 'affinity', preferring 'prefer'. */
+static unsigned load_of(const struct cpu *c)
+{
+    return c->nr_ready + (c->current != c->idle);
+}
+
+/*
+ * Whether 'a' is a better place than 'b' for one more task (V3 step 4):
+ * an idle CPU beats a busy one, and a faster idle one a slower, so big
+ * cores fill first and the work spills onto little ones; among busy
+ * ones, the one that would give it the most capacity per task. With
+ * equal capacities, as on a symmetric machine, that's the least loaded.
+ */
+static bool better(const struct cpu *a, const struct cpu *b)
+{
+    unsigned la = load_of(a), lb = load_of(b);
+
+    if ((la == 0) != (lb == 0))
+        return la == 0;
+    return a->capacity * (lb + 1) > b->capacity * (la + 1);
+}
+
+/* The best online CPU in 'affinity'; 'prefer' wins ties. */
 static struct cpu *place(uint64_t affinity, struct cpu *prefer)
 {
     struct cpu *best = nullptr;
@@ -232,13 +257,10 @@ static struct cpu *place(uint64_t affinity, struct cpu *prefer)
         best = prefer;
     for (unsigned i = 0; i < ncpus; i++) {
         struct cpu *c = &cpus[i];
-        unsigned load, best_load;
 
         if (!(affinity & bit(c)) || !atomic_load(&c->online))
             continue;
-        load = c->nr_ready + (c->current != c->idle);
-        best_load = best ? best->nr_ready + (best->current != best->idle) : ~0u;
-        if (load < best_load)
+        if (!best || better(c, best))
             best = c;
     }
     return best;

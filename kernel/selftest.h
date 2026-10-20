@@ -54,5 +54,6 @@ void selftest_boot(void);
  * against good and broken tables. Called from selftest_tasks. */
 void selftest_acpi(void);
 void selftest_board(void);
+void selftest_classes(void);
 
 #endif /* KERNEL_SELFTEST_H */

@@ -90,6 +90,19 @@ bool arch_cpu_start(struct cpu *c)
     return r.error == 0;
 }
 
+/* The calling hart's marchid; 0 (not implemented) if the call fails. */
+uint64_t arch_cpu_type(void)
+{
+    struct sbiret r = sbi_call(SBI_EXT_BASE, SBI_BASE_GET_MARCHID, 0, 0, 0);
+
+    return r.error ? 0 : r.value;
+}
+
+const char *arch_cpu_type_name(uint64_t)
+{
+    return nullptr;
+}
+
 void arch_send_ipi(struct cpu *c)
 {
     /* The call record must be visible before the interrupt lands. */

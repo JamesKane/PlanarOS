@@ -15,6 +15,7 @@ constexpr uint32_t SBI_EXT_SRST = 0x53525354;
 
 constexpr uint32_t SBI_BASE_GET_SPEC_VERSION = 0;
 constexpr uint32_t SBI_BASE_PROBE_EXTENSION  = 3;
+constexpr uint32_t SBI_BASE_GET_MARCHID      = 5;
 constexpr uint32_t SBI_TIME_SET_TIMER        = 0;
 constexpr uint32_t SBI_IPI_SEND_IPI          = 0;
 constexpr uint32_t SBI_HSM_HART_START        = 0;

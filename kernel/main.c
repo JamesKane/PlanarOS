@@ -15,6 +15,7 @@
 #include "bootinfo.h"
 #include "console.h"
 #include "cpu.h"
+#include "cpuclass.h"
 #include "acpi.h"
 #include "fdt.h"
 #include "hw.h"
@@ -94,6 +95,8 @@
         kprintf("planar: no memory to start the other %u CPUs\n", ncpus - 1);
         ncpus = 1;
     }
+    cpu_classify();
+    cpu_class_report();
     plat_late_init();
     selftest_smp();
     selftest_ipi();
@@ -124,6 +127,9 @@
         kprintf("V3.2 done\n");
         selftest_board();
         kprintf("V3.3 done\n");
+        selftest_classes();
+        kprintf("V3.4 placement skipped: no tasks\n");
+        kprintf("V3.4 done\n");
         arch_halt();
     }
     sched_idle();

@@ -87,6 +87,15 @@ void arch_send_ipi(struct cpu *c);
 uint32_t arch_ipi_irq(void);
 
 /*
+ * This CPU's core type, as its ID registers give it: MIDR_EL1's
+ * implementer and part number, or RISC-V's marchid. CPUs of one type are
+ * one core class (kernel/cpuclass.c). arch_cpu_type_name() names a type,
+ * or gives nullptr for one it doesn't know.
+ */
+uint64_t arch_cpu_type(void);
+const char *arch_cpu_type_name(uint64_t type);
+
+/*
  * Kernel tasks (V1 step 3). arch_context_init() makes 'ctx' start in
  * task_start() on the stack that ends at 'stack_top' when it's first
  * switched to. arch_switch() saves the running task's state in 'from'

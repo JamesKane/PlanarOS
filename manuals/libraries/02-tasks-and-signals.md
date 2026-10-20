@@ -14,7 +14,7 @@ Tasks are how a Planar program does several things at once. Signals are how a ta
 - When the last task of a process ends, the process ends. `ExitProcess(code)` ends every task at once.
 - `FindTask(nullptr)` returns the calling task's handle.
 
-A task runs at its process's priority. The scheduler runs tasks on any CPU, with per-CPU run queues and a 4 ms quantum. There is no call yet to change a task's priority or to pin it to a CPU.
+A task runs at its process's priority. The scheduler runs tasks on any CPU, with per-CPU run queues and a 4 ms quantum. A new task goes to an idle CPU, the fastest first: on a board with big and little cores, the big ones fill first and the work spills onto the little ones. When no CPU is idle, it goes where it gets the most capacity per task. A task that waits and wakes stays on its CPU, unless an idle one takes it. There is no call yet to change a task's priority or to pin it to a CPU.
 
 ### Signals
 

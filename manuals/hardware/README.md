@@ -16,4 +16,5 @@
 | 6 | Orange Pi RV2 (SpacemiT K1): serial boot, watchdog, the board's quirks | `plat/ky-x1/`, `tools/serial-boot.py` |
 | 7 | CIX P1 (UEFI, ACPI, `BootNext` runs, the EL2 controls, the SBSA watchdog, GIC-700 erratum 2941627); RK3588, SC8280XP | `plat/uefi/`, `tools/efi-boot.py`, `docs/boards/cix-p1/`; **planned**: RK3588 V6, SC8280XP V7 |
 | 7a | Firmware descriptions: the device tree and ACPI, `hw=`, the `hw:` facts, board quirks | `kernel/hw.h`, `kernel/acpi.h`, `kernel/fdt.h`, `docs/boards/` |
+| 7b | Core classes: core type from MIDR or `marchid`, clusters from the PPTT, capacity measured at boot, and placement by capacity | `kernel/cpuclass.h`, `kernel/sched.c` |
 | 8 | The program image format (`PLNR` header) | `arch/<isa>/user/crt0.S`, `kernel/process.c` |

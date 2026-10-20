@@ -124,6 +124,16 @@ void arch_cpu_init(void)
 {
 }
 
+uint64_t arch_cpu_type(void)
+{
+    return 0;
+}
+
+const char *arch_cpu_type_name(uint64_t)
+{
+    return "host";
+}
+
 void arch_send_ipi(struct cpu *)
 {
 }

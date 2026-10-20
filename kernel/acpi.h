@@ -55,6 +55,11 @@ struct acpi_cpu {
 };
 bool acpi_cpu(unsigned index, struct acpi_cpu *c);
 
+/* ACPI processor 'uid''s cluster, from the PPTT: an opaque ID that its
+ * cluster's CPUs share (the node's offset). False if there's no PPTT, or
+ * it doesn't place the CPU. */
+bool acpi_cluster(uint32_t uid, uint32_t *cluster);
+
 /* The generic timer's interrupts, from the GTDT: 0 where none is given. */
 struct acpi_timer {
     uint32_t el1_phys, el1_virt, el2_phys;
