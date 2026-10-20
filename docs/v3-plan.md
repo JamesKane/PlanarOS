@@ -82,7 +82,15 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 
 Lazy SVE state is later work.
 
-**The rig.** See decision 1 below.
+**The rig (decided 2026-10-20).** The RV2's USB-serial cable (3.3 V) moves to the 10-pin debug header:
+- the adapter's RXD to pin 1 (UART2_TX);
+- its TXD to pin 3 (UART2_RX);
+- GND to pin 5;
+- 5 V is left unconnected.
+
+UART2 carries the firmware's log as well as ours, so the first boot shows UEFI's baud rate (expected 115200). Images reach the board as in decision 1 (a).
+
+While the cable is on the CIX, the RV2 has no console and no serial boot. Step 6's RV2 runs need it moved back, or a second adapter.
 
 ## 4. Big and little
 
@@ -134,6 +142,6 @@ Lazy SVE state is later work.
    - (c) USB stick swaps.
 
    Any of them wants a 3.3 V USB-serial adapter on UART2 for the console, and a way to cut power on a hang: a smart plug, or the watchdog left armed by us.
-   *Proposed:* (a) plus serial, with the watchdog armed during tests, as on the RV2.
+   *Proposed:* (a) plus serial, with the watchdog armed during tests, as on the RV2. **Serial decided:** the RV2's cable moves to UART2 (step 3).
 2. **One UEFI image, or a CIX platform.** *Proposed:* one `uefi-a64` image, with board differences as quirk data keyed by ACPI IDs. This is the point of ACPI. The RK3588 will still use `booti` and the FDT.
 3. **What VQ3's decision does to the losing layout:** keep it behind `layout=` as an option, or delete it. *Proposed:* delete it, after V3, in its own commit, so the decision shows in the history.
