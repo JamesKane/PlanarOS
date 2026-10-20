@@ -115,6 +115,7 @@ struct hw_node {
 - References are first class. `power-domains = <&scmi 8>` in a DT and `power-domains = <\_SB.SCMI.DVFS 8>` in CIX `_DSD` become the same `hw_ref`.
 - The hwdb hands out leases. Each resource in the graph is what `GrantLease` (§2.2) gives to the driver that binds the node.
 - **Built (V4 step 2), on the host:** `servers/hwdb/hwdb.h` has `struct hw_node` much as above, with the state and the consumers added. `props` aren't copied: a node keeps where its properties are in the blob. Static ACPI nodes take the device tree's compatible (`arm,smmu-v3`), since the tables carry no `_HID`. Quirks are C tables (D5 (a)), with four actions so far: disable, the firmware's, the console, and pin or exclude a driver. Leases are whole pages, and the report lists the pages devices share: QEMU's virtio-mmio slots, and the K1's system controllers ([v4-plan](v4-plan.md) step 2).
+- **Built (V4 step 3):** leases come from pages (`servers/hwdb/lease.c`). Devices sharing a page are one lease, served by one process of their driver, as QEMU's virtio slots are. A page shared across drivers, or with a device the kernel or the firmware drives, can't be leased: on the RV2 that's the K1's power domains, which share the MPMU's pages with the kernel's watchdog. `power` will need a quirk or the kernel's watchdog moved (step 7).
 
 ### Layer 2: sources and quirks (D3, D4)
 

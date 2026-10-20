@@ -123,11 +123,15 @@ Raised in §2.4.
 
 Should the hwdb restart a driver that dies, MINIX-style, from V4? *Leaning:* yes, with backoff and a cap. The node keeps its unit, and class libraries reconnect and retry what is safe to retry.
 
+*Built (V4 step 3):* yes. The first restart comes after 10 ms, each next after twice as long, and hwdb gives up at 5 failures in 10 s (`servers/hwdb/server.h`).
+
 Raised in §11.10.
 
 **VQ24 Devices with no stop method.**
 
 When a driver dies, something must stop its device before its DMA Areas are reused. What happens for a device with no reset line, no power domain of its own, no bus-master bit and no IOMMU? *Leaning:* its Areas stay quarantined for the rest of the boot, and the hwdb logs it. Each board's device list should be checked for such devices before V4.
+
+*Built (V4 step 3), as leaned:* such a driver is restarted only if it held no DMA. Otherwise its lease stays stopping with the quarantine, hwdb logs it, and its devices fail.
 
 Raised in §11.4.
 

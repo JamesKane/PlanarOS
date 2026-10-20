@@ -65,7 +65,8 @@ int64_t QueryArea(const void *address, struct AreaInfo *info);
  * process is dead. PROCF_HELD creates it without starting it, for
  * StartProcess once the caller has granted it what it needs (a lease).
  * A process never outlives its handle: CloseHandle kills it if it's
- * still running, and so does its owner's death.
+ * still running, and so does its owner's death. QueryProcess(0, ...)
+ * asks about the caller's own process (its state is running).
  */
 #define PROCF_HELD      (1u << 0)
 
@@ -92,6 +93,8 @@ struct ProcessInfo {
     uint32_t pi_Fault;
     uint64_t pi_FaultAddress;       /* the address it touched */
     uint64_t pi_FaultPC;
+    uint32_t pi_Handles;            /* the handles it holds */
+    uint32_t pi_Pad;
 };
 
 int64_t CreateProcess(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);

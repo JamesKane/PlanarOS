@@ -6,7 +6,7 @@
  * own state, so a chain can be followed to its end: a supplier with no
  * driver, a disabled one, a phandle that names nothing, or a cycle.
  * With detail, each device's resources and references follow. Then the
- * pages devices share that a lease would need alone, and a count.
+ * leases that serve several devices (lease.c), and a count.
  */
 #include "hwdb.h"
 
@@ -21,6 +21,8 @@ static const char *state_name(enum hw_state s)
     case HW_S_WAITING:   return "waiting";
     case HW_S_READY:     return "ready";
     case HW_S_BOUND:     return "bound";
+    case HW_S_DECLINED:  return "declined";
+    case HW_S_FAILED:    return "failed";
     default:             return "?";
     }
 }
@@ -145,90 +147,38 @@ static void resources(const struct hw_graph *g, const struct hw_node *n, hw_prin
     }
 }
 
-/*
- * Leases are whole pages, and no page is in two (kernel/lease.c). Devices
- * whose registers share a page, one of them for a driver that would be
- * granted it, can't each have a lease: one line per run of such pages.
- */
-struct span {
-    uint64_t first, last;           /* pages */
-    hw_id node;
-};
-
-static bool leased(const struct hw_graph *g, const struct hw_node *n)
+/* The leases serving more than one device: the pages they shared. */
+static void leases(const struct hw_graph *g, hw_print *out, void *ctx)
 {
-    return n->driver != HW_NODRV && g->drivers[n->driver].kind == HW_DRV_PROCESS &&
-           (n->state == HW_S_WAITING || n->state == HW_S_READY || n->state == HW_S_BOUND);
-}
+    for (uint32_t i = 0; i < g->nleases; i++) {
+        const struct hw_lease *ls = &g->leases[i];
+        struct hw_line l = { 0 };
 
-static void shared_pages(const struct hw_graph *g, hw_print *out, void *ctx)
-{
-    struct hw_arena *a = g->arena;
-    size_t mark = a->used;
-    unsigned n = 0, cap = 0;
-    struct span *s;
-
-    for (hw_id i = 1; i < g->count; i++)
-        if (g->nodes[i].nkeys && g->nodes[i].enabled)
-            cap += g->nodes[i].nres;
-    if (!(s = hw_alloc(a, (cap ? cap : 1) * sizeof *s)))
-        return;
-    for (hw_id i = 1; i < g->count; i++) {
-        const struct hw_node *d = &g->nodes[i];
-
-        if (!d->nkeys || !d->enabled)
+        if (ls->nnodes < 2)
             continue;
-        for (unsigned k = 0; k < d->nres; k++) {
-            const struct hw_res *r = &d->res[k];
-            unsigned j = n;
-
-            if (r->kind != HW_MMIO || r->size == 0)
-                continue;
-            for (; j > 0 && s[j - 1].first > r->base >> 12; j--)
-                s[j] = s[j - 1];
-            s[j] = (struct span){ r->base >> 12, (r->base + r->size - 1) >> 12, i };
-            n++;
+        hw_put(&l, "hwdb: one ");
+        hw_put(&l, g->drivers[ls->driver].name);
+        hw_put(&l, " for ");
+        hw_put_dec(&l, ls->nnodes);
+        hw_put(&l, " devices sharing");
+        for (unsigned k = 0; k < ls->nranges; k++) {
+            hw_put(&l, k ? ", " : " ");
+            hw_put_hex(&l, ls->ranges[k].base);
+            hw_put(&l, "+");
+            hw_put_hex(&l, ls->ranges[k].size);
         }
+        hw_put(&l, ": ");
+        for (unsigned k = 0; k < ls->nnodes; k++) {
+            hw_put(&l, k ? " " : "");
+            hw_put(&l, g->nodes[ls->nodes[k]].name);
+        }
+        out(ctx, l.text);
     }
-    for (unsigned i = 0; i < n;) {
-        uint64_t last = s[i].last;
-        unsigned j = i + 1, others = 0;
-        bool lease = leased(g, &g->nodes[s[i].node]);
-
-        for (; j < n && s[j].first <= last; j++) {
-            if (s[j].last > last)
-                last = s[j].last;
-            lease |= leased(g, &g->nodes[s[j].node]);
-            others += s[j].node != s[i].node;
-        }
-        if (lease && others) {
-            struct hw_line l = { 0 };
-
-            hw_put(&l, "hwdb: pages ");
-            hw_put_hex(&l, s[i].first << 12);
-            hw_put(&l, "-");
-            hw_put_hex(&l, (last << 12) + 0xfff);
-            hw_put(&l, " are shared:");
-            for (unsigned k = i; k < j; k++) {
-                bool again = false;
-
-                for (unsigned q = i; q < k; q++)
-                    again |= s[q].node == s[k].node;
-                if (again)
-                    continue;
-                hw_put(&l, " ");
-                hw_put_path(&l, g, s[k].node);
-            }
-            out(ctx, l.text);
-        }
-        i = j;
-    }
-    a->used = mark;
 }
 
 void hw_report(const struct hw_graph *g, bool detail, hw_print *out, void *ctx)
 {
-    unsigned counts[HW_S_BOUND + 1] = { 0 };
+    unsigned counts[HW_S_STATES] = { 0 };
     struct hw_line l = { 0 };
 
     for (hw_id i = 1; i < g->count; i++) {
@@ -267,6 +217,16 @@ void hw_report(const struct hw_graph *g, bool detail, hw_print *out, void *ctx)
         case HW_S_NAMESPACE:
             hw_put(&l, "named by a static table; acpid finds the rest");
             break;
+        case HW_S_DECLINED:
+        case HW_S_FAILED:
+            hw_put(&l, g->drivers[n->driver].name);
+            hw_put(&l, ", ");
+            hw_put(&l, state_name(n->state));
+            if (n->why) {
+                hw_put(&l, ": ");
+                hw_put(&l, n->why);
+            }
+            break;
         default:
             hw_put(&l, state_name(n->state));
             break;
@@ -283,12 +243,12 @@ void hw_report(const struct hw_graph *g, bool detail, hw_print *out, void *ctx)
         }
     }
 
-    shared_pages(g, out, ctx);
+    leases(g, out, ctx);
     l = (struct hw_line){ 0 };
     hw_put(&l, "hwdb: ");
     hw_put(&l, g->board ? g->board : "?");
     hw_put(&l, ":");
-    for (unsigned s = HW_S_DISABLED; s <= HW_S_BOUND; s++)
+    for (unsigned s = HW_S_DISABLED; s < HW_S_STATES; s++)
         if (counts[s]) {
             hw_put(&l, " ");
             hw_put_dec(&l, counts[s]);

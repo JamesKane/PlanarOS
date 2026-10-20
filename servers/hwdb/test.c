@@ -68,12 +68,9 @@ static const struct hw_driver drivers[] = {
 
 static void run(void)
 {
-    hw_id n;
-
     hw_match(&g, drivers, 3);
     hw_order_start(&g);
-    while ((n = hw_next(&g)) != HW_NONE)
-        hw_bound(&g, n);
+    hw_bind_all(&g);
 }
 
 static void print(void *ctx, const char *line)
@@ -284,7 +281,6 @@ static void test_damage(const char *dtb, const char *const *tables, unsigned nta
     for (unsigned round = 0; round < 3000; round++) {
         uint32_t n = round < 1000 ? (uint32_t)((uint64_t)len * round / 1000) : len;
         uint8_t *copy = malloc(n ? n : 1);
-        hw_id id;
 
         memcpy(copy, blob, n);
         if (round >= 1000)
@@ -293,11 +289,8 @@ static void test_damage(const char *dtb, const char *const *tables, unsigned nta
         empty();
         if (hw_from_fdt(&g, copy, n)) {
             built++;
-            hw_quirks(&g, hw_quirk_table, hw_nquirks);
-            hw_match(&g, hw_drivers, hw_ndrivers);
-            hw_order_start(&g);
-            while ((id = hw_next(&g)) != HW_NONE)
-                hw_bound(&g, id);
+            hw_prepare(&g);
+            hw_bind_all(&g);
             hw_report(&g, true, print, nullptr);
         }
         free(copy);
@@ -343,11 +336,8 @@ static void test_damage(const char *dtb, const char *const *tables, unsigned nta
         }
         empty();
         if (hw_from_acpi(&g, t, ntables)) {
-            hw_quirks(&g, hw_quirk_table, hw_nquirks);
-            hw_match(&g, hw_drivers, hw_ndrivers);
-            hw_order_start(&g);
-            while (hw_next(&g) != HW_NONE)
-                ;
+            hw_prepare(&g);
+            hw_bind_all(&g);
             hw_report(&g, true, print, nullptr);
         }
         for (unsigned i = 0; i < ntables && i < 32; i++)
@@ -355,11 +345,76 @@ static void test_damage(const char *dtb, const char *const *tables, unsigned nta
     }
 }
 
+static void reg(hw_id n, enum hw_res_kind kind, uint64_t base, uint64_t size)
+{
+    struct hw_res *r = hw_res_add(&g, n);
+
+    r->kind = kind;
+    r->base = base;
+    r->size = size;
+}
+
+/* Who is leased what (lease.c): devices sharing a page share a lease. */
+static void test_leases(void)
+{
+    hw_id a1, a2, a3, b1, k1, b2, a4, b3, b4, c;
+    const struct hw_lease *l;
+
+    fresh();
+    a1 = dev("a1", "a");                    /* two slots in a page */
+    reg(a1, HW_MMIO, 0x1000, 0x200);
+    reg(a1, HW_IRQ, 5, 0);
+    a2 = dev("a2", "a");
+    reg(a2, HW_MMIO, 0x1200, 0x200);
+    reg(a2, HW_IRQ, 6, 0);
+    reg(a2, HW_IRQ, 5, 0);                  /* a line they share: once */
+    a3 = dev("a3", "a");                    /* a page of its own */
+    reg(a3, HW_MMIO, 0x3000, 0x1000);
+    b1 = dev("b1", "b");                    /* sharing with the kernel's */
+    reg(b1, HW_MMIO, 0x5000, 0x100);
+    k1 = dev("k1", "k");
+    reg(k1, HW_MMIO, 0x5800, 0x100);
+    b2 = dev("b2", "b");                    /* with another driver's */
+    reg(b2, HW_MMIO, 0x7000, 0x100);
+    a4 = dev("a4", "a");
+    reg(a4, HW_MMIO, 0x7400, 0x100);
+    b3 = dev("b3", "b");                    /* two ranges, one shared */
+    reg(b3, HW_MMIO, 0x9000, 0x1000);
+    reg(b3, HW_MMIO, 0xb000, 0x100);
+    b4 = dev("b4", "b");
+    reg(b4, HW_MMIO, 0xb100, 0x100);
+    c = dev("c", "a");                      /* needs a device that can't be leased */
+    need(c, b1, true);
+
+    hw_match(&g, drivers, 3);
+    hw_leases(&g);
+    hw_order_start(&g);
+    hw_bind_all(&g);
+    CHECK(g.nleases == 3);
+    l = &g.leases[g.nodes[a1].lease];
+    CHECK(g.nodes[a2].lease == g.nodes[a1].lease && l->nnodes == 2 && l->nranges == 1 &&
+          l->ranges[0].base == 0x1000 && l->ranges[0].size == 0x1000 && l->nlines == 2);
+    l = &g.leases[g.nodes[a3].lease];
+    CHECK(g.nodes[a3].lease != g.nodes[a1].lease && l->nnodes == 1 && l->nlines == 0);
+    CHECK(g.nodes[b1].state == HW_S_FAILED && g.nodes[b1].lease == HW_NOLEASE);
+    CHECK(strstr(line_for("/b1"), "failed: shares pages with /k1"));
+    CHECK(g.nodes[k1].state == HW_S_KERNEL);
+    CHECK(g.nodes[b2].state == HW_S_FAILED && g.nodes[a4].state == HW_S_FAILED);
+    CHECK(strstr(line_for("/b2"), "shares pages with /a4"));
+    l = &g.leases[g.nodes[b3].lease];
+    CHECK(g.nodes[b4].lease == g.nodes[b3].lease && l->nnodes == 2 && l->nranges == 2 &&
+          l->ranges[1].base == 0xb000 && l->ranges[1].size == 0x1000);
+    CHECK(g.nodes[b3].state == HW_S_BOUND && g.nodes[b4].state == HW_S_BOUND);
+    CHECK(strstr(line_for("/c"), "waits for /b1 (clock): failed"));
+    CHECK(strstr(line_for("hwdb: one drv-a"), "for 2 devices sharing 0x1000+0x1000: a1 a2"));
+}
+
 int main(int argc, char **argv)
 {
     test_order();
     test_match();
     test_quirks();
+    test_leases();
     if (argc >= 3)
         test_damage(argv[1], (const char *const *)argv + 2, (unsigned)(argc - 2));
     printf("hwdb-test: %u of %u checks failed\n", failures, checks);

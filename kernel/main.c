@@ -135,6 +135,8 @@
         kprintf("V3.6 done\n");
         kprintf("V4.1 drivers skipped: no tasks\n");
         kprintf("V4.1 done\n");
+        kprintf("V4.3 hwdb skipped: no tasks\n");
+        kprintf("V4.3 done\n");
         arch_halt();
     }
     sched_idle();

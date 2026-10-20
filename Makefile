@@ -72,7 +72,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V4.1 done
+EXPECT := V4.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -185,7 +185,9 @@ soak: $(IMAGE)
 # blobs, then each captured description against the report it should
 # give (docs/boards/*/hwdb*.txt); HWDB_UPDATE=1 rewrites the reports.
 HWDB_BUILD := build/hwdb
-HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c,$(wildcard servers/hwdb/*.c))
+# The graph: what the server and the host share (not the server's loop).
+HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c servers/hwdb/server.c \
+	servers/hwdb/killtest.c,$(wildcard servers/hwdb/*.c))
 HWDB_HOST := $(HWDB_BUILD)/hwdb-host
 HWDB_TEST := $(HWDB_BUILD)/hwdb-test
 HWDB_CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O1 -g \

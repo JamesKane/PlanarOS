@@ -66,5 +66,6 @@ void selftest_tlb(void);
 void selftest_processes(void);
 void selftest_time(void);
 void selftest_leases(void);
+void selftest_hwdb(void);
 
 #endif /* KERNEL_SELFTEST_H */

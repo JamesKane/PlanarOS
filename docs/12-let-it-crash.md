@@ -136,6 +136,7 @@ Erlang systems work because every process sits in a tree with a stated restart p
   2. `hwdb` runs the lease's stop method (§11.4) and releases the quarantined Areas.
   3. `hwdb` spawns a fresh driver process for the node, with exponential backoff and a retry cap.
   4. Class libraries (`blk`, `serial`) reconnect and retry idempotent requests (§11.9).
+- **Built (V4 step 3):** steps 1 to 3 as written (`servers/hwdb/server.c`), with no class library yet: the kill test's clients reconnect by hand. The port name is gone until the new driver publishes it (Option B's gap, §12.6), so they retry on `ERR_NOTFOUND`.
 
 ### Bus drivers and providers (`rest_for_one` along the graph)
 

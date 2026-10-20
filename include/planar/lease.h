@@ -23,7 +23,7 @@
 
 #include <planar/exec.h>
 
-#define LEASE_IRQS      4
+#define LEASE_IRQS      32          /* eight virtio-mmio slots in a page, and room */
 
 /* LeaseInfo.li_State */
 #define LEASES_IDLE     1           /* not granted */

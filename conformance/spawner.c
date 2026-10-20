@@ -63,7 +63,9 @@ int main(uint64_t arg)
     CHECK(CreateProcess((const char *)8, 0, 20, 0) == ERR_BADADDR);
     CHECK(KillProcess(FindTask(nullptr)) == ERR_BADHANDLE);         /* a task, not a process */
     CHECK(CloseHandle(FindTask(nullptr)) == ERR_BADHANDLE);
-    CHECK(QueryProcess(0, &info) == ERR_BADHANDLE);
+    CHECK(QueryProcess(FindTask(nullptr), &info) == ERR_BADHANDLE);
+    /* 0 is the caller's own, which holds no handles but its task's. */
+    CHECK(QueryProcess(0, &info) == 0 && info.pi_State == PROCS_RUNNING && info.pi_Handles == 1);
 
     /* One that exits. */
     h = CreateProcess("hello", 0, 20, 0);

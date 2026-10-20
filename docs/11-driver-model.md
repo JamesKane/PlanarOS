@@ -105,6 +105,8 @@ The graph logic (insertion, cycles, order, the "what blocks whom" report) is pur
 
 **Built (V4 step 2):** `servers/hwdb/order.c` and `report.c`, as proposed. Optional references are DMA, IOMMU, MSI and nvmem; everything else is required. An optional one is dropped at the start when its supplier can't bind, and when nothing is ready if it's what holds a node back. The report gives each node's direct blockers with their states, not the whole chain. Matching (`match.c`) takes the node's first key any driver lists, then the highest rank, and `make check` refuses a tie; the tables are in `servers/hwdb/drivers.c` until drivers are ELF.
 
+**Built (V4 step 3):** hwdb starts a lease's driver once all the lease's devices are ready, and only then. While any driver is still starting, it drops no optional reference (`hw_unstick` waits), since the supplier may just be slow.
+
 ### Power before lease (D3)
 
 §2.4 says "drivers ask `power` for their unit before touching its registers". That is a rule enforced by convention, and the survey's class 7 is what happens when it is broken. On the CIX GPU it is an SError; on the Q8B it is a SoC reset.
@@ -235,6 +237,8 @@ Rules for every class protocol:
 ## 11.10 Robustness and verification
 
 **Driver restart.** A dead driver is a process exit. The hwdb restarts it (MINIX's reincarnation server), with backoff, and gives up after a few failures in a short window. The node stays in the graph and keeps its unit, so the new driver republishes the same names and clients reconnect. Stateless drivers recover completely. Stateful ones recover what their class can retry. Restart is cheap in Planar, unlike in AbyssBSD, so it belongs in V4 rather than "never" (VQ23; see [§12](12-let-it-crash.md) for port continuity and the supervision tree).
+
+**Built (V4 step 3):** `servers/hwdb/server.c` restarts after 10 ms, then twice as long each time, and gives up at 5 failures in 10 s. A death hwdb asked for is an unbind, so it's restarted at once and not counted. `drv.library` (`lib/drv`) has `Bind`, `Start`, `Interrupt` and `Request` but no `Stop` yet: unbind is a kill. The kill test (`servers/hwdb/killtest.c`) is the one above, with an RTC and virtio's entropy device in place of a block driver, on QEMU. It checks the kernel's half of the teardown, hwdb's own handles, and that every client recovered.
 
 **Device reset.** A driver that finds its device wedged asks the hwdb for a reset. The hwdb unbinds (§11.4), runs the bus or power reset, and binds again. This is Windows' TDR, applied to any device (S§7.1).
 

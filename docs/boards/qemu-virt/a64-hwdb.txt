@@ -173,8 +173,8 @@
   irq 26 on /intc@8000000
   needs /intc@8000000 (interrupts)
 /apb-pclk [fixed-clock]: hwdb, bound 35
-hwdb: pages 0xa000000-0xa000fff are shared: /virtio_mmio@a000000 /virtio_mmio@a000200 /virtio_mmio@a000400 /virtio_mmio@a000600 /virtio_mmio@a000800 /virtio_mmio@a000a00 /virtio_mmio@a000c00 /virtio_mmio@a000e00
-hwdb: pages 0xa001000-0xa001fff are shared: /virtio_mmio@a001000 /virtio_mmio@a001200 /virtio_mmio@a001400 /virtio_mmio@a001600 /virtio_mmio@a001800 /virtio_mmio@a001a00 /virtio_mmio@a001c00 /virtio_mmio@a001e00
-hwdb: pages 0xa002000-0xa002fff are shared: /virtio_mmio@a002000 /virtio_mmio@a002200 /virtio_mmio@a002400 /virtio_mmio@a002600 /virtio_mmio@a002800 /virtio_mmio@a002a00 /virtio_mmio@a002c00 /virtio_mmio@a002e00
-hwdb: pages 0xa003000-0xa003fff are shared: /virtio_mmio@a003000 /virtio_mmio@a003200 /virtio_mmio@a003400 /virtio_mmio@a003600 /virtio_mmio@a003800 /virtio_mmio@a003a00 /virtio_mmio@a003c00 /virtio_mmio@a003e00
+hwdb: one virtio-mmio for 8 devices sharing 0xa000000+0x1000: virtio_mmio@a000000 virtio_mmio@a000200 virtio_mmio@a000400 virtio_mmio@a000600 virtio_mmio@a000800 virtio_mmio@a000a00 virtio_mmio@a000c00 virtio_mmio@a000e00
+hwdb: one virtio-mmio for 8 devices sharing 0xa001000+0x1000: virtio_mmio@a001000 virtio_mmio@a001200 virtio_mmio@a001400 virtio_mmio@a001600 virtio_mmio@a001800 virtio_mmio@a001a00 virtio_mmio@a001c00 virtio_mmio@a001e00
+hwdb: one virtio-mmio for 8 devices sharing 0xa002000+0x1000: virtio_mmio@a002000 virtio_mmio@a002200 virtio_mmio@a002400 virtio_mmio@a002600 virtio_mmio@a002800 virtio_mmio@a002a00 virtio_mmio@a002c00 virtio_mmio@a002e00
+hwdb: one virtio-mmio for 8 devices sharing 0xa003000+0x1000: virtio_mmio@a003000 virtio_mmio@a003200 virtio_mmio@a003400 virtio_mmio@a003600 virtio_mmio@a003800 virtio_mmio@a003a00 virtio_mmio@a003c00 virtio_mmio@a003e00
 hwdb: linux,dummy-virt: 8 kernel, 6 no driver, 36 bound, 0 broken

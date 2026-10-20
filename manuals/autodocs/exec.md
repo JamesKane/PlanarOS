@@ -825,7 +825,7 @@ int64_t QueryProcess(Handle process, struct ProcessInfo *info);
 ```
 
 **FUNCTION**
-Fills in `info` for a process the calling process created. `pi_State` is one of:
+Fills in `info` for a process the calling process created, or, with `process` 0, for the calling process itself. `pi_State` is one of:
 
 | `pi_State` | |
 |---|---|
@@ -844,17 +844,17 @@ Once it is dead, the other fields say how:
 | `pi_FaultAddress` | The address the fault was about: for an access fault, the one touched |
 | `pi_FaultPC` | Where it faulted |
 
-While the process is held or running, they are 0.
+While the process is held or running, they are 0. `pi_Handles` is always filled in: the handles the process holds now, its tasks' among them. A supervisor checks with it that restarting its children leaks none (hwdb's kill test).
 
 A kernel call.
 
 **INPUTS**
-- `process` -- a process handle owned by the calling process.
+- `process` -- a process handle owned by the calling process, or 0 for the calling process.
 - `info` -- where to store the description.
 
 **RESULT**
 0, or:
-- `ERR_BADHANDLE` -- `process` isn't a process handle the calling process owns.
+- `ERR_BADHANDLE` -- `process` isn't 0 or a process handle the calling process owns.
 - `ERR_BADADDR` -- `info` isn't writable.
 
 **NOTES**

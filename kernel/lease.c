@@ -132,6 +132,9 @@ static void unbind(struct line *ln, uint32_t *detach, unsigned *n)
     ln->task = nullptr;
 }
 
+/* Lines detached at a time, unlocked, between passes over the leases. */
+constexpr unsigned DETACH = 16;
+
 static void detach_all(const uint32_t *detach, unsigned n)
 {
     while (n)
@@ -162,7 +165,7 @@ void lease_process_dying(struct process *p)
  */
 void lease_process_died(struct process *p)
 {
-    uint32_t detach[16];
+    uint32_t detach[DETACH];
     unsigned n;
 
     for (bool again = true; again;) {
@@ -175,7 +178,7 @@ void lease_process_died(struct process *p)
             if (l->grantee != p)
                 continue;
             for (unsigned i = 0; i < l->nlines; i++) {
-                if (l->line[i].bound && n + LEASE_IRQS > 16) {
+                if (l->line[i].bound && n == DETACH) {
                     again = true;   /* the rest next time round */
                     break;
                 }
@@ -203,7 +206,7 @@ void lease_process_died(struct process *p)
 
 void lease_task_gone(struct task *t)
 {
-    uint32_t detach[16];
+    uint32_t detach[DETACH];
     unsigned n;
 
     do {
@@ -211,12 +214,12 @@ void lease_task_gone(struct task *t)
 
         n = 0;
         for (struct lease *l = leases; l; l = l->next)
-            for (unsigned i = 0; i < l->nlines && n < 16; i++)
+            for (unsigned i = 0; i < l->nlines && n < DETACH; i++)
                 if (l->line[i].bound && l->line[i].task == t)
                     unbind(&l->line[i], detach, &n);
         spin_unlock_irqrestore(&lock, was);
         detach_all(detach, n);
-    } while (n == 16);
+    } while (n == DETACH);
 }
 
 void lease_release(struct lease *l)

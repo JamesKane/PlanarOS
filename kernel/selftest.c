@@ -1338,6 +1338,8 @@ void selftest_tasks(void *)
     selftest_time();
     selftest_leases();
     kprintf("V4.1 done\n");
+    selftest_hwdb();
+    kprintf("V4.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2625,4 +2627,40 @@ void selftest_leases(void)
     else
         kprintf("V4.1 leases ok: the firmware's tables read; refused over memory, the "
                 "kernel's devices and bad arguments (no virtio test device here)\n");
+}
+
+/*
+ * V4 step 3: hwdb, the first server (servers/hwdb/), in its test mode:
+ * it builds the graph from the firmware's description, starts the
+ * drivers it can in graph order, then kills them at random over and
+ * over, checking each teardown, and exits 0 if every check held
+ * (servers/hwdb/killtest.c). Here: nothing it made outlives it.
+ */
+void selftest_hwdb(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    struct process *p;
+
+    if (!user_images[0].name) {
+        kprintf("V4.3 hwdb skipped: no user programs\n");
+        return;
+    }
+    task_set_signal(0, SIGF_DEAD);
+    if (!(p = process_create_root("hwdb", 5, 1, task_self(), SIGF_DEAD)))
+        fail("V4.3 hwdb", "process_create failed");
+    for (uint64_t end = time_now() + time_us(15000000); !atomic_load(&p->dead) && time_now() < end;)
+        wait_test_dead();
+    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+        kprintf("hwdb: exit %lld, fault %d\n", (long long)p->exit_code, p->fault);
+        fail("V4.3 hwdb", "hwdb failed");
+    }
+    process_free(p);
+    if (!processes_down_to(0, 1000000) || lease_count() || lease_quarantined() || area_count())
+        fail("V4.3 hwdb", "a process, lease or Area outlived hwdb");
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V4.3 hwdb", "pages leaked");
+    kprintf("V4.3 hwdb ok: the graph built from %s, drivers started in its order and "
+            "supervised; hwdb exited 0, leaving no process, lease, Area or page behind\n",
+            hw_source() == HW_FDT ? "the device tree" : "ACPI's static tables");
 }

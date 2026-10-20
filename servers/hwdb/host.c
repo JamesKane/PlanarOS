@@ -51,7 +51,6 @@ int main(int argc, char **argv)
     bool detail = false, ok;
     const char *dtb = nullptr;
     int i = 1;
-    hw_id n;
 
     if (argc == 2 && strcmp(argv[1], "--ties") == 0) {
         unsigned ties = hw_match_ties(hw_drivers, hw_ndrivers, print, stderr);
@@ -90,11 +89,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "hwdb-host: the source is unusable%s\n", g.full ? " (out of space)" : "");
         return 1;
     }
-    hw_quirks(&g, hw_quirk_table, hw_nquirks);
-    hw_match(&g, hw_drivers, hw_ndrivers);
-    hw_order_start(&g);
-    while ((n = hw_next(&g)) != HW_NONE)
-        hw_bound(&g, n);
+    hw_prepare(&g);
+    hw_bind_all(&g);
     hw_report(&g, detail, print, stdout);
     if (g.full) {
         fprintf(stderr, "hwdb-host: out of space\n");

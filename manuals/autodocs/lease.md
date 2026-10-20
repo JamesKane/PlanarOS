@@ -4,7 +4,7 @@
 
 The calls a driver and its supervisor use, in alphabetical order. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
-A **lease** is one device's registers, whole pages of MMIO, and up to four (`LEASE_IRQS`) interrupt lines. Only the holder of the **device root** may create one. The device root is a handle the kernel gives the first server, hwdb, as `main`'s second argument (`process_create_root` in `kernel/process.c`). Today the kernel's self-test gives it to `conformance/leaser.c`, which plays hwdb. A lease is never made over RAM or reserved memory, over the registers the kernel drives itself, over lines the kernel uses, or over another lease.
+A **lease** is one device's registers, whole pages of MMIO, and up to 32 (`LEASE_IRQS`) interrupt lines. Only the holder of the **device root** may create one. The device root is a handle the kernel gives the first server, hwdb, as `main`'s second argument (`process_create_root` in `kernel/process.c`). The kernel's self-test gives it to `conformance/leaser.c`, which plays hwdb, and then to hwdb itself (`servers/hwdb/`). A lease is never made over RAM or reserved memory, over the registers the kernel drives itself, over lines the kernel uses, or over another lease.
 
 The process that creates a lease owns it. It grants the lease to one process at a time, one it created: the driver. The driver maps the registers at their physical address, binds lines to signals, and allocates the device's DMA memory against the lease. The driver doesn't own the lease's handle. It names the lease by the owner's handle value, which the owner passes it, in `CreateProcess`'s `arg` in the tests.
 
@@ -197,7 +197,7 @@ A kernel call.
 - `base` -- the registers' physical address, page-aligned.
 - `size` -- whole pages, more than 0 and at most 1 GiB. The range must end within user addresses.
 - `irqs` -- the interrupt controller's source numbers, 1–1023, none twice. May be `nullptr` when `nirqs` is 0.
-- `nirqs` -- 0 to `LEASE_IRQS` (4).
+- `nirqs` -- 0 to `LEASE_IRQS` (32: eight virtio-mmio slots share a page, and so a lease).
 
 **RESULT**
 The lease's handle (positive), or:

@@ -36,6 +36,8 @@ static bool hopeless(const struct hw_graph *g, hw_id s)
     case HW_S_DISABLED:
     case HW_S_NODRIVER:
     case HW_S_STRUCTURE:
+    case HW_S_DECLINED:
+    case HW_S_FAILED:
         return true;
     default:
         return false;
@@ -114,8 +116,10 @@ void hw_order_start(struct hw_graph *g)
 }
 
 /* Nothing is ready: drop the optional references holding nodes back. */
-static void unstick(struct hw_graph *g)
+bool hw_unstick(struct hw_graph *g)
 {
+    uint32_t was = g->qtail;
+
     for (hw_id i = 0; i < g->count; i++) {
         struct hw_node *n = &g->nodes[i];
         bool dropped = false;
@@ -130,14 +134,13 @@ static void unstick(struct hw_graph *g)
         if (dropped)
             examine(g, i);
     }
+    return g->qtail != was;
 }
 
 hw_id hw_next(struct hw_graph *g)
 {
     if (!g->queue)
         return HW_NONE;
-    if (g->qhead == g->qtail)
-        unstick(g);
     return g->qhead < g->qtail ? g->queue[g->qhead++] : HW_NONE;
 }
 
@@ -151,4 +154,33 @@ void hw_bound(struct hw_graph *g, hw_id id)
     n->order = ++g->bound;
     for (unsigned i = 0; i < n->nconsumers; i++)
         examine(g, n->consumers[i]);
+}
+
+void hw_unbind(struct hw_graph *g, hw_id id, enum hw_state state, const char *why)
+{
+    g->nodes[id].state = state;
+    g->nodes[id].why = why;
+}
+
+void hw_bind_all(struct hw_graph *g)
+{
+    hw_id n;
+
+    do
+        while ((n = hw_next(g)) != HW_NONE)
+            hw_bound(g, n);
+    while (hw_unstick(g));
+}
+
+void hw_prepare(struct hw_graph *g)
+{
+    uint16_t units[256] = { 0 };
+
+    hw_quirks(g, hw_quirk_table, hw_nquirks);
+    hw_match(g, hw_drivers, hw_ndrivers);
+    for (hw_id i = 1; i < g->count; i++)
+        if (g->nodes[i].driver < 256)
+            g->nodes[i].unit = units[g->nodes[i].driver]++;
+    hw_leases(g);
+    hw_order_start(g);
 }

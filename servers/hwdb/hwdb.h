@@ -93,6 +93,9 @@ enum hw_state : uint8_t {
     HW_S_WAITING,       /* matched; a supplier isn't bound yet */
     HW_S_READY,         /* matched, suppliers bound; its driver is being started */
     HW_S_BOUND,
+    HW_S_DECLINED,      /* its driver looked and found nothing it drives (an empty slot) */
+    HW_S_FAILED,        /* it can't be leased, or its driver failed too often: 'why' */
+    HW_S_STATES
 };
 
 struct hw_node {
@@ -106,15 +109,41 @@ struct hw_node {
     bool enabled;
     enum hw_state state;
     uint16_t driver;                /* index into the match tables; HW_NODRV */
-    const char *why;                /* for KERNEL and FIRMWARE: what says so */
+    const char *why;                /* for KERNEL, FIRMWARE and FAILED: what says so */
     const char *pin, *exclude;      /* a quirk's: the driver it must or mustn't have */
     uint32_t pending;               /* references not yet met */
     uint32_t order;                 /* when it was bound, from 1 */
     uint32_t fdt_props;             /* the device tree: where its properties start */
     uint32_t phandle;
+    uint16_t lease;                 /* its index in hw_graph.leases; HW_NOLEASE */
+    uint16_t unit;                  /* its number among its driver's nodes */
 };
 
 constexpr uint16_t HW_NODRV = UINT16_MAX;
+constexpr uint16_t HW_NOLEASE = UINT16_MAX;
+
+/*
+ * What one driver process is leased (lease.c): every device whose
+ * registers share a page with another goes in the same lease, served by
+ * one process. Each range becomes a kernel lease; the first carries the
+ * lines. The sizes match the kernel's (planar/lease.h).
+ */
+constexpr unsigned HW_LEASE_RANGES = 4;
+constexpr unsigned HW_LEASE_NODES = 32;
+constexpr unsigned HW_LEASE_LINES = 32;
+
+struct hw_range {
+    uint64_t base, size;            /* whole pages */
+};
+
+struct hw_lease {
+    uint16_t driver;
+    uint8_t nranges, nlines;
+    uint16_t nnodes;
+    struct hw_range ranges[HW_LEASE_RANGES];
+    hw_id nodes[HW_LEASE_NODES];
+    uint32_t lines[HW_LEASE_LINES];
+};
 
 /* --- Match tables (§11.6). --- */
 
@@ -154,6 +183,10 @@ struct hw_graph {
     uint32_t fdt_struct, fdt_struct_size, fdt_strings, fdt_strings_size;
     uint32_t *phandles;             /* sorted pairs: phandle, node */
     uint32_t nphandles;
+
+    /* Leases (lease.c). */
+    struct hw_lease *leases;
+    uint32_t nleases;
 
     /* Ordering. */
     hw_id *queue;                   /* ready nodes, in the order they became ready */
@@ -227,6 +260,10 @@ hw_id hw_child(const struct hw_graph *g, hw_id parent, const char *name, size_t 
  * most specific key that any driver takes. */
 void hw_match(struct hw_graph *g, const struct hw_driver *drivers, unsigned n);
 
+/* Group the process drivers' nodes into leases by the pages they share,
+ * after hw_match; a node that can't be leased fails, saying why. */
+void hw_leases(struct hw_graph *g);
+
 /* The drivers hwdb knows (drivers.c). */
 extern const struct hw_driver hw_drivers[];
 extern const unsigned hw_ndrivers;
@@ -240,13 +277,23 @@ unsigned hw_match_ties(const struct hw_driver *drivers, unsigned n, hw_print *ou
  * Ordering (order.c). hw_order_start finds what's ready; hw_next hands
  * out the next ready node (HW_NONE when none is); the server starts its
  * driver and calls hw_bound when it has bound, which looks again at that
- * node's consumers only. When nothing is ready and some node still
- * waits, hw_next first drops the optional references that can't be met
- * (to a supplier with no driver, or in a cycle), and tries again.
+ * node's consumers only, or hw_unbind when it can't (declined, failed),
+ * which leaves them waiting. When nothing is ready and no driver is
+ * still starting, hw_unstick drops the optional references that can't
+ * be met (to a supplier with no driver, or in a cycle); true if that
+ * made a node ready. hw_bind_all is the host's: every driver binds at
+ * once.
  */
 void hw_order_start(struct hw_graph *g);
 hw_id hw_next(struct hw_graph *g);
+bool hw_unstick(struct hw_graph *g);
 void hw_bound(struct hw_graph *g, hw_id node);
+void hw_unbind(struct hw_graph *g, hw_id node, enum hw_state state, const char *why);
+void hw_bind_all(struct hw_graph *g);
+
+/* hwdb's way from a firmware description to an ordered graph: the
+ * board's quirks, matching, the units and leases, and what's ready. */
+void hw_prepare(struct hw_graph *g);
 
 /* Each device, with its state, then (if 'detail') its resources and
  * what it needs; and a count of each state. */

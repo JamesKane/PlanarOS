@@ -6,7 +6,7 @@
 
 cd "$(dirname "$0")/.." || exit 2
 
-PORTABLE_DIRS="include kernel lib servers drivers conformance"
+PORTABLE_DIRS="include kernel lib servers drv drivers conformance"
 PATTERN='^[[:space:]]*#[[:space:]]*(if|ifdef|ifndef|elif)[[:space:]].*(__riscv|__APPLE__|__linux__|__x86_64__|__aarch64__|__arm__|__m68k__|HELLFIRE|(^|[^A-Za-z0-9_])(ARCH|PLAT)_)'
 
 hits=$(grep -rnE "$PATTERN" $PORTABLE_DIRS 2>/dev/null)

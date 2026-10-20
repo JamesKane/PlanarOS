@@ -64,7 +64,7 @@ int main(uint64_t arg, uint64_t root_arg)
     Handle root = (Handle)root_arg;
     uint64_t slot = (arg & 0xffffff) * 512, console = (arg >> 34) * PAGE;
     uint64_t dev = slot & ~(PAGE - 1);
-    uint32_t irq = (uint32_t)(arg >> 24) & 0x3ff, irqs[5] = { irq, irq + 1, 0, 0, 0 };
+    uint32_t irq = (uint32_t)(arg >> 24) & 0x3ff, irqs[LEASE_IRQS + 1] = { irq, irq + 1 };
     uint64_t ram = (uint64_t)&arg & ~(PAGE - 1);
     struct FirmwareInfo fi;
     struct ProcessInfo pi;
@@ -97,7 +97,7 @@ int main(uint64_t arg, uint64_t root_arg)
     CHECK(CreateLease(root, 0x1000, 0, nullptr, 0) == ERR_BADARG);
     CHECK(CreateLease(root, 0x1001, PAGE, nullptr, 0) == ERR_BADARG);
     CHECK(CreateLease(root, ~0ULL & ~(PAGE - 1), 2 * PAGE, nullptr, 0) == ERR_BADARG);
-    CHECK(CreateLease(root, 0x1000, PAGE, irqs, 5) == ERR_BADARG);          /* too many */
+    CHECK(CreateLease(root, 0x1000, PAGE, irqs, LEASE_IRQS + 1) == ERR_BADARG); /* too many */
     irqs[1] = irqs[0];
     CHECK(CreateLease(root, 0x1000, PAGE, irqs, 2) == ERR_BADARG);          /* twice */
     CHECK(CreateLease(root, 0x1000, PAGE, (const uint32_t *)8, 1) == ERR_BADADDR);

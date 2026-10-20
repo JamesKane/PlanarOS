@@ -1,9 +1,8 @@
 /*
  * arch/aarch64/user/user.ld -- layout of a built-in user program
  *
- * Linked at 0 and loaded wherever the kernel puts it, so the code must
- * reach its data PC-relatively only (no absolute pointers in initialized
- * data). Code and constants come first and end on a page boundary, so
+ * Linked at 0 and loaded wherever the kernel puts it, as a position-independent
+ * executable: lib/rt/reloc.c applies its relocations at the start. Code and constants come first and end on a page boundary, so
  * they can be mapped RX and the rest RW. From omega's user.ld.
  */
 OUTPUT_ARCH(aarch64)
@@ -17,10 +16,23 @@ SECTIONS
         *(.text .text.*)
         *(.rodata .rodata.*)
     }
+    .rela.dyn : {
+        __rela_start = .;
+        *(.rela.dyn .rela.*)
+        __rela_end = .;
+    }
+    .dynsym : { *(.dynsym) }
+    .dynstr : { *(.dynstr) }
+    .hash : { *(.hash) }
+    .gnu.hash : { *(.gnu.hash) }
     . = ALIGN(4096);
     _etext = .;
     .data : {
         *(.data .data.*)
+        *(.got .got.*)
+    }
+    .dynamic : {
+        *(.dynamic)
     }
     .bss : {
         *(.bss .bss.* COMMON)

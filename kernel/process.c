@@ -439,11 +439,13 @@ int64_t process_kill_call(uint32_t h)
 
 int64_t process_query_call(uint32_t h, uint64_t info_out)
 {
-    struct process *p = process_child(h);
+    struct process *p = h ? process_child(h) : task_self()->process;
     struct ProcessInfo info = { 0 };
 
     if (!p)
         return ERR_BADHANDLE;
+    if (!h)
+        process_get(p);
     if (__atomic_load_n(&p->held, __ATOMIC_ACQUIRE))
         info.pi_State = PROCS_HELD;
     else if (!atomic_load(&p->dead))
@@ -460,6 +462,7 @@ int64_t process_query_call(uint32_t h, uint64_t info_out)
         info.pi_FaultAddress = p->fault_addr;
         info.pi_FaultPC = p->fault_pc;
     }
+    info.pi_Handles = __atomic_load_n(&p->handles, __ATOMIC_RELAXED);
     process_put(p);
     return arch_copy_to_user(info_out, &info, sizeof info) ? 0 : ERR_BADADDR;
 }

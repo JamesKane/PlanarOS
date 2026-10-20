@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** Steps 1 and 2 are done. The four decisions at the end are made, as leaned.
+**Status: in progress (2026-10-20).** Steps 1 to 3 are done. The four decisions at the end are made, as leaned.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -24,7 +24,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 |---|---|
 | **1. The kernel calls drivers need** ✅ | A boot bundle of servers, `CreateProcess`, handle passing, timers, device leases, interrupt binding, DMA Areas with quarantine, and the firmware tables as a read-only Area. |
 | **2. hwdb on the host** ✅ | The device graph from the device tree and from ACPI's static tables, quirks as data, match tables, ordering and the "what blocks whom" report. Tested against the captured trees and the CIX dumps. |
-| **3. hwdb as the first server** | hwdb starts drivers in graph order, supervises and restarts them. `drv.library`. The first drivers are small ones on QEMU, and the kill test starts here. |
+| **3. hwdb as the first server** ✅ | hwdb starts drivers in graph order, supervises and restarts them. `drv.library`. The first drivers are small ones on QEMU, and the kill test starts here. |
 | **4. `acpid`** | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
 | **5. Storage** | The `pci` server (ECAM, MSI-X through the ITS), NVMe on QEMU and the CIX, SDHCI on the RV2, the block class, GPT partitions. The queue-depth measurements. |
 | **6. Files and programs** | FAT32 under `dos`, programs loaded from storage, and the boot moved onto each board's own storage. |
@@ -101,7 +101,7 @@ hwdb's graph logic is pure C (§11.5), so it's built and tested on the `hosted` 
 - QEMU AArch64's 32 virtio-mmio slots are 0x200 apart, eight to a page (the step 1 test leased one page for one device).
 - On the K1, the clock controller, the reset controller, the power domains and the kernel's watchdog share the MPMU's pages at `0xd4050000`, and the first three share `0xd4282000` with the PCIe controller and its PHY. `CreateLease` would refuse `power` the first: the kernel uses it.
 
-Step 3 has to choose: one lease per run of shared pages, held by one driver that serves the others (a virtio-mmio bus driver for its slots; `power` for the K1's system controllers, with the watchdog's register reached through it or kept as the kernel's), or leases smaller than a page. The report lists each such run.
+Step 3 has to choose: one lease per run of shared pages, held by one driver that serves the others (a virtio-mmio bus driver for its slots; `power` for the K1's system controllers, with the watchdog's register reached through it or kept as the kernel's), or leases smaller than a page. The report lists each such run. **Chosen (2026-10-20): one lease per run**, built in step 3 (`servers/hwdb/lease.c`).
 
 **Not as planned:**
 - **No "what blocks whom" chain,** only each node's direct blockers and their states. Following them takes one look per step, and the real trees' chains are one or two long.
@@ -114,6 +114,38 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 - **Supervision:** a driver that dies is restarted with backoff, and given up after a few failures in a short window (VQ23). The node keeps its unit.
 - **The first drivers are small ones QEMU has:** the PL031 or Goldfish RTC, and the `edu` device. They're there to prove binding, restart and quarantine before a real class depends on them.
 - **The kill test starts** with them: kill a driver at random points, over and over, and check its leases, its line, its DMA Areas and its handles each time.
+
+**Done (2026-10-20).** hwdb runs as a server, starts drivers in graph order, and restarts them when they die. `make test-all` passes its 10 boots at `V4.3 done`.
+
+- **The boot bundle** now holds servers and drivers as well as the conformance programs (`mk/user.mk`): `servers/NAME/` and `drv/NAME/` are a program each, every `.c` in the directory, and drivers link `drv.library`. User programs are now position-independent and relocate themselves before `main` (`lib/rt/reloc.c`), since hwdb's match and quirk tables are pointers.
+- **Leases come from pages** (`servers/hwdb/lease.c`). Devices whose registers share a page are one lease, served by one process of their driver. A page shared with another driver's device, or with one the kernel or the firmware drives, can't be leased, and those nodes fail with the reason. A device with registers in two places joins them into one lease with two ranges. The report lists each lease that serves more than one device.
+- **hwdb** (`servers/hwdb/server.c`). The kernel starts it with the device root. It maps the firmware's description, builds the graph, and starts each lease's driver when all the lease's devices are ready: the process held, its leases granted, then started. It answers the driver's two messages, `HWDB_BIND` and `HWDB_STARTED` (`planar/drv.h`), and never waits on a driver. A driver that takes none of its devices exits, and they're *declined*.
+- **Supervision.** When a driver dies, hwdb checks what the kernel did: the leases are stopping, no DMA Area is left live, and, when hwdb killed it while running, every page it held is in quarantine. Then it runs the stop method, revokes the leases (which frees the quarantine), and starts it again. A death hwdb didn't ask for is a failure: restarted after 10 ms, then twice as long each time, and given up on at 5 failures in 10 s. The devices then fail, and their consumers wait. A driver that hasn't started in 2 s is killed as failed.
+- **Stop methods.** virtio's status register is the only one so far. A device with none can be restarted only if it held no DMA. Otherwise its quarantine stays, as VQ24 leans, and it isn't restarted.
+- **`drv.library`** (`lib/drv`): `Bind` for each device, then `Start` to publish its class port (`rtc.0`, `rng.1`), then a loop that hands interrupts to `Interrupt` and requests to `Request`. It maps the leases and binds each taken device's line. Line *n* of a lease is signal 32 + *n*.
+- **Three drivers** (`drv/`): `rtc-pl031` (QEMU AArch64), `rtc-goldfish` (QEMU RISC-V), and `virtio-mmio`, which serves a page of slots and drives the entropy device in them.
+- **The kill test** (`servers/hwdb/killtest.c`, hwdb's test mode, run by `kernel/selftest.c` as V4.3):
+  - A client task for each class port reads its device over and over, and reconnects after `ERR_PORT_DIED`.
+  - hwdb kills each live driver 12 times at random points, about a third of the kills while it's still binding, and checks the teardown above each time. Its own handle count mustn't grow.
+  - Then one driver faults in `Bind` on every start. It must be given up on after 5 failures, spaced by the backoff, then start again when retried.
+  - The clients must have recovered from every death they saw. Then hwdb kills everything, closes its leases and exits 0. The kernel checks that no process, lease, Area or page outlived it.
+  - **Mutations:** a kernel that frees a dead driver's DMA Areas instead of quarantining them fails the "every page in quarantine" check, once per kill of the entropy driver. One that leaves a dead driver's line bound fails the restart: the new driver's `BindIrq` is refused.
+- **Kernel changes:** `LEASE_IRQS` went from 4 to 32 (eight virtio slots to a page, each with a line). `QueryProcess(0, …)` asks about the calling process, and `pi_Handles` reports a process's handle count.
+
+**What the boots show:**
+- **QEMU RISC-V:** eight virtio slots in separate pages, so eight leases. The entropy device's driver binds, and the seven empty slots are declined. The Goldfish RTC binds.
+- **QEMU AArch64:** four leases of eight slots each. One process drives the entropy device, and the other three decline. The PL031 binds after its fixed clock. Through edk2, the PL031 is disabled because the firmware keeps it, so the kill test has the virtio driver alone.
+- **Under ACPI, and on the boards,** the only drivers matched (`pci`, `sdhci-k1`, `power-k1`) aren't built, so those nodes fail with "its program isn't built yet", and the kill test has nothing to kill.
+- **About 20 ms per kill-and-restart** under QEMU's TCG, and the give-up test takes about 165 ms.
+
+**Not as planned:**
+- **No `edu` device:** it's on PCI, which comes in step 5. virtio's entropy device has DMA and an interrupt, so it serves instead.
+- **hwdb runs as the kernel's V4.3 test,** in test mode, and exits when the test ends. Starting it at every boot as the first server, and leaving it running, comes when something follows it (step 7's shell).
+- **No graceful `STOP`.** Unbind is a kill, the path §11.4 says must be right. A `STOP` with a deadline can come before it when a class needs it (block, in step 5).
+- **The supervision is one-for-one.** A restarted supplier's consumers aren't restarted with it (§12.7's rest-for-one). None of these drivers has a consumer yet.
+- **No port continuity:** a restarting driver's port name is gone until the new one publishes it (§12.6). Clients retry on `ERR_NOTFOUND`.
+- **Tokens, not identities.** hwdb knows a driver by the token in its argument (the lease and a generation), not by which process connected. That's enough for programs from the boot bundle.
+- **`drv.library` isn't in the manuals yet.** It goes in the *Devices* volume at the V4 exit, when its interface has met a real class.
 
 ## 4. `acpid`
 
