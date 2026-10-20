@@ -10,7 +10,7 @@
 #include "sched.h"
 
 static struct task idle_tasks[MAX_CPUS];
-static atomic_uint_fast64_t steals, handoffs;
+static atomic_uint_fast64_t steals;
 
 [[noreturn]] void task_start(void);
 
@@ -200,9 +200,10 @@ static void kick(struct cpu *c, bool now)
     } else if (self->irq_depth) {
         return;
     } else if (!now) {
-        if (atomic_load(&self->need_resched) || atomic_load(&self->quantum_check))
+        if (atomic_load_explicit(&self->need_resched, memory_order_relaxed) ||
+            atomic_load_explicit(&self->quantum_check, memory_order_relaxed))
             arch_send_ipi(self);
-    } else if (atomic_load(&self->need_resched)) {
+    } else if (atomic_load_explicit(&self->need_resched, memory_order_relaxed)) {
         schedule();
     } else if (atomic_exchange(&self->quantum_check, false)) {
         unsigned long was = spin_lock_irqsave(&self->rq_lock);
@@ -289,8 +290,8 @@ static void schedule_locked(struct cpu *c, unsigned long was)
 {
     struct task *prev = c->current, *next;
 
-    atomic_store(&c->need_resched, false);
-    atomic_store(&c->quantum_check, false);
+    atomic_store_explicit(&c->need_resched, false, memory_order_relaxed);     /* rq_lock held */
+    atomic_store_explicit(&c->quantum_check, false, memory_order_relaxed);
     if (prev->state == TASK_RUNNING && prev != c->idle) {
         prev->state = TASK_READY;
         if (prev->affinity & bit(c))
@@ -313,7 +314,7 @@ static void schedule_locked(struct cpu *c, unsigned long was)
         /* Its context may still be in use where it last ran. */
         while (atomic_load_explicit(&next->on_cpu, memory_order_acquire))
             arch_cpu_relax();
-        atomic_store(&next->on_cpu, true);
+        atomic_store_explicit(&next->on_cpu, true, memory_order_relaxed);   /* off every queue: ours */
         next->runs++;
         cpu_count(&c->switches);
         c->switched_from = prev;
@@ -370,7 +371,7 @@ void irq_exit(void)
 
     if (--c->irq_depth)
         return;
-    if (atomic_load(&c->need_resched)) {
+    if (atomic_load_explicit(&c->need_resched, memory_order_relaxed)) {
         schedule();
     } else if (atomic_exchange(&c->quantum_check, false)) {
         spin_lock(&c->rq_lock);
@@ -619,7 +620,7 @@ uint64_t task_wait_kick(uint64_t mask, struct cpu *kick_cpu)
 
         spin_lock(&self->lock);
         got = self->sig_received & mask;
-        if (atomic_load(&self->killed) || got) {
+        if (atomic_load_explicit(&self->killed, memory_order_relaxed) || got) {     /* self->lock held */
             /* Killed: back out of the kernel call; user_return() ends it. */
             self->sig_received &= ~got;
             spin_unlock(&self->lock);
@@ -661,7 +662,7 @@ struct cpu *task_post(struct task *t, uint64_t mask, unsigned how)
             t->sig_waiting = 0;
             t->state = TASK_READY;
             if ((how & POST_HANDOFF) && !t->on_rq && (t->affinity & bit(self)) &&
-                me != self->idle && !atomic_load(&t->on_cpu)) {
+                me != self->idle && !atomic_load_explicit(&t->on_cpu, memory_order_acquire)) {
                 /* Here, next: the caller is about to wait for it. Its
                  * state keeps everyone else off while it moves (they
                  * take t->lock first anyway). Never one still switching
@@ -676,7 +677,7 @@ struct cpu *task_post(struct task *t, uint64_t mask, unsigned how)
                 if ((how & POST_LEND) && t->pri < me->pri)
                     t->pri = me->pri;   /* lent until it next signals or waits */
                 enqueue_head(c, t);
-                atomic_fetch_add_explicit(&handoffs, 1, memory_order_relaxed);
+                cpu_count(&self->handoffs);
                 /* No nudge: this CPU is about to be its. */
                 notify = wake_check_how(c, t, false);
             } else {
@@ -749,5 +750,9 @@ uint64_t sched_steals(void)
 
 uint64_t sched_handoffs(void)
 {
-    return atomic_load(&handoffs);
+    uint64_t n = 0;
+
+    for (unsigned i = 0; i < ncpus; i++)
+        n += atomic_load_explicit(&cpus[i].handoffs, memory_order_relaxed);
+    return n;
 }

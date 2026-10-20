@@ -45,6 +45,7 @@ struct cpu {
     atomic_uint_fast64_t ipis;  /* IPIs taken */
     _Atomic uint64_t syscalls;  /* kernel calls made here (cpu_count) */
     _Atomic uint64_t switches;  /* task switches here (cpu_count) */
+    _Atomic uint64_t handoffs;  /* tasks handed this CPU (cpu_count) */
 
     /* The run queue (kernel/sched.c): one FIFO per priority, and a bit
      * per non-empty one. */

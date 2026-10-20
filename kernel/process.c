@@ -279,7 +279,7 @@ int64_t process_create_task(uint64_t entry, uint64_t arg)
 
 void user_return(void)
 {
-    if (atomic_load(&task_self()->killed))
+    if (atomic_load_explicit(&task_self()->killed, memory_order_relaxed))   /* a hint: the kill signals too */
         leave();
 }
 

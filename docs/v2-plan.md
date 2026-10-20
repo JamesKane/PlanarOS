@@ -4,7 +4,7 @@
 
 **Exit:**
 - Zero-trap streaming is measured: kernel calls per message while the receiver stays busy.
-- `DoMsg` costs no more than omega's 3,361 cycles per round trip on the RV2.
+- `DoMsg` costs no more than omega's 3,361 cycles per round trip on the RV2. **Met: 3,209 (identity), 3,283 (global).**
 - omega's port-based A1 tests (`echo`, `client`, `pingpong`) pass, rewritten for connections, on every CPU, in both layouts, on QEMU and the RV2.
 
 Each step ends with `make test-all` green and a `V2.n done` line in the transcript.
@@ -41,7 +41,18 @@ Step 1 also serialises `kprintf` across CPUs. Lines from different CPUs used to 
 
 The hunt for the soak failures that came before the review found three SMP races: a cross-CPU handoff deadlock, and two `finish_switch` races, one reading state and one reading the task's own page after letting go of it. 4,000 QEMU boots were clean afterwards.
 
-Correct, then fast. On the RV2 the hardening first cost 252 cycles per kernel call, mostly from reading the current task with interrupts off. A single load through `tp` gets that back. `DoMsg` is 3,492 cycles in the global layout, and 3,475 in identity before the hardening. Omega's 3,361 is still 3–4% away. The next speedup is saving fewer registers on a kernel call.
+Correct, then fast. On the RV2 the hardening first cost 252 cycles per kernel call, mostly from reading the current task with interrupts off. A single load through `tp` gets that back.
+
+**Performance (2026-10-20): the V2 exit is met.** `make PROFILE=1` builds a cycle profiler (`kernel/prof.c`): marks along the kernel-call and switch paths sum the cycles per edge. On the RV2 it showed where the round trip went. What paid off:
+
+| Change | `DoMsg` on the RV2, identity layout |
+|---|---|
+| Before | 3,512 cycles |
+| Kernel calls save only what the calling convention keeps; scratch registers zeroed on the way out | 3,447 |
+| A task that blocks goes into the scheduler with its run queue still locked | 3,368 |
+| Relaxed ordering on hot-path hints and on reads under locks (the default puts a fence on each side of a load on RISC-V); handoffs counted per CPU | **3,209** |
+
+That is below omega's 3,361 (3,283 in the global layout). The kernel-only Signal/Wait round trip is 1,554 cycles, and a null kernel call 469. A domain switch alone costs 118 cycles: 16-bit ASIDs, no flush. Lock pairs, at about 55 cycles each, are now the largest software cost. A round trip takes about a dozen of them.
 
 ## Design
 
