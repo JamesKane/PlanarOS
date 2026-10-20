@@ -8,6 +8,7 @@
 #include "cpu.h"
 #include "handle.h"
 #include "kprintf.h"
+#include "ktime.h"
 #include "area.h"
 #include "kstring.h"
 #include "pmm.h"
@@ -130,7 +131,8 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
         return nullptr;
     p = phys_to_virt(page);
     *p = (struct process){ .name = img->name, .pri = pri, .watcher = watcher,
-                           .watch_sig = sig, .refs = 1 };
+                           .watch_sig = sig, .refs = 1, .klog_tokens = 32,
+                           .klog_at = time_now() };
     if (!arch_domain_create(&p->domain)) {
         pmm_free(page);
         return nullptr;

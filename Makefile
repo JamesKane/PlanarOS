@@ -51,9 +51,10 @@ PORTABLE_SRCS := \
 
 # What every boot transcript must end with (tools/boot-check.py). A
 # platform that can run every test sets CHECK_FLAGS to forbid skipping
-# one (the VQ3 soak is skipped unless asked for).
+# one (the VQ3 soak is skipped unless asked for), and terminal escapes in
+# a program's KLog lines (the firmware's own output may have them).
 CHECK_FLAGS :=
-FULL_CHECK := --forbid 'skipped: (?!not asked for)'
+FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
 EXPECT := V2.4 done
 

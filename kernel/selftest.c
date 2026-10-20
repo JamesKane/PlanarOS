@@ -1654,7 +1654,13 @@ static void test_client_dies(void)
         fail("V2.4 rogue", "a rogue client killed the server");
     expect_clean_exit("V2.4 rogue", start("V2.4 rogue", "client", 0), 10000000);
     expect_clean_exit("V2.4 limits", start("V2.4 limits", "limits", 0), 5000000);
-    kprintf("V2.4 limits ok: a process stopped at 64 tasks, 256 handles and 32 connections\n");
+    uint64_t drops = syscall_klog_drops();
+
+    expect_clean_exit("V2.4 limits", start("V2.4 limits", "logflood", 0), 5000000);
+    if (syscall_klog_drops() - drops < 400)
+        fail("V2.4 limits", "a process flooded the console");
+    kprintf("V2.4 limits ok: a process stopped at 64 tasks, 256 handles and 32 connections; "
+            "a flood of KLog lines was cut to its rate, escapes filtered\n");
     kill_and_free(echo);
     kprintf("V2.4 client ok: the server dropped a killed client, and four rogue ones "
             "(a pointer outside the heap, a broken ring, scribbling, a message running off the heap), and served on\n");

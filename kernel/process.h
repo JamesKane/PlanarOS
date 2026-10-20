@@ -55,6 +55,8 @@ struct process {
     unsigned ntasks;                /* on 'tasks' (lock) */
     unsigned handles;               /* held (kernel/handle.c's lock) */
     unsigned conns;                 /* connection ends (kernel/port.c's lock) */
+    unsigned klog_tokens;           /* KLog lines it may print now (lock) */
+    uint64_t klog_at, klog_dropped;
     atomic_uint unfinished;         /* tasks not yet switched away for good */
     struct mapping *maps;           /* the Areas it maps (kernel/area.c's lock) */
     atomic_bool dying;

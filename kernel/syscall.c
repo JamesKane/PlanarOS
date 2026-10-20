@@ -8,12 +8,17 @@
 #include "cpu.h"
 #include "handle.h"
 #include "kprintf.h"
+#include "ktime.h"
 #include "port.h"
 #include "process.h"
 #include "sched.h"
 #include "syscall.h"
 
 constexpr unsigned KLOG_MAX = 200;
+constexpr unsigned KLOG_BURST = 32;
+constexpr unsigned KLOG_PER_S = 20;
+
+static atomic_uint_fast64_t klog_drops;
 
 /* Signals a user task may not wait for, send or change: the kernel's. */
 constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL;
@@ -29,9 +34,18 @@ bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
     return false;
 }
 
+/*
+ * The console is polled: a line holds the log, and interrupts, for about
+ * 19 ms at 115200 baud. So a process gets KLOG_BURST lines at once and
+ * KLOG_PER_S a second after that, the rest only counted, and only
+ * printable bytes reach the terminal (review M12). A buffered console
+ * drained by its driver comes with the drivers (V4).
+ */
 static int64_t sys_klog(struct task *self, uint64_t text)
 {
+    struct process *p = self->process;
     char buf[KLOG_MAX + 1];
+    uint64_t now = time_now(), dropped = 0;
     unsigned n;
 
     for (n = 0; n < KLOG_MAX; n++) {
@@ -39,10 +53,42 @@ static int64_t sys_klog(struct task *self, uint64_t text)
             return ERR_BADADDR;
         if (!buf[n])
             break;
+        if (buf[n] < 0x20 || buf[n] > 0x7e)
+            buf[n] = '?';
     }
     buf[n] = '\0';
+    if (p) {
+        unsigned long was = spin_lock_irqsave(&p->lock);
+        uint64_t refill = (now - p->klog_at) * KLOG_PER_S / (time_hz() ? time_hz() : 1);
+        bool ok;
+
+        if (refill) {
+            p->klog_tokens = p->klog_tokens + refill > KLOG_BURST ? KLOG_BURST
+                                                                  : p->klog_tokens + (unsigned)refill;
+            p->klog_at = now;
+        }
+        if ((ok = p->klog_tokens > 0)) {
+            p->klog_tokens--;
+            dropped = p->klog_dropped;
+            p->klog_dropped = 0;
+        } else {
+            p->klog_dropped++;
+        }
+        spin_unlock_irqrestore(&p->lock, was);
+        if (!ok) {
+            atomic_fetch_add(&klog_drops, 1);
+            return 0;
+        }
+    }
+    if (dropped)
+        kprintf("[%s] (%llu lines dropped)\n", self->name, (unsigned long long)dropped);
     kprintf("[%s] %s\n", self->name, buf);
     return 0;
+}
+
+uint64_t syscall_klog_drops(void)
+{
+    return atomic_load(&klog_drops);
 }
 
 struct signal_args {
