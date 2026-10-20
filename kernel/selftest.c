@@ -1316,6 +1316,8 @@ void selftest_tasks(void *)
     test_placement();
     test_class_costs();
     kprintf("V3.4 done\n");
+    selftest_costs();
+    kprintf("V3.5 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1340,13 +1342,13 @@ constexpr unsigned SIGB_DEAD = 17;
 constexpr uint64_t SIGF_DEAD = 1ULL << SIGB_DEAD;
 
 /* Run built-in program 'name' and wait (at most 'us') for it to die. */
-static struct process *run(const char *name, uint64_t arg, uint64_t us)
+static struct process *run_on(const char *name, uint64_t arg, uint64_t us, uint64_t affinity)
 {
     struct process *p;
     uint64_t start = time_now();
 
     task_set_signal(0, SIGF_DEAD);
-    if (!(p = process_create(name, 5, arg, task_self(), SIGF_DEAD)))
+    if (!(p = process_create_on(name, 5, arg, task_self(), SIGF_DEAD, affinity)))
         fail("V1.4 user", "process_create failed");
     while (!atomic_load(&p->dead) && time_now() - start < time_us(us)) {
         struct ktimer t = { .fn = timeout_fire, .data = task_self() };
@@ -1356,6 +1358,11 @@ static struct process *run(const char *name, uint64_t arg, uint64_t us)
         ktimer_stop(&t);
     }
     return p;
+}
+
+static struct process *run(const char *name, uint64_t arg, uint64_t us)
+{
+    return run_on(name, arg, us, TASK_ANY_CPU);
 }
 
 static void expect_exit(const char *name, int64_t code)
@@ -1890,17 +1897,21 @@ static void dump_tasks(struct process *p)
 
 /* Start the echo server and run 'client' with 'arg' against it. Returns
  * the kernel calls each made meanwhile: [0] the server, [1] the client. */
-static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
+/* Run 'prog' with 'arg' against an echo server, both on 'affinity'; the
+ * kernel calls each made. The client must exit 0, or if 'code' isn't
+ * nullptr, its exit code goes there for the caller to judge. */
+static void with_echo_on(const char *prog, uint64_t arg, uint64_t calls[2], uint64_t affinity,
+                         int64_t *code)
 {
     struct process *echo, *client;
     uint64_t before;
 
     task_set_signal(0, SIGF_DEAD);
-    if (!(echo = process_create("echo", 5, 0, task_self(), SIGF_DEAD)))
+    if (!(echo = process_create_on("echo", 5, 0, task_self(), SIGF_DEAD, affinity)))
         fail("V2.2 echo", "process_create failed");
     task_sleep_until(time_now() + time_us(2000));       /* let it make its port */
     before = process_calls(echo);
-    client = run(prog, arg, 10000000);
+    client = run_on(prog, arg, 10000000, affinity);
     calls[0] = process_calls(echo) - before;
     calls[1] = process_calls(client);
     if (!atomic_load(&client->dead)) {
@@ -1908,7 +1919,9 @@ static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
         dump_tasks(echo);
         fail("V2.2 echo", "the client never finished");
     }
-    if (client->fault != FAULT_NONE || client->exit_code != 0) {
+    if (code && client->fault == FAULT_NONE) {
+        *code = client->exit_code;
+    } else if (client->fault != FAULT_NONE || client->exit_code != 0) {
         kprintf("V2.2 echo: client exit %lld\n", (long long)client->exit_code);
         fail("V2.2 echo", "the client failed");
     }
@@ -1919,6 +1932,11 @@ static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
     while (!atomic_load(&echo->dead))
         wait_test_dead();
     process_free(echo);
+}
+
+static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
+{
+    with_echo_on(prog, arg, calls, TASK_ANY_CPU, nullptr);
 }
 
 void selftest_rings(void)
@@ -2066,6 +2084,29 @@ static void test_handoff(void)
             "it ran past a hog at 5 and ahead of a peer at 10, and went back to 1\n");
 }
 
+/* Cycles for one switch to a user domain or back, on this CPU, or 0 if
+ * there are no user domains. */
+static uint64_t domain_switch_cycles(void)
+{
+    constexpr unsigned N = 10000;
+    struct arch_domain d;
+    uint64_t c0, dom;
+    unsigned long was;
+
+    if (!arch_domain_create(&d))
+        return 0;
+    was = arch_irq_save();
+    c0 = arch_read_cycles();
+    for (unsigned i = 0; i < N; i++) {
+        arch_domain_switch(&d);
+        arch_domain_switch(nullptr);
+    }
+    dom = arch_read_cycles() - c0;
+    arch_irq_restore(was);
+    arch_domain_destroy(&d);
+    return dom / (2 * N);
+}
+
 /* What the kernel's own building blocks cost on this CPU, to read the
  * round trip's cost against. */
 static void pieces(void)
@@ -2074,7 +2115,7 @@ static void pieces(void)
     static spinlock_t l;
     static atomic_uint_fast64_t a;
     _Atomic uint64_t n = 0;
-    uint64_t c0, lock, amo, irq, store, yield;
+    uint64_t c0, lock, amo, irq, store, yield, dom;
     unsigned long was = arch_irq_save();
 
     c0 = arch_read_cycles();
@@ -2095,19 +2136,8 @@ static void pieces(void)
     for (unsigned i = 0; i < N; i++)
         cpu_count(&n);
     store = arch_read_cycles() - c0;
-    struct arch_domain d;
-    uint64_t dom = 0;
-
-    if (arch_domain_create(&d)) {
-        c0 = arch_read_cycles();
-        for (unsigned i = 0; i < N; i++) {
-            arch_domain_switch(&d);
-            arch_domain_switch(nullptr);
-        }
-        dom = (arch_read_cycles() - c0) / 2;
-        arch_domain_destroy(&d);
-    }
     arch_irq_restore(was);
+    dom = domain_switch_cycles() * N;
     c0 = arch_read_cycles();
     for (unsigned i = 0; i < N; i++)
         task_yield();       /* nothing else ready here: picks itself */
@@ -2145,6 +2175,66 @@ void selftest_domsg(void)
             (unsigned long long)(calls[0] / 20000), (unsigned long long)(calls[0] % 20000 / 200),
             (unsigned long long)(calls[1] / 20000), (unsigned long long)(calls[1] % 20000 / 200),
             (unsigned long long)ns);
+}
+
+/* ---------------------------------------------------------------------
+ * V3 step 5: what the kernel's paths cost on each core class.
+ */
+
+/* This CPU's cycles per microsecond, over a millisecond of the timer. */
+static uint64_t clock_mhz(void)
+{
+    unsigned long was = arch_irq_save();
+    uint64_t t0 = time_now(), c0 = arch_read_cycles(), c;
+
+    while (time_now() - t0 < time_us(1000))
+        arch_cpu_relax();
+    c = arch_read_cycles() - c0;
+    arch_irq_restore(was);
+    return c / 1000;
+}
+
+/* On the first CPU of each class, with everything it needs pinned there:
+ * a null kernel call (bench), a domain switch, a Signal and Wait round
+ * trip between two kernel tasks, and a DoMsg round trip (pingpong and
+ * echo). In cycles, the unit the RV2's numbers are in (docs/v3-plan.md
+ * step 5). */
+void selftest_costs(void)
+{
+    for (unsigned k = 0; cpu_class(k); k++) {
+        unsigned a = ~0u;
+        uint64_t mhz, dom, ns, sw, calls[2];
+        int64_t null = 0, domsg = 0;
+
+        for (unsigned i = 0; i < ncpus && a == ~0u; i++)
+            if (cpus[i].cls == k && atomic_load(&cpus[i].online))
+                a = i;
+        task_set_affinity(cpu_mask(a));
+        mhz = clock_mhz();
+        dom = domain_switch_cycles();
+        if (user_images[0].name) {
+            struct process *p = run_on("bench", 1, 10000000, cpu_mask(a));
+
+            if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code <= 0)
+                fail("V3.5 costs", "bench failed");
+            null = p->exit_code;
+            process_free(p);
+            with_echo_on("pingpong", 1, calls, cpu_mask(a), &domsg);
+            if (domsg <= 0)
+                fail("V3.5 costs", "pingpong failed");
+        }
+        pingpong_run(a, a, &ns, &sw);   /* leaves this task on CPU 0 */
+        kprintf("V3.5 costs: ");
+        print_class(cpu_class(k));
+        kprintf(" at %llx, %llu MHz: cycles for a domain switch %llu (%u-bit ASIDs), "
+                "Signal + Wait %llu",
+                (unsigned long long)cpus[a].hwid, (unsigned long long)mhz,
+                (unsigned long long)dom, arch_asid_bits(), (unsigned long long)sw);
+        if (user_images[0].name)
+            kprintf(", a null kernel call %lld, DoMsg %lld (%llu ns)", (long long)null,
+                    (long long)domsg, (unsigned long long)(mhz ? domsg * 1000 / mhz : 0));
+        kprintf("\n");
+    }
 }
 
 /* ---------------------------------------------------------------------

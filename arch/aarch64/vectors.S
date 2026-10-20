@@ -10,14 +10,21 @@
  * there; the user's stack pointer is SP_EL0.
  *
  * The frame (struct trap_frame in trap.c): x0-x30, sp, elr, spsr, where
- * sp is SP_EL0 for an exception from EL0.
+ * sp is SP_EL0 for an exception from EL0. A kernel call (SVC) fills in
+ * only part of it (svc_entry, below).
  */
 
 #define FRAME_SIZE  (34 * 8)
+#define EC_SVC64    0x15
 
     .macro  SAVE_FRAME el0
     sub     sp, sp, #FRAME_SIZE
     stp     x0, x1, [sp, #16 * 0]
+    SAVE_REST \el0
+    .endm
+
+/* The rest of the frame, once x0 and x1 are in it. */
+    .macro  SAVE_REST el0
     stp     x2, x3, [sp, #16 * 1]
     stp     x4, x5, [sp, #16 * 2]
     stp     x6, x7, [sp, #16 * 3]
@@ -64,7 +71,14 @@ vectors:
     VENTRY  trap_irq, 5             /* EL1h IRQ */
     VENTRY  trap_unexpected, 6      /* EL1h FIQ */
     VENTRY  trap_unexpected, 7      /* EL1h SError */
-    VENTRY  trap_el0_sync, 8, 1     /* EL0 sync */
+    .balign 0x80                    /* EL0 sync: a kernel call, or not */
+    sub     sp, sp, #FRAME_SIZE
+    stp     x0, x1, [sp, #16 * 0]
+    mrs     x0, esr_el1
+    ubfx    x0, x0, #26, #6         /* EC */
+    cmp     x0, #EC_SVC64
+    b.eq    svc_entry
+    b       el0_sync
     VENTRY  trap_el0_irq, 9, 1      /* EL0 IRQ */
     VENTRY  trap_unexpected, 10, 1  /* EL0 FIQ */
     VENTRY  trap_unexpected, 11, 1  /* EL0 SError */
@@ -72,6 +86,48 @@ vectors:
     VENTRY  trap_unexpected, 13     /* EL0 AArch32 IRQ */
     VENTRY  trap_unexpected, 14     /* EL0 AArch32 FIQ */
     VENTRY  trap_unexpected, 15     /* EL0 AArch32 SError */
+
+/* Anything from EL0 but a kernel call: the whole frame. */
+el0_sync:
+    SAVE_REST 1
+    mov     x0, sp
+    mov     x1, #8
+    bl      trap_el0_sync
+    b       trap_return
+
+/*
+ * A kernel call. The user stub is an ordinary C call (syscalls.S), so the
+ * caller already expects x0-x18 to be clobbered, and the kernel's C code
+ * keeps x19-x29 as the calling convention says, across switches too. So
+ * only what the stub itself needs back is saved (x30, SP_EL0, and ELR
+ * and SPSR, which another task's return would overwrite), with the
+ * arguments and the call number for syscall_dispatch; the rest of the
+ * frame is never read. On the way out x1-x18 are zeroed, so no kernel
+ * value reaches user mode. Interrupts stay masked from here to the eret
+ * except inside the call.
+ */
+svc_entry:
+    stp     x2, x3, [sp, #16 * 1]
+    stp     x4, x5, [sp, #16 * 2]
+    str     x8, [sp, #16 * 4]
+    mrs     x9, sp_el0
+    stp     x30, x9, [sp, #16 * 15]
+    mrs     x10, elr_el1
+    mrs     x11, spsr_el1
+    stp     x10, x11, [sp, #16 * 16]
+    mov     x0, sp
+    bl      trap_el0_svc
+    ldp     x10, x11, [sp, #16 * 16]
+    msr     elr_el1, x10
+    msr     spsr_el1, x11
+    ldp     x30, x9, [sp, #16 * 15]
+    msr     sp_el0, x9
+    ldr     x0, [sp, #16 * 0]
+    .irp    n, 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+    mov     x\n, xzr
+    .endr
+    add     sp, sp, #FRAME_SIZE
+    eret
 
 /* Pop the frame at sp and return to wherever it says. */
     .globl  trap_return

@@ -40,12 +40,18 @@ static bool holds(struct arch_context *ctx)
     return c->arch.fp_owner == ctx && ctx->lazy_cpu == (int)c->index;
 }
 
-/* Last thing before returning to EL0: access only if the registers are ours. */
+/* Last thing before returning to EL0: access only if the registers are
+ * ours. Most returns change nothing, so CPACR is written only if it
+ * must be; and the eret makes the write take effect, with no isb (the
+ * kernel itself never touches FP/SIMD). */
 void aarch64_lazy_return(struct arch_context *ctx)
 {
     bool ours = holds(ctx);
+    uint64_t cpacr = sysreg_read(cpacr_el1);
+    uint64_t want = ours ? cpacr | CPACR_FPEN : cpacr & ~CPACR_FPEN;
 
-    fp_access(ours);
+    if (want != cpacr)
+        sysreg_write(cpacr_el1, want);
     if (ours) {
         this_cpu()->arch.fp_dirty = true;   /* no dirty bit: assume a write */
         cpu_count(&this_cpu()->arch.reuses);

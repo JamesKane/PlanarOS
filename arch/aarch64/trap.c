@@ -11,6 +11,7 @@
 #include "irq.h"
 #include "kprintf.h"
 #include "process.h"
+#include "prof.h"
 #include "sched.h"
 #include "syscall.h"
 
@@ -29,7 +30,6 @@ struct fixup {
 /* ESR_EL1.EC values from EL0. */
 constexpr unsigned EC_UNKNOWN    = 0x00;
 constexpr unsigned EC_FP         = 0x07;
-constexpr unsigned EC_SVC64      = 0x15;
 constexpr unsigned EC_SYSREG      = 0x18;   /* MSR/MRS/SYS trapped: EL1's registers */
 constexpr unsigned EC_SVE         = 0x19;   /* SVE while CPACR_EL1.ZEN traps it */
 constexpr unsigned EC_IABT_LOWER = 0x20;
@@ -43,6 +43,7 @@ extern const struct fixup __fixup_start[], __fixup_end[];
 void trap_sync(struct trap_frame *f, uint64_t kind);
 void trap_irq(struct trap_frame *f, uint64_t kind);
 void trap_el0_sync(struct trap_frame *f, uint64_t kind);
+void trap_el0_svc(struct trap_frame *f);
 void trap_el0_irq(struct trap_frame *f, uint64_t kind);
 void trap_unexpected(struct trap_frame *f, uint64_t kind);
 [[noreturn]] void trap_resume(struct trap_frame *f);
@@ -86,12 +87,8 @@ void trap_el0_sync(struct trap_frame *f, uint64_t)
     uint64_t esr = sysreg_read(esr_el1), far = sysreg_read(far_el1);
     unsigned ec = (unsigned)(esr >> 26) & 0x3f;
 
+    prof_mark(P_TRAP_IN);
     switch (ec) {
-    case EC_SVC64:
-        arch_irq_enable();
-        f->x[0] = (uint64_t)syscall_dispatch(f->x[8], &f->x[0]);
-        arch_irq_disable();
-        break;
     case EC_DABT_LOWER:
         if (area_fault_retry(far, esr & (1u << 6) ? MAP_WRITE : MAP_READ))
             break;
@@ -118,15 +115,31 @@ void trap_el0_sync(struct trap_frame *f, uint64_t)
     }
     user_return();          /* a killed task stops here */
     aarch64_lazy_return(&task_self()->ctx);
+    prof_mark(P_TRAP_OUT);
+}
+
+/* A kernel call, from vectors.S's svc_entry: only x0-x5, x8, x30, sp, elr
+ * and spsr are in the frame. */
+void trap_el0_svc(struct trap_frame *f)
+{
+    prof_mark(P_TRAP_IN);
+    arch_irq_enable();
+    f->x[0] = (uint64_t)syscall_dispatch(f->x[8], &f->x[0]);
+    arch_irq_disable();
+    user_return();          /* a killed task stops here */
+    aarch64_lazy_return(&task_self()->ctx);
+    prof_mark(P_TRAP_OUT);
 }
 
 void trap_el0_irq(struct trap_frame *, uint64_t)
 {
+    prof_mark(P_TRAP_IN);
     irq_enter();
     irq_external();
     irq_exit();
     user_return();
     aarch64_lazy_return(&task_self()->ctx);
+    prof_mark(P_TRAP_OUT);
 }
 
 void trap_unexpected(struct trap_frame *f, uint64_t kind)

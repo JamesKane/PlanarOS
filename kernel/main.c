@@ -130,6 +130,8 @@
         selftest_classes();
         kprintf("V3.4 placement skipped: no tasks\n");
         kprintf("V3.4 done\n");
+        kprintf("V3.5 costs skipped: no tasks\n");
+        kprintf("V3.5 done\n");
         arch_halt();
     }
     sched_idle();

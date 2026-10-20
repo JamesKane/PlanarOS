@@ -115,6 +115,8 @@ Each ring has one producer and one consumer. A slot holds a message's address.
 
 A stream of messages to a server that keeps up costs no kernel calls. In V2's test, streaming 20,000 messages took about 24–32 calls per 1,000 messages on each side.
 
+When the server is asleep, `DoMsg` wakes it and hands it the CPU. A round trip with the echo server, both on one CPU, costs about 1,530 cycles (0.8 µs) on the CIX's Cortex-A720, 3,370 (1.9 µs) on its Cortex-A520, and 3,210 (2 µs) on the RV2.
+
 ## Rules
 
 - **Fill in `mn_Length`** with the whole message's size, header included.

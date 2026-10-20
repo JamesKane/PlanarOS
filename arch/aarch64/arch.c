@@ -66,6 +66,7 @@ void arch_cpu_init(void)
     have_pmu = dfr0 != 0 && dfr0 != 0xf;
     if (have_pmu) {
         sysreg_write(pmcr_el0, sysreg_read(pmcr_el0) | 1);     /* E */
+        sysreg_write(pmccfiltr_el0, 0);     /* EL0 and EL1 both, whatever reset left */
         sysreg_write(pmcntenset_el0, 1ULL << 31);              /* PMCCNTR */
         sysreg_write(pmuserenr_el0, 4);     /* CR alone: user mode reads the cycle
                                              * counter, controls nothing (review M2) */

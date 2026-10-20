@@ -66,7 +66,7 @@ static void user_start(void *)
 static struct task *new_user_task(struct process *p, uint64_t pc, struct area *stack,
                                   uint64_t arg0, uint64_t arg1)
 {
-    struct task *t = task_new(p->name, p->pri, TASK_ANY_CPU, user_start, nullptr);
+    struct task *t = task_new(p->name, p->pri, p->affinity, user_start, nullptr);
 
     if (!t)
         return nullptr;
@@ -114,6 +114,12 @@ static int64_t launch(struct process *p, struct task *t)
 struct process *process_create(const char *name, int pri, uint64_t arg,
                                struct task *watcher, uint64_t sig)
 {
+    return process_create_on(name, pri, arg, watcher, sig, TASK_ANY_CPU);
+}
+
+struct process *process_create_on(const char *name, int pri, uint64_t arg,
+                                  struct task *watcher, uint64_t sig, uint64_t affinity)
+{
     const struct user_image *img = find_image(name);
     const uint8_t *file;
     uint64_t file_size, etext, end, page;
@@ -135,9 +141,9 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
     if (!(page = pmm_alloc()))
         return nullptr;
     p = phys_to_virt(page);
-    *p = (struct process){ .name = img->name, .pri = pri, .watcher = watcher,
-                           .watch_sig = sig, .refs = 1, .klog_tokens = 32,
-                           .klog_at = time_now() };
+    *p = (struct process){ .name = img->name, .pri = pri, .affinity = affinity,
+                           .watcher = watcher, .watch_sig = sig, .refs = 1,
+                           .klog_tokens = 32, .klog_at = time_now() };
     if (!arch_domain_create(&p->domain)) {
         pmm_free(page);
         return nullptr;

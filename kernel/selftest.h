@@ -56,4 +56,8 @@ void selftest_acpi(void);
 void selftest_board(void);
 void selftest_classes(void);
 
+/* V3 step 5: what the kernel's paths cost on each core class. Called
+ * from selftest_tasks. */
+void selftest_costs(void);
+
 #endif /* KERNEL_SELFTEST_H */

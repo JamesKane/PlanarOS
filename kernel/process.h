@@ -50,6 +50,7 @@ struct process {
     struct arch_domain domain;
     const char *name;
     int pri;
+    uint64_t affinity;              /* where its tasks may run, by CPU index */
     spinlock_t lock;                /* tasks */
     struct task *tasks;             /* by next_in_proc */
     unsigned ntasks;                /* on 'tasks' (lock) */
@@ -78,6 +79,11 @@ struct process {
  * 'sig'. nullptr if there's no such program or no memory. */
 struct process *process_create(const char *name, int pri, uint64_t arg,
                                struct task *watcher, uint64_t sig);
+
+/* The same, with every task it ever has confined to 'affinity' (for
+ * measuring one core class). */
+struct process *process_create_on(const char *name, int pri, uint64_t arg,
+                                  struct task *watcher, uint64_t sig, uint64_t affinity);
 
 /* End a process from outside it. Returns at once; the watcher hears
  * when it's dead. */

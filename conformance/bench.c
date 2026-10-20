@@ -3,7 +3,8 @@
  *
  * A kernel call that does nothing much (SetSignal), and Signal to the
  * calling task itself: a trap, a handle lookup, and the signal path
- * without a wakeup. Logs cycles per call.
+ * without a wakeup. Logs cycles per call. Exits 0; with an argument,
+ * with the null call's cycles (for the kernel's table, V3.5 costs).
  */
 #include "cycles.h"
 #include "log.h"
@@ -24,7 +25,7 @@ static void report(const char *what, const struct CycleSum *c)
     KLog(b.text);
 }
 
-int main(void)
+int main(uint64_t table)
 {
     struct CycleSum null = { 0 }, self = { 0 }, read = { 0 };
     Handle me = FindTask(nullptr);
@@ -47,5 +48,5 @@ int main(void)
     report("reading the counter", &read);
     report("SetSignal(0, 0)", &null);
     report("Signal(self)", &self);
-    return 0;
+    return table ? (int)CycleMean(&null) : 0;
 }

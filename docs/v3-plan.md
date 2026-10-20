@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: in progress (2026-10-20).** Steps 1 to 4 done. All three decisions are made (end of this plan).
+**Status: in progress (2026-10-20).** Steps 1 to 5 done. All three decisions are made (end of this plan).
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -27,7 +27,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 | **2. ACPI, on QEMU** ✅ | `kernel/acpi.c` parses the static tables into the same facts `fdt.c` gives. Both sources are compared on one machine. |
 | **3. The board** ✅ | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
 | **4. Big and little** ✅ | Core classes from the PPTT and MIDR, and costs per class. |
-| **5. Arm costs** | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
+| **5. Arm costs** ✅ | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
 | **6. VQ3** | The `vq3` workload on the CIX, again on the RV2, and switch and TLB-miss costs per layout. Then the decision. |
 
 ## 1. UEFI entry, on QEMU ✅
@@ -216,7 +216,34 @@ While the cable is on the CIX, the RV2 has no console and no serial boot. Step 6
   - placement prefers big cores and spills onto little ones.
 - **Later:** a real policy (which servers go where, and energy) waits until V4 has servers to place.
 
-## 5. Arm costs
+## 5. Arm costs ✅
+
+**Done (2026-10-20).** The profiler runs on AArch64, kernel calls take a lean path like RV64's, and `V3.5 costs` measures the four costs on the first CPU of each core class. On the CIX, in cycles (identity layout):
+
+| | Null kernel call | Domain switch | Signal + Wait | `DoMsg` |
+|---|---|---|---|---|
+| Cortex-A720 at 1.9 GHz | 258 | 63 | 882 | 1,533 (806 ns) |
+| Cortex-A520 at 1.8 GHz | 586 | 66 | 1,666 | 3,366 (1.87 µs) |
+| RV2, X60 at 1.6 GHz (V2) | 469 | 118 | 1,554 | 3,209 (2.0 µs) |
+
+Both layouts pass on the board (a soak of 10 boots, 5 in each layout, had no failures). The global layout gives the same numbers to within 1%: `DoMsg` 1,529 on the A720 and 3,380 on the A520. The transcript ends with `V3.5 done`.
+
+- **Per clock, the A520 is a little behind the X60** (null call 586 against 469, `DoMsg` 3,366 against 3,209). Both are in-order cores. The A720 takes about half the X60's cycles for each kernel path, and 0.4 of its time for `DoMsg`. The domain switch is one TTBR0 write with a 16-bit ASID (read from `ID_AA64MMFR0`) on both Arm cores, and needs no flush.
+- **`V3.5 costs`** (`selftest_costs`): for each class, everything it measures is pinned to that class's first CPU. That covers `bench` and `pingpong` with the echo server, and processes now take an affinity (`process_create_on`). With an argument, `bench` exits with the null call's cycles and `pingpong` with its round trip's, so the kernel prints the table itself. The clock is the cycle counter against the timer over a millisecond.
+- **The kernel-call fast path** (`svc_entry` in `arch/aarch64/vectors.S`). The EL0 sync vector checks ESR's class first. A kernel call saves x0–x5, the call number, x30, SP_EL0, ELR and SPSR, and nothing else. On the way out x1–x18 are zeroed. `callregs` now checks that on AArch64 too: every scratch register comes back zero. Before the fast path it failed all 30,000 calls.
+- **What the cycles came from**, on the A720 at `a00`:
+
+  | Change | Null call | `DoMsg` |
+  |---|---|---|
+  | Before | 314 | 1,632 |
+  | The fast path | 302 | 1,614 |
+  | CPACR written on the way back to EL0 only when FP access changes, and with no `isb` (the `eret` synchronises) | **258** | **1,533** |
+
+  The profiler found the second: the edge from the end of a call to the return to EL0 was 148 cycles, and is 104 now.
+- **The profiler** (`make PROFILE=1`) marks the AArch64 trap path as it does RV64's, and `PMCCFILTR_EL0` is set to count EL0 and EL1 whatever the firmware left.
+- **Later:** the parked lock-pair work (docs/v2-plan.md, last section), measured on both ISAs. The A720's lock pair is 27 cycles and the X60's about 55. The RV2 also needs the step 5 build run again. Its numbers above are from V2, because the serial cable is on the CIX.
+
+### The plan, as written before the step
 
 - **The profiler** (`make PROFILE=1`) on AArch64, through `PMCCNTR_EL0`.
 - **An AArch64 kernel-call fast path**, like RV64's. It saves only what the calling convention keeps, and zeroes the scratch registers on the way out. `callregs` already checks the contract.

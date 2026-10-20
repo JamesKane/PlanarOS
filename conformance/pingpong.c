@@ -2,7 +2,9 @@
  * conformance/pingpong.c -- DoMsg round trips with the echo server
  *
  * The number to compare with omega's 3,361 cycles on the X60 (docs §4.4).
- * Exits with the number of bad replies, or -1 if it can't connect.
+ * Exits with the number of bad replies, or -1 if it can't connect. With
+ * an argument, it exits with the cycles per round trip instead, or -1
+ * on a bad reply (for the kernel's table, V3.5 costs).
  */
 #include <planar/syscalls.h>
 
@@ -12,7 +14,7 @@
 
 constexpr unsigned ROUNDS = 20000;
 
-int main(void)
+int main(uint64_t table)
 {
     struct MsgPort mp;
     struct EchoMsg *m;
@@ -43,5 +45,7 @@ int main(void)
     log_num(&b, each.dropped);
     log_str(&b, " moved CPU)");
     KLog(b.text);
+    if (table)
+        return bad ? -1 : (int)CycleMean(&each);
     return (int)bad;
 }
