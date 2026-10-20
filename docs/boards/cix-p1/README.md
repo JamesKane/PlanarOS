@@ -5,6 +5,7 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 | File | What |
 |---|---|
 | `acpi/*.dat` | Every ACPI table the XSDT lists, plus the XSDT and DSDT, read raw from `/dev/mem`. All checksums are good. They are fixtures for `kernel/acpi.c`'s hosted tests. |
+| `hwdb.txt` | The report hwdb's graph must give from those tables (`make hwdb-test`, docs/v4-plan.md step 2). |
 | `acpi-expect.txt` | The lines the kernel must print when it reads those tables, hosted: `make PLATFORM=hosted ACPI_BOARD=cix-p1 test` (part of `make test-all`). |
 | `firmware-boot.log` | UART2 from power-on to FreeBSD's loader: TF-A, OP-TEE, UEFI. Escape sequences stripped. |
 | `freebsd-dmesg.txt` | FreeBSD's boot messages: devices found through ACPI, the CPU feature registers. |

@@ -1,0 +1,225 @@
+/cpus/cpu@0 [riscv]: kernel, a CPU
+  at 0x0 on its bus
+/cpus/cpu@0/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@0 (parent)
+/cpus/cpu@1 [riscv]: kernel, a CPU
+  at 0x1 on its bus
+/cpus/cpu@1/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@1 (parent)
+/cpus/cpu@2 [riscv]: kernel, a CPU
+  at 0x2 on its bus
+/cpus/cpu@2/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@2 (parent)
+/cpus/cpu@3 [riscv]: kernel, a CPU
+  at 0x3 on its bus
+/cpus/cpu@3/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@3 (parent)
+/cpus/cpu@4 [riscv]: kernel, a CPU
+  at 0x4 on its bus
+/cpus/cpu@4/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@4 (parent)
+/cpus/cpu@5 [riscv]: kernel, a CPU
+  at 0x5 on its bus
+/cpus/cpu@5/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@5 (parent)
+/cpus/cpu@6 [riscv]: kernel, a CPU
+  at 0x6 on its bus
+/cpus/cpu@6/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@6 (parent)
+/cpus/cpu@7 [riscv]: kernel, a CPU
+  at 0x7 on its bus
+/cpus/cpu@7/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@7 (parent)
+/clocks/vctcxo_24 [fixed-clock]: hwdb, bound 1
+/clocks/vctcxo_3 [fixed-clock]: hwdb, bound 2
+/clocks/vctcxo_1 [fixed-clock]: hwdb, bound 3
+/clocks/pll1_vco [fixed-clock]: hwdb, bound 4
+/clocks/clk_32k [fixed-clock]: hwdb, bound 5
+/clocks/clk_dummy [fixed-clock]: hwdb, bound 6
+/soc [simple-bus]: hwdb, bound 7
+/soc/clint@e4000000 [riscv,clint0]: firmware, the firmware's
+  mmio 0xe4000000+0x10000
+  irq 3 on /cpus/cpu@0/interrupt-controller
+  irq 7 on /cpus/cpu@0/interrupt-controller
+  irq 3 on /cpus/cpu@1/interrupt-controller
+  irq 7 on /cpus/cpu@1/interrupt-controller
+  irq 3 on /cpus/cpu@2/interrupt-controller
+  irq 7 on /cpus/cpu@2/interrupt-controller
+  irq 3 on /cpus/cpu@3/interrupt-controller
+  irq 7 on /cpus/cpu@3/interrupt-controller
+  irq 3 on /cpus/cpu@4/interrupt-controller
+  irq 7 on /cpus/cpu@4/interrupt-controller
+  irq 3 on /cpus/cpu@5/interrupt-controller
+  irq 7 on /cpus/cpu@5/interrupt-controller
+  irq 3 on /cpus/cpu@6/interrupt-controller
+  irq 7 on /cpus/cpu@6/interrupt-controller
+  irq 3 on /cpus/cpu@7/interrupt-controller
+  irq 7 on /cpus/cpu@7/interrupt-controller
+  needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /cpus/cpu@4/interrupt-controller (interrupts); /cpus/cpu@5/interrupt-controller (interrupts); /cpus/cpu@6/interrupt-controller (interrupts); /cpus/cpu@7/interrupt-controller (interrupts); /soc (parent)
+/soc/clock-controller@d4050000 [ky,x1-ccu]: firmware, U-Boot's, until power (V4 step 7)
+  mmio 0xd4050000+0x209c
+  mmio 0xd4282800+0x400
+  mmio 0xd4015000+0x1000
+  mmio 0xd4090000+0x1000
+  mmio 0xd4282c00+0x400
+  mmio 0xd8440000+0x98
+  mmio 0xc0000000+0x4280
+  mmio 0xf0610000+0x20
+  needs /clocks/vctcxo_24 (clock); /clocks/vctcxo_3 (clock); /clocks/vctcxo_1 (clock); /clocks/pll1_vco (clock); /clocks/clk_32k (clock); /clocks/clk_dummy (clock); /soc (parent)
+/soc/reset-controller@d4050000 [ky,x1-reset]: firmware, U-Boot's, until power (V4 step 7)
+  mmio 0xd4050000+0x209c
+  mmio 0xd4282800+0x400
+  mmio 0xd4015000+0x1000
+  mmio 0xd4090000+0x1000
+  mmio 0xd4282c00+0x400
+  mmio 0xd8440000+0x98
+  mmio 0xc0000000+0x4280
+  mmio 0xf0610000+0x20
+  needs /soc (parent)
+/soc/interrupt-controller@e0000000 [riscv,plic0]: kernel, driven by the kernel
+  mmio 0xe0000000+0x4000000
+  irq 9 on /cpus/cpu@0/interrupt-controller
+  irq 9 on /cpus/cpu@1/interrupt-controller
+  irq 9 on /cpus/cpu@2/interrupt-controller
+  irq 9 on /cpus/cpu@3/interrupt-controller
+  irq 9 on /cpus/cpu@4/interrupt-controller
+  irq 9 on /cpus/cpu@5/interrupt-controller
+  irq 9 on /cpus/cpu@6/interrupt-controller
+  irq 9 on /cpus/cpu@7/interrupt-controller
+  needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /cpus/cpu@4/interrupt-controller (interrupts); /cpus/cpu@5/interrupt-controller (interrupts); /cpus/cpu@6/interrupt-controller (interrupts); /cpus/cpu@7/interrupt-controller (interrupts); /soc (parent)
+/soc/gpio@d4019000 [ky,x1-gpio]: no driver
+  mmio 0xd4019000+0x800
+  irq 58 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/clock-controller@d4050000 (clock); /soc (parent)
+/soc/pinctrl@d401e000 [pinctrl-single]: firmware, U-Boot's pins
+  mmio 0xd401e000+0x400
+  needs /soc (parent)
+/soc/power-management@0 [ky,x1-pm-domain]: power-k1, bound 8
+  mmio 0xd4050000+0x3004
+  mmio 0xd4282800+0x400
+  needs /soc (parent)
+/soc/uart@d4017000 [ns16550]: kernel, the console
+  mmio 0xd4017000+0x100
+  needs /soc (parent)
+/soc/ddr@c0000000 [ky,ddr-ctl]: no driver
+  mmio 0xc0000000+0x400000
+  needs /soc (parent)
+/soc/ethernet@cac80000 [ky,x1-emac]: no driver
+  mmio 0xcac80000+0x420
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc/pinctrl@d401e000 (pins); /soc (parent)
+/soc/ethernet@cac80000/mdio/phy@0 [ethernet-phy-id001c.c916]: no driver
+  at 0x1 on its bus
+  needs /soc/ethernet@cac80000 (parent)
+/soc/udc@c0900100 [ky,mv-udc]: no driver
+  mmio 0xc0900100+0x4000
+  irq 105 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc (parent)
+/soc/usbphy1@c09c0000 [ky,usb2-phy]: no driver
+  mmio 0xc09c0000+0x200
+  needs /soc/clock-controller@d4050000 (clock); /soc (parent)
+/soc/ehci1@c0980100 [ky,mv-ehci]: no driver
+  mmio 0xc0980100+0x4000
+  irq 118 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc/usbphy1@c09c0000 (phy); /usb2hub (supply); /soc (parent)
+/soc/phy@c0b10000 [ky,x1-combphy]: no driver
+  mmio 0xc0b10000+0x800
+  mmio 0xd4282910+0x400
+  needs /soc/reset-controller@d4050000 (reset); /soc (parent)
+/soc/usb2phy@0xc0a30000 [ky,usb2-phy]: no driver
+  mmio 0xc0a30000+0x200
+  needs /soc/clock-controller@d4050000 (clock); /soc (parent)
+/soc/usb3@0 [ky,x1-dwc3]: no driver
+  irq 149 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /usb3hub (supply); /soc (parent)
+/soc/usb3@0/dwc3@c0a00000 [snps,dwc3]: no driver
+  mmio 0xc0a00000+0x10000
+  irq 125 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/phy@c0b10000 (phy); /soc/usb2phy@0xc0a30000 (phy); /soc/usb3@0 (parent)
+/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci-k1, waits for /soc/gpio@d4019000 (gpio): no driver
+  mmio 0xd4280000+0x200
+  irq 99 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc/pinctrl@d401e000 (pins); /soc/gpio@d4019000 (gpio); /soc (parent)
+/soc/sdh@d4280800 [ky,x1-sdhci]: disabled
+/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci-k1, bound 9
+  mmio 0xd4281000+0x200
+  irq 101 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc (parent)
+/soc/twsi0@d4010800 [ky,i2c]: disabled
+/soc/twsi1@d4011000 [ky,i2c]: disabled
+/soc/twsi2@d4012000 [ky,i2c]: no driver
+  mmio 0xd4012000+0x38
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc/pinctrl@d401e000 (pins); /soc (parent)
+/soc/twsi2@d4012000/eeprom@50 [atmel,24c02]: no driver
+  at 0x50 on its bus
+  needs /soc/twsi2@d4012000 (parent)
+/soc/twsi3@f0614000 [ky,i2c]: disabled
+/soc/twsi4@d4012800 [ky,i2c]: no driver
+  mmio 0xd4012800+0x38
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc (parent)
+/soc/twsi5@d4013800 [ky,i2c]: disabled
+/soc/twsi6@d4018800 [ky,i2c]: disabled
+/soc/twsi7@d401d000 [ky,i2c]: disabled
+/soc/twsi8@d401d800 [ky,i2c]: no driver
+  mmio 0xd401d800+0x38
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc (parent)
+/soc/twsi8@d401d800/pmic@41 [ky,spm8821]: no driver
+  at 0x41 on its bus
+  needs /soc/twsi8@d401d800 (parent)
+/soc/pwm@d401a000 [ky,x1-pwm]: disabled
+/soc/pwm@d401a400 [ky,x1-pwm]: disabled
+/soc/pwm@d4021800 [ky,x1-pwm]: disabled
+/soc/backlight [pwm-backlight]: disabled
+/soc/pcie@ca000000 [x1,dwc-pcie]: disabled
+/soc/pcie@ca400000 [x1,dwc-pcie]: no driver
+  mmio 0xca400000+0x1000
+  mmio 0xca700000+0x1ff24
+  mmio 0x90000000+0x100000
+  mmio 0xd4282bd4+0x8
+  mmio 0xc0c20000+0x1000
+  mmio 0xc0c10000+0x1000
+  mmio 0xd4282bcc+0x8
+  mmio 0xc0b10000+0x1000
+  irq 142 on /soc/interrupt-controller@e0000000
+  irq 146 on /soc/interrupt-controller@e0000000
+  needs /soc/interrupt-controller@e0000000 (interrupts); /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc/pinctrl@d401e000 (pins); /soc (parent)
+/soc/pcie@ca800000 [x1,dwc-pcie]: disabled
+/soc/spi0@d4026000 [ky,x1-spi]: disabled
+/soc/spi1@d4026800 [ky,x1-spi]: disabled
+/soc/spi2@f0613000 [ky,x1-spi]: disabled
+/soc/spi3@d401c000 [ky,x1-spi]: disabled
+/soc/spi@d420c000 [ky,x1-qspi]: no driver
+  mmio 0xd420c000+0x1000
+  mmio 0xb8000000+0xd00000
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc/pinctrl@d401e000 (pins); /soc (parent)
+/soc/spi@d420c000/flash@0 [jedec,spi-nor]: no driver
+  at 0x0 on its bus
+  needs /soc/spi@d420c000 (parent)
+/soc/fuse@f0702800 [ky,x1-efuse]: no driver
+  mmio 0xf0702800+0x400
+  needs /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc (parent)
+/soc/dpu@c0340000 [ky,dpu]: no driver
+  mmio 0xc0340000+0x2a000
+  mmio 0xc0440000+0x2a000
+  needs /soc (parent)
+/soc/mipi@d421a800 [ky,mipi-dsi]: disabled
+/soc/panel [ky,panel]: disabled
+/soc/hdmi@c0400500 [ky,hdmi]: no driver
+  mmio 0xc0400500+0x200
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc/power-management@0 (power domain); /soc/pinctrl@d401e000 (pins); /soc (parent)
+/soc/charging [k1,shutdown-charging]: disabled
+/pmu [riscv,pmu]: firmware, the firmware's
+/watchdog@D4080000 [ky,x1-wdt]: kernel, driven by the kernel
+  mmio 0xd4080000+0x1000
+  mmio 0xd4051020+0x4
+  needs /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset)
+/wdt_reboot [wdt-reboot]: no driver
+/usb2hub [ky,usb-hub]: no driver
+  needs /soc/gpio@d4019000 (gpio)
+/usb3hub [ky,usb-hub]: no driver
+  needs /soc/gpio@d4019000 (gpio)
+/vcc3v3-pcie-regulator [regulator-fixed]: no driver
+  needs /soc/gpio@d4019000 (gpio)
+/gpio-leds [gpio-leds]: no driver
+hwdb: pages 0xd4050000-0xd4053fff are shared: /soc/clock-controller@d4050000 /soc/reset-controller@d4050000 /soc/power-management@0 /watchdog@D4080000
+hwdb: pages 0xd4282000-0xd4282fff are shared: /soc/clock-controller@d4050000 /soc/reset-controller@d4050000 /soc/power-management@0 /soc/phy@c0b10000 /soc/pcie@ca400000
+hwdb: ky,x1: 20 disabled, 19 kernel, 5 firmware, 27 no driver, 1 waiting, 9 bound, 0 broken

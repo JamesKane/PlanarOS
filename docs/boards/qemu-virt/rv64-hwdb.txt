@@ -1,0 +1,91 @@
+/poweroff [syscon-poweroff]: no driver
+/reboot [syscon-reboot]: no driver
+/platform-bus@4000000 [qemu,platform]: hwdb, bound 1
+/cpus/cpu@0 [riscv]: kernel, a CPU
+  at 0x0 on its bus
+/cpus/cpu@0/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@0 (parent)
+/cpus/cpu@1 [riscv]: kernel, a CPU
+  at 0x1 on its bus
+/cpus/cpu@1/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@1 (parent)
+/cpus/cpu@2 [riscv]: kernel, a CPU
+  at 0x2 on its bus
+/cpus/cpu@2/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@2 (parent)
+/cpus/cpu@3 [riscv]: kernel, a CPU
+  at 0x3 on its bus
+/cpus/cpu@3/interrupt-controller [riscv,cpu-intc]: kernel, driven by the kernel
+  needs /cpus/cpu@3 (parent)
+/pmu [riscv,pmu]: firmware, the firmware's
+/fw-cfg@10100000 [qemu,fw-cfg-mmio]: no driver
+  mmio 0x10100000+0x18
+/flash@20000000 [cfi-flash]: no driver
+  mmio 0x20000000+0x2000000
+  mmio 0x22000000+0x2000000
+/soc [simple-bus]: hwdb, bound 2
+/soc/rtc@101000 [google,goldfish-rtc]: rtc-goldfish, bound 3
+  mmio 0x101000+0x1000
+  irq 11 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/serial@10000000 [ns16550a]: kernel, the console
+  mmio 0x10000000+0x100
+  irq 10 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/test@100000 [sifive,test1]: firmware, the firmware's
+  mmio 0x100000+0x1000
+  needs /soc (parent)
+/soc/virtio_mmio@10008000 [virtio,mmio]: virtio-mmio, bound 4
+  mmio 0x10008000+0x1000
+  irq 8 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10007000 [virtio,mmio]: virtio-mmio, bound 5
+  mmio 0x10007000+0x1000
+  irq 7 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10006000 [virtio,mmio]: virtio-mmio, bound 6
+  mmio 0x10006000+0x1000
+  irq 6 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10005000 [virtio,mmio]: virtio-mmio, bound 7
+  mmio 0x10005000+0x1000
+  irq 5 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10004000 [virtio,mmio]: virtio-mmio, bound 8
+  mmio 0x10004000+0x1000
+  irq 4 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10003000 [virtio,mmio]: virtio-mmio, bound 9
+  mmio 0x10003000+0x1000
+  irq 3 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10002000 [virtio,mmio]: virtio-mmio, bound 10
+  mmio 0x10002000+0x1000
+  irq 2 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/virtio_mmio@10001000 [virtio,mmio]: virtio-mmio, bound 11
+  mmio 0x10001000+0x1000
+  irq 1 on /soc/interrupt-controller@c000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+/soc/interrupt-controller@c000000 [sifive,plic-1.0.0]: kernel, driven by the kernel
+  mmio 0xc000000+0x600000
+  irq 9 on /cpus/cpu@0/interrupt-controller
+  irq 9 on /cpus/cpu@1/interrupt-controller
+  irq 9 on /cpus/cpu@2/interrupt-controller
+  irq 9 on /cpus/cpu@3/interrupt-controller
+  needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /soc (parent)
+/soc/clint@2000000 [sifive,clint0]: firmware, the firmware's
+  mmio 0x2000000+0x10000
+  irq 3 on /cpus/cpu@0/interrupt-controller
+  irq 7 on /cpus/cpu@0/interrupt-controller
+  irq 3 on /cpus/cpu@1/interrupt-controller
+  irq 7 on /cpus/cpu@1/interrupt-controller
+  irq 3 on /cpus/cpu@2/interrupt-controller
+  irq 7 on /cpus/cpu@2/interrupt-controller
+  irq 3 on /cpus/cpu@3/interrupt-controller
+  irq 7 on /cpus/cpu@3/interrupt-controller
+  needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /soc (parent)
+/soc/pci@30000000 [pci-host-ecam-generic]: pci, bound 12
+  mmio 0x30000000+0x10000000
+  needs /soc/interrupt-controller@c000000 (interrupts); /soc (parent)
+hwdb: riscv-virtio: 10 kernel, 3 firmware, 4 no driver, 12 bound, 0 broken

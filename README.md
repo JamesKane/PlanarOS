@@ -9,7 +9,7 @@ Planar is an operating system for one person and one machine. It turns a modern 
 - **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
 - **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
 
-Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). There are no drivers, filesystem or display yet; those are V4.
+Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). There are no drivers, filesystem or display yet; those are V4, which has the kernel calls drivers need and hwdb's device graph, tested on the host against each board's captured tree or tables ([V4](docs/v4-plan.md)).
 
 The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
@@ -41,8 +41,9 @@ make run                      # boot it in QEMU (Ctrl-A X quits)
 make PLATFORM=qemu-virt-a64 run
 make PLATFORM=hosted run      # or: build/hosted/planar some.dtb
 make PLATFORM=... test        # boot and check the transcript (tools/boot-check.py)
-make test-all                 # every platform that runs here: 10 boots, then compare-hw
-make check                    # portable code must not test arch or platform
+make test-all                 # every platform that runs here: 10 boots, compare-hw, hwdb-test
+make check                    # portable code must not test arch or platform; no match-table ties
+make hwdb-test                # hwdb's device graph on the captured trees and tables
 make PLATFORM=ky-x1 test      # the RV2, over the serial console
 make PLATFORM=uefi-a64 test   # the CIX P1, through its FreeBSD (BOARD=root@…)
 make vq3                      # the VQ3 soak of Areas under memory pressure

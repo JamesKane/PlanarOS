@@ -1,0 +1,98 @@
+/*
+ * servers/hwdb/drivers.c -- the match tables hwdb knows
+ *
+ * Until drivers are ELF programs (step 6) and carry their tables in a
+ * .note.planar.match section (§11.6), the tables are here. Only the
+ * drivers V4 plans are listed, each with the step that builds it: none
+ * of them is a program yet, so a node "bound" to one says what will bind
+ * it, in what order.
+ *
+ * The first three entries aren't processes. "kernel" is what the kernel
+ * drives itself (kernel/devmem.c's registry refuses leases over them);
+ * "firmware" is what M-mode owns on RISC-V; "hwdb" is what hwdb serves
+ * itself: buses whose children the tree already lists, fixed clocks.
+ */
+#include "hwdb.h"
+
+static const struct hw_match kernel[] = {
+    { "riscv,cpu-intc",         HW_SPECIFIC },
+    { "riscv,plic0",            HW_DEFAULT },
+    { "sifive,plic-1.0.0",      HW_SPECIFIC },
+    { "arm,gic-v3",             HW_SPECIFIC },
+    { "arm,armv8-timer",        HW_SPECIFIC },
+    { "arm,psci-1.0",           HW_SPECIFIC },
+    { "arm,psci-0.2",           HW_SPECIFIC },
+    { "arm,sbsa-gwdt",          HW_SPECIFIC },  /* the kernel finds it in the GTDT */
+    { "ky,x1-wdt",              HW_SPECIFIC },
+    { "spacemit,k1x-wdt",       HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
+static const struct hw_match firmware[] = {
+    { "riscv,clint0",           HW_DEFAULT },   /* the timer: through SBI */
+    { "sifive,clint0",          HW_SPECIFIC },
+    { "riscv,pmu",              HW_SPECIFIC },  /* SBI's PMU extension */
+    { "sifive,test0",           HW_DEFAULT },   /* QEMU's reset: SBI's SRST */
+    { nullptr, 0 },
+};
+
+static const struct hw_match hwdb[] = {
+    { "simple-bus",             HW_GENERIC },
+    { "fixed-clock",            HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
+/* Step 3: the first small drivers, to prove binding and restart. */
+static const struct hw_match virtio_mmio[] = {
+    { "virtio,mmio",            HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
+static const struct hw_match rtc_goldfish[] = {
+    { "google,goldfish-rtc",    HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
+static const struct hw_match rtc_pl031[] = {
+    { "arm,pl031",              HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
+/* Step 5: storage. */
+static const struct hw_match pci[] = {
+    { "pci-host-ecam-generic",  HW_SPECIFIC },
+    { "PNP0A08",                HW_DEFAULT },   /* PCI Express host bridge */
+    { nullptr, 0 },
+};
+
+static const struct hw_match sdhci_k1[] = {
+    { "ky,x1-sdhci",            HW_SPECIFIC },  /* the vendor's U-Boot tree */
+    { "spacemit,k1-sdhci",      HW_SPECIFIC },  /* Linux's */
+    { nullptr, 0 },
+};
+
+/* Step 7: the framebuffer and power. */
+static const struct hw_match display[] = {
+    { "simple-framebuffer",     HW_GENERIC },
+    { nullptr, 0 },
+};
+
+static const struct hw_match power_k1[] = {
+    { "ky,x1-pm-domain",        HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
+const struct hw_driver hw_drivers[] = {
+    { "kernel",         HW_DRV_KERNEL,      kernel },
+    { "firmware",       HW_DRV_FIRMWARE,    firmware },
+    { "hwdb",           HW_DRV_HWDB,        hwdb },
+    { "virtio-mmio",    HW_DRV_PROCESS,     virtio_mmio },
+    { "rtc-goldfish",   HW_DRV_PROCESS,     rtc_goldfish },
+    { "rtc-pl031",      HW_DRV_PROCESS,     rtc_pl031 },
+    { "pci",            HW_DRV_PROCESS,     pci },
+    { "sdhci-k1",       HW_DRV_PROCESS,     sdhci_k1 },
+    { "display",        HW_DRV_PROCESS,     display },
+    { "power-k1",       HW_DRV_PROCESS,     power_k1 },
+};
+
+const unsigned hw_ndrivers = sizeof hw_drivers / sizeof hw_drivers[0];

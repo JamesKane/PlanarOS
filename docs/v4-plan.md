@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** Step 1 is done. The four decisions at the end are made, as leaned.
+**Status: in progress (2026-10-20).** Steps 1 and 2 are done. The four decisions at the end are made, as leaned.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -23,7 +23,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 | Step | Content |
 |---|---|
 | **1. The kernel calls drivers need** ✅ | A boot bundle of servers, `CreateProcess`, handle passing, timers, device leases, interrupt binding, DMA Areas with quarantine, and the firmware tables as a read-only Area. |
-| **2. hwdb on the host** | The device graph from the device tree and from ACPI's static tables, quirks as data, match tables, ordering and the "what blocks whom" report. Tested against the captured trees and the CIX dumps. |
+| **2. hwdb on the host** ✅ | The device graph from the device tree and from ACPI's static tables, quirks as data, match tables, ordering and the "what blocks whom" report. Tested against the captured trees and the CIX dumps. |
 | **3. hwdb as the first server** | hwdb starts drivers in graph order, supervises and restarts them. `drv.library`. The first drivers are small ones on QEMU, and the kill test starts here. |
 | **4. `acpid`** | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
 | **5. Storage** | The `pci` server (ECAM, MSI-X through the ITS), NVMe on QEMU and the CIX, SDHCI on the RV2, the block class, GPT partitions. The queue-depth measurements. |
@@ -69,7 +69,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 - `ktimer_stop` and `irq_detach` now wait for a handler already running on another CPU, so what the handler uses can be freed once they return.
 - The process record holds a reference of its own while the process lives, and the watcher's fields are read before `dead` is set.
 
-## 2. hwdb on the host
+## 2. hwdb on the host ✅
 
 hwdb's graph logic is pure C (§11.5), so it's built and tested on the `hosted` platform first:
 - **The FDT source:** nodes, `compatible`, `reg` through `ranges`, `interrupts` through `interrupt-parent` and `interrupts-extended`, and the references (`clocks`, `resets`, `power-domains`, `*-supply`, `phys`) as `hw_ref` edges.
@@ -79,6 +79,33 @@ hwdb's graph logic is pure C (§11.5), so it's built and tested on the `hosted` 
 - **Ordering:** ready when every required supplier is bound, re-examining only the consumers of a node that binds, and a report of each node's state.
 
 **Tested against** the QEMU trees for both ISAs, the RV2's tree from U-Boot, and the CIX's static tables (`docs/boards/cix-p1/acpi`). Each node is expected to get the driver it should, or to say what it waits for.
+
+**Done (2026-10-20).** `servers/hwdb/`, about 2,400 lines of C with no library, which compiles freestanding for both ISAs (only `memset` from outside), so step 3 can run it as the server unchanged. `make hwdb-test` (part of `make test-all`) ends with `V4.2 done`; step 2 runs on the host only, so that line is the test's, not a boot's.
+
+- **The graph** (`hwdb.h`, `graph.c`): nodes with keys, resources (MMIO, interrupts with their line, bus addresses, ECAM), references (`hw_ref`: parent, interrupts, clock, reset, power domain, supply, phy, pins, GPIO, and the optional IOMMU, MSI, DMA and nvmem), and a state. All memory comes from one arena.
+- **The device tree source** (`fdt.c`): `reg` translated through each bus's `ranges` (a bus without them, as I2C or `/cpus`, gives bus addresses), interrupts through `interrupt-parent`, `interrupts-extended` and `interrupt-map`, PCI's `msi-map` and `iommu-map`, and the references above. A reference's supplier is the device its target belongs to, so a pin group means its pin controller and a PMIC's regulator means the PMIC. The console is `stdout-path`'s node.
+- **The static ACPI source** (`acpi.c`): the MADT's GIC (with its redistributors) and ITSs, a host bridge per MCFG range, the IORT's SMMUv3s and named components, with its ID mappings as references (a host bridge to its SMMU, and through it to the ITS for MSIs), the SPCR's and DBG2's serial ports, and the GTDT's timer and watchdogs. Static tables carry no `_HID`, so these nodes take the device tree's compatible for what they are (`arm,gic-v3-its`, `arm,smmu-v3`), and host bridges take `PNP0A08`: one match table then binds both ways. A named component gets no key: acpid gives it one (step 4).
+- **Quirks** (`quirks.c`): C tables keyed by the root compatible or the OEM IDs, naming nodes by path, to disable a node, mark it the firmware's, name the console, or pin or exclude a driver. Two boards have entries: the CIX's console is DBG2's port (as the kernel's quirk says), and on the RV2 the K1's clock, reset and pin controllers are U-Boot's until `power` takes them (step 7).
+- **Matching** (`match.c`, `drivers.c`): the node's most specific key that any driver takes decides, and the rank settles which driver takes it. The tables are in `drivers.c` until drivers are ELF (step 6): the kernel's own devices, M-mode's, hwdb's (`simple-bus`, fixed clocks), and the drivers V4 plans, none of which is a program yet. `make check` fails on a tie.
+- **Ordering** (`order.c`): a node is ready when its references are met; when one binds, only its consumers are looked at again. An optional reference is dropped at the start if its supplier can't bind, and, when nothing is ready, if it's what holds a node back, which breaks a cycle through it.
+- **The report** (`report.c`): each device with its driver and when it bound, or what it waits for and that supplier's state; with `--detail`, its resources and references. Then the pages devices share (see below).
+- **Tested** two ways. `servers/hwdb/test.c` builds graphs that break each rule (cycles with and without an optional edge, a phandle naming nothing, a disabled supplier, the count of nodes looked at again, ranks, ties, each quirk), then reads every blob and table cut short, changed at random, and shortened with its length and checksum mended, under the address sanitizer. Removing either of two bounds checks makes it fail. Then each captured description must give its report exactly: `docs/boards/qemu-virt/{rv64,a64}-hwdb.txt`, `docs/boards/orangepi-rv2/hwdb.txt` and `docs/boards/cix-p1/hwdb.txt`.
+- **The captures.** QEMU's trees, and the RV2's as U-Boot passes it, were taken by the kernel itself: the boot argument `dumpdtb` prints the blob as hex (`fdt_dump_blob`), and `tools/dtb-from-log.py` rebuilds it from the transcript. They include what OpenSBI and U-Boot change, which `dumpdtb` from QEMU or the dts in Linux's tree wouldn't. The RV2's is U-Boot's own control tree, `binman` nodes and all.
+
+**What the reports say:**
+- **QEMU:** everything planned binds, in order (the PL031 after its fixed clock). The ITS has no driver, so PCI's MSI reference is dropped.
+- **The RV2:** the eMMC's controller (`sdh@d4281000`) binds. The SD card's (`sdh@d4280000`) waits for the K1's GPIO controller, which reads its card detect: step 5 needs a GPIO driver, or a card that's assumed present.
+- **The CIX:** the three host bridges bind; their SMMU (`0xb010000`) and the ITS have no driver, so both references are dropped (the SMMU in bypass, as step 5 plans). The fourteen named components (DPUs, the NPU, the ISP) wait for acpid.
+
+**Found: devices that share pages.** A lease is whole pages and no page is in two, but:
+- QEMU AArch64's 32 virtio-mmio slots are 0x200 apart, eight to a page (the step 1 test leased one page for one device).
+- On the K1, the clock controller, the reset controller, the power domains and the kernel's watchdog share the MPMU's pages at `0xd4050000`, and the first three share `0xd4282000` with the PCIe controller and its PHY. `CreateLease` would refuse `power` the first: the kernel uses it.
+
+Step 3 has to choose: one lease per run of shared pages, held by one driver that serves the others (a virtio-mmio bus driver for its slots; `power` for the K1's system controllers, with the watchdog's register reached through it or kept as the kernel's), or leases smaller than a page. The report lists each such run.
+
+**Not as planned:**
+- **No "what blocks whom" chain,** only each node's direct blockers and their states. Following them takes one look per step, and the real trees' chains are one or two long.
+- **Shutdown and resume order** aren't computed yet: the graph has what they need, and they come with `power`.
 
 ## 3. hwdb as the first server
 

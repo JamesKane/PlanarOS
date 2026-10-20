@@ -16,7 +16,9 @@
 #                                  from the device tree and ACPI
 #   make PLATFORM=... soak         boot SOAK times (100) and count failures
 #   make vq3                       the VQ3 soak of Areas, on each QEMU platform
-#   make check                     portable code must not test arch or platform
+#   make check                     portable code must not test arch or platform,
+#                                  and no two drivers' match tables tie
+#   make hwdb-test                 hwdb's device graph on the captured trees
 #
 # mk/<platform>.mk names the arch and board compile units, and includes
 # mk/arch-<arch>.mk for the arch units and the link rule. Portable units
@@ -98,7 +100,7 @@ CPPFLAGS += -Iarch/$(ARCH)/include
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -128,7 +130,7 @@ TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
 # and RK3588 boards enter it), and through UEFI at EL1 and EL2, from the
 # device tree and from ACPI; RV64 with 17 GiB (RAM and the device tree
 # above 16 GiB); the hosted build, alone and on the CIX's ACPI tables.
-# Then the AArch64 boots' facts are compared.
+# Then the AArch64 boots' facts are compared, and hwdb's graph tested.
 test-all:
 	@rm -f $(A64_FACTS)/facts-*.txt
 	@for p in $(TEST_PLATFORMS); do \
@@ -143,6 +145,7 @@ test-all:
 	@$(MAKE) --no-print-directory PLATFORM=hosted test
 	@$(MAKE) --no-print-directory PLATFORM=hosted ACPI_BOARD=cix-p1 test
 	@$(MAKE) --no-print-directory compare-hw
+	@$(MAKE) --no-print-directory hwdb-test
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.
@@ -177,8 +180,48 @@ soak: $(IMAGE)
 	    { fails=$$((fails + 1)); cp $(BUILD)/soak-last.log $(BUILD)/soak-fail-$$fails.log; }; \
 	done; echo "soak: $$fails of $(SOAK) boots failed ($(PLATFORM))"; test $$fails -eq 0
 
-check:
+# hwdb's graph (servers/hwdb, docs §11.5), built for the host with the
+# sanitizers. hwdb-test runs its rules on made-up graphs and damaged
+# blobs, then each captured description against the report it should
+# give (docs/boards/*/hwdb*.txt); HWDB_UPDATE=1 rewrites the reports.
+HWDB_BUILD := build/hwdb
+HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c,$(wildcard servers/hwdb/*.c))
+HWDB_HOST := $(HWDB_BUILD)/hwdb-host
+HWDB_TEST := $(HWDB_BUILD)/hwdb-test
+HWDB_CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O1 -g \
+	-fsanitize=address,undefined -fno-sanitize-recover=all -Iservers/hwdb
+CIX_ACPI := $(wildcard docs/boards/cix-p1/acpi/*.dat)
+
+# Each case: the report file, then hwdb-host's source arguments.
+HWDB_CASES := \
+	docs/boards/qemu-virt/rv64-hwdb.txt@--dtb@docs/boards/qemu-virt/rv64.dtb \
+	docs/boards/qemu-virt/a64-hwdb.txt@--dtb@docs/boards/qemu-virt/a64.dtb \
+	docs/boards/orangepi-rv2/hwdb.txt@--dtb@docs/boards/orangepi-rv2/u-boot.dtb \
+	docs/boards/cix-p1/hwdb.txt@--acpi@$(subst $(eval) ,@,$(CIX_ACPI))
+
+$(HWDB_HOST): $(HWDB_SRCS) servers/hwdb/host.c servers/hwdb/hwdb.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS) $(HWDB_SRCS) servers/hwdb/host.c -o $@
+
+$(HWDB_TEST): $(HWDB_SRCS) servers/hwdb/test.c servers/hwdb/hwdb.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS) $(HWDB_SRCS) servers/hwdb/test.c -o $@
+
+check: $(HWDB_HOST)
 	@tools/check-portable.sh
+	@$(HWDB_HOST) --ties
+
+hwdb-test: $(HWDB_HOST) $(HWDB_TEST)
+	@$(HWDB_TEST) docs/boards/qemu-virt/a64.dtb $(CIX_ACPI)
+	@$(HWDB_TEST) docs/boards/orangepi-rv2/u-boot.dtb $(CIX_ACPI) >/dev/null
+	@for c in $(HWDB_CASES); do \
+	  set -- $$(echo $$c | tr @ ' '); want=$$1; shift; \
+	  if [ "$(HWDB_UPDATE)" = 1 ]; then $(HWDB_HOST) --detail "$$@" > $$want || exit 1; fi; \
+	  $(HWDB_HOST) --detail "$$@" | diff -u $$want - || \
+	    { echo "hwdb-test: FAILED: $$want"; exit 1; }; \
+	  echo "hwdb-test: ok: $$(tail -1 $$want)"; \
+	done
+	@echo "V4.2 done: hwdb's graph on $(words $(HWDB_CASES)) captured descriptions"
 
 clean:
 	rm -rf build

@@ -100,6 +100,8 @@ Kernel entry contract (`arch_entry`):
 
 **Built (V4 step 1).** The kernel calls drivers need ([v4-plan](v4-plan.md)): processes made by processes, which never outlive their creator's handle; `CurrentTime` and `ArmTimer`; device leases (`kernel/lease.c`), created only with the device root, granted to one driver at a time, with lines delivered as signals and DMA Areas quarantined when a driver dies with them; and `MapFirmware` for the firmware's tables. `GrantLease` replaces `SendHandle` for now: hwdb keeps the leases it hands out.
 
+**Built (V4 step 2).** hwdb's device graph (`servers/hwdb/`), run on the host for now: a device tree source and a static ACPI source, quirks as C tables, matching by rank with `make check` refusing ties, and binding in dependency order that looks again only at the consumers of a node that binds. It's tested on the QEMU trees, the RV2's U-Boot tree and the CIX's tables, each against its expected report ([v4-plan](v4-plan.md)).
+
 **Built (V3 step 5).** On AArch64, as on RV64, a kernel call saves only what the calling convention keeps, and zeroes the scratch registers on the way out. On the CIX a null kernel call is 258 cycles on an A720 and 586 on an A520, and a `DoMsg` round trip 1,533 and 3,366 (the RV2: 469 and 3,209). `make PROFILE=1` profiles both ISAs.
 
 **Built (V3 step 3).** One `uefi-a64` image runs on the CIX P1, with no board-specific code: the board's differences are ACPI quirk data. Leaving EL2, the entry code writes every EL2 control that can trap EL1 whole, because on a core just started by PSCI they're UNKNOWN. The direct map covers 1 TiB. The GTDT's SBSA watchdog is kept armed, so a hang resets the board.

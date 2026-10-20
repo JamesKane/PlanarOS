@@ -103,6 +103,8 @@ The hwdb's `hw_ref`s (power domain, clock, reset, regulator, PHY, and from ACPI 
 
 The graph logic (insertion, cycles, order, the "what blocks whom" report) is pure C. It runs and is tested on the `hosted` platform against captured device trees and ACPI dumps (§11.10).
 
+**Built (V4 step 2):** `servers/hwdb/order.c` and `report.c`, as proposed. Optional references are DMA, IOMMU, MSI and nvmem; everything else is required. An optional one is dropped at the start when its supplier can't bind, and when nothing is ready if it's what holds a node back. The report gives each node's direct blockers with their states, not the whole chain. Matching (`match.c`) takes the node's first key any driver lists, then the highest rank, and `make check` refuses a tie; the tables are in `servers/hwdb/drivers.c` until drivers are ELF.
+
 ### Power before lease (D3)
 
 §2.4 says "drivers ask `power` for their unit before touching its registers". That is a rule enforced by convention, and the survey's class 7 is what happens when it is broken. On the CIX GPU it is an SError; on the Q8B it is a SoC reset.
