@@ -197,6 +197,20 @@ Should `font.library` cache `4×` horizontal subpixel phases (`0.0`, `0.25`, `0.
 
 Raised in §14.7.
 
+## Audio and DSP
+
+**VQ36 Hardware Audio DSP offload (`sky1_audss0` HiFi4, Q8B ADSP) vs. efficiency-core SIMD.**
+
+Should V5/V6 drive the on-SoC audio DSPs, or run `audio` and `dsp.library` on an efficiency core (A520 on CIX, X60 on RV2) and keep the `dsp-*` queue lease optional? *Leaning:* run `audio` and `dsp.library` on CPU SIMD first (pinned to an A520 / cluster-1 core); keep the `DSP_PROVIDER_LEASE` hook in `dsp.library` so `sky1_audss0` can be bound later without changing client code.
+
+Raised in §15.5 and §15.9.
+
+**VQ37 Native tracker / module format support (`mod.library`).**
+
+Should a compact tracker module player (`MOD` / `XM` or native `.pmod` using `F32` samples) ship in user space on top of `audio.library`'s retained `AudioVoice` API? *Leaning:* yes, a small bounds-checked `mod.library` (`< 1,500` lines of C23) as a system utility and conformance test of sample-accurate `Conductor` ticks.
+
+Raised in §15.9.
+
 ## Coprocessors
 
 **VQ16 Is the Hexagon CDSP in scope?**

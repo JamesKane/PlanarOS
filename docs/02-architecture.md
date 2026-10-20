@@ -62,6 +62,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 | `blk` drivers | SDHCI, eMMC, NVMe (PCIe), and later UFS. | RV2 / RK3588 |
 | `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. | RV2 (Omega A2 already has flips and a sprite plane) |
 | `input` | USB HID through an xHCI/DWC3 driver. | CIX |
+| `audio` | Real-time SIMD voice/stream mixer, Paula-style precedence and exclusive DMA leases over HDA (CIX ALC269), I²S (RK3588/K1) and `virtio-snd` ([§15](15-audio-dsp.md), proposed). | QEMU / CIX |
 | `net` | RTL8125 (PCIe), the K1 EMAC, and a TCP/IP stack (**VQ15**). | later |
 | `gpu-*` | One per GPU family, granting queue leases (§5). | CIX (Panthor, G720), then RK3588 |
 | `npu-*` | Per NPU family. | CIX / RK3588 |
