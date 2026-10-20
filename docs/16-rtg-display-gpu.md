@@ -216,7 +216,145 @@ We drop legacy bitplane-specific entry points (`BltTemplate` planar masks, `Area
 
 ---
 
-## 16.5 Fault Tolerance: "Let It Crash" for Display and GPU
+## 16.5 The 3D API (`gfx3d.library`): From RTG `BitMap` to First Triangle
+
+Modern desktop 3D APIs (Vulkan, Direct3D 12) require 800–1,200 lines of boilerplate before drawing a single triangle because they assume separate CPU and GPU address spaces, opaque driver heaps, descriptor pools, binding tables, `dma-buf` file-descriptor export/import, and swapchain surface negotiations.
+
+In Planar, **three architectural facts collapse that boilerplate by 10×**:
+
+1. **Universal pointers (`VA = PA`) across CPU, GPU and DPU (P2):**
+   The `gpu-*` server maps the process's granted `Area`s into the GPU's stage-1 MMU at the **exact same 64-bit address** ([§5.3](05-coprocessors.md#53-by-board)). A vertex buffer, index buffer, uniform block or texture is not an opaque handle or descriptor-set binding—it is a plain C pointer (`const Vertex *`) inside a shared `Area`.
+2. **An RTG `BitMap` is already a GPU render target:**
+   `AllocBitMap(w, h, PIXFMT_ARGB8888, BMF_DISPLAYABLE | BMF_GPU_RENDER, screen_bm)` returns a `BitMap` whose `bm_BaseAddr` can be handed straight to the GPU's tile/fragment writeback unit and straight to the DPU's scanout plane.
+3. **Command encoding is purely user-mode memory writing:**
+   `gfx3d.library` runs in the caller's protection domain. Encoding a render pass writes hardware descriptors and command stream words (Mali CSF `RUN_IDVS` + Tiler/Fragment descriptors on G720/G610, or Adreno CP Type-7 packets on Q8B) directly into the application's [§5.1 Queue Lease](05-coprocessors.md#51-the-abstraction) ring and rings the user-mode doorbell.
+
+### Core `gfx3d.library` Objects (Stateless & Pointer-First)
+
+| Object | What it is in Planar | Why it's tiny |
+|---|---|---|
+| **`Gfx3DCtx`** | User-mode wrapper around a §5.1 GPU `QueueLease` + descriptor scratch `Area` | Created once via `Gfx3D_CreateContext(screen_or_friend_bm)`. Maps the hardware doorbell and ring. |
+| **`Gfx3DPipeline`** | Compiled shader binary (`Area`) + fixed-function blend/depth/raster state words | No descriptor-set layouts! Shaders take one **64-bit root argument pointer** (`void *shader_args`) in a hardware uniform/push register and dereference buffers/textures directly by pointer. |
+| **`Gfx3DPass`** | Tile-Based Deferred Rendering (TBDR) load/clear/store attachment descriptor targeting a `BitMap *` | Maps directly to Mali/Adreno/IMG on-chip tile memory (`LOAD_CLEAR`, `STORE_COLOR_BITMAP`, `DONT_CARE_DEPTH`). |
+| **`Gfx3DCmd`** | Lightweight cursor into the Queue Lease command ring | Encodes draws, dispatches and end-of-pass sequence barriers without allocating heap memory. |
+
+### Complete C23 Example: Drawing the First GPU Triangle onto an Intuition Window / Screen
+
+```c
+#include <planar/exec.h>
+#include <planar/gfx.h>
+#include <planar/gfx3d.h>
+#include <planar/intuition.h>
+
+typedef struct {
+    float pos[4];   // x, y, z, w
+    float color[4]; // r, g, b, a
+} Vertex;
+
+typedef struct {
+    const Vertex *verts; // Universal pointer (CPU VA == GPU VA == PA)
+    float         mvp[16];
+} TriShaderArgs;
+
+// Precompiled shader binary embedded at build time (C23 #embed)
+static const uint8_t vs_fs_bin[] = {
+    #embed "triangle_shader.gbin"
+};
+
+void draw_first_triangle(Window *win) {
+    // 1. Open a 3D context (acquires a §5.1 GPU Queue Lease & grants window Areas to GPU MMU)
+    Gfx3DCtx *gpu = Gfx3D_CreateContext(win->RPort->BitMap, 0);
+
+    // 2. Allocate a GPU-visible Area for vertices and shader arguments (universal pointers!)
+    AreaHandle data_area = AllocArea(4096, AREAF_READ | AREAF_WRITE | AREAF_GPU);
+    Gfx3D_GrantArea(gpu, data_area); // Identity-maps data_area into the process's GPU MMU context
+
+    Vertex *vbuf = (Vertex *)QueryArea(data_area).base;
+    vbuf[0] = (Vertex){ {  0.0f,  0.6f, 0.0f, 1.0f }, { 0.94f, 0.55f, 0.13f, 1.0f } }; // Signal Amber
+    vbuf[1] = (Vertex){ { -0.6f, -0.6f, 0.0f, 1.0f }, { 0.23f, 0.51f, 0.96f, 1.0f } }; // Cobalt Blue
+    vbuf[2] = (Vertex){ {  0.6f, -0.6f, 0.0f, 1.0f }, { 0.94f, 0.96f, 0.98f, 1.0f } }; // Ice White
+
+    TriShaderArgs *args = (TriShaderArgs *)(vbuf + 4);
+    args->verts = vbuf; // <-- Plain pointer! No vkBindVertexBuffers or descriptor sets.
+
+    // 3. Create the pipeline state object from the embedded shader binary
+    Gfx3DPipeline *pipe = Gfx3D_CreatePipeline(gpu, &(Gfx3DPipelineDesc){
+        .shader_bin  = vs_fs_bin,
+        .shader_size = sizeof(vs_fs_bin),
+        .color_fmt   = GetBitMapAttr(win->RPort->BitMap, BMA_PIXELFORMAT),
+        .cull_mode   = GFX3D_CULL_NONE,
+        .blend_mode  = BLEND_SRC_OVER,
+    });
+
+    // 4. Acquire the window's back-buffer BitMap (or ScreenBuffer)
+    ScreenBuffer *sbuf = ObtainWindowBackBuffer(win); // Waits on sbuf->safe_seq if needed
+
+    // 5. Record the command stream directly into the Queue Lease ring (zero syscalls!)
+    Gfx3DCmd cmd = Gfx3D_Begin(gpu);
+
+    Gfx3D_BeginPass(&cmd, &(Gfx3DPass){
+        .color_target = sbuf->sb_BitMap,     // RTG BitMap is directly the GPU render target
+        .load_op      = GFX3D_LOAD_CLEAR,
+        .store_op     = GFX3D_STORE_WRITEBACK,
+        .clear_color  = { 0.07f, 0.09f, 0.13f, 1.0f }, // #121822 deep slate
+    });
+
+    Gfx3D_BindPipeline(&cmd, pipe);
+    Gfx3D_Draw(&cmd, &(Gfx3DDraw){
+        .shader_args  = args,                // Passed in 64-bit GPU root/push register
+        .vertex_count = 3,
+        .instance_count = 1,
+    });
+
+    Gfx3D_EndPass(&cmd);
+
+    // 6. Ring the hardware GPU doorbell in user mode and get the 64-bit completion fence
+    uint64_t gpu_done_seq = Gfx3D_Submit(gpu, &cmd);
+
+    // 7. Hand the BitMap and the GPU's sync sequence number to intuition/display for vblank flip
+    PresentWindow(win, sbuf, &(PresentSync){
+        .in_sync_area = Gfx3D_GetSyncArea(gpu),
+        .in_seq       = gpu_done_seq,
+    });
+}
+```
+
+### What Happens Under the Hood on CIX P1 (Immortalis-G720 CSF + Linlon DPU)
+
+```
+Step   CPU / User Process (`gfx3d.library`)       Immortalis-G720 MCU (CSF)        Linlon DPU (`display`)
+────   ────────────────────────────────────       ─────────────────────────        ──────────────────────
+1–3    Allocates Area, writes 3 Vertex structs
+       and args->verts = vbuf at PA 0x8040_0000.
+5      Gfx3D_BeginPass / Gfx3D_Draw writes a
+       Mali Frame + Tiler + IDVS job descriptor
+       referencing sbuf->sb_BitMap->bm_BaseAddr
+       and args (0x8040_0000) into CSF ring.
+6      Gfx3D_Submit writes CSF user doorbell  ──▶ Firmware wakes, runs IDVS
+       page (`AREAF_DEVICE`, zero kernel trap!).  vertex shading + tiling +
+                                                  fragment shading in on-chip
+                                                  tile SRAM; writes finished
+                                                  16×16 tiles to sb_BitMap;
+                                                  writes gpu_sync.seq = N.
+7      PresentWindow enqueues flip request    ───────────────────────────────────▶ Sees gpu_sync.seq == N,
+       on intuition SPSC ring (zero trap).                                         latches sb_BitMap->bm_BaseAddr
+                                                                                   into Linlon layer register
+                                                                                   at next vblank!
+```
+
+### How Shaders Work Without porting Mesa (**VQ41**)
+
+Because §0.3 rules out dragging 2M+ lines of Mesa/LLVM into Planar userspace, shader compilation follows a clean split between **portable offline/host IR** and **small board-specific micro-compilers**:
+
+1. **Offline / Build-time (`tools/shaderc`)**: Shaders written in GLSL/WGSL/HLSL or Planar's compact shader DSL are compiled at build time into a compact, stripped **SPIR-V subset** (or pre-assembled `.gbin` bundle containing the target ISA sections for Valhall/Immortalis, Adreno A6xx, and a C23 SIMD tile-rasteriser fallback) and embedded via C23 `#embed`.
+2. **Runtime (`gfx3d.library` backend)**:
+   - Every target GPU supports **64-bit buffer device addresses** natively (`LDR`/`LDG` from a 64-bit base register in Arm Valhall/Immortalis ISA and Qualcomm A6xx ISA).
+   - Because all resource access goes through that single 64-bit `shader_args` pointer, the ISA backend never has to implement Vulkan's complex descriptor-table indirection, binding-model remapping or pipeline-layout patching.
+   - Before a board's native 3D ISA backend is ready, `gfx3d.library` executes the exact same `Gfx3DPass` and `Gfx3DDraw` calls on CPU SIMD (`GFX_BACKEND_SIMD` tiled software rasteriser across big/little cores), so every 3D test and application runs deterministically on `hosted`, QEMU, and RV2 from day one.
+
+---
+
+## 16.6 Fault Tolerance: "Let It Crash" for Display and GPU
 
 Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-let-it-crash.md) to the RTG pipeline guarantees that neither a crashing 3D client nor a wedged GPU takes down the display:
 
@@ -231,7 +369,7 @@ Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-
 
 ---
 
-## 16.6 Hardware Mapping Across Target Boards
+## 16.7 Hardware Mapping Across Target Boards
 
 | Board / SoC | Display Controller (`display` server) | Hardware Planes & Formats | GPU (`gpu-*` server) | Memory & Coherency Notes |
 |---|---|---|---|---|
@@ -243,7 +381,7 @@ Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-
 
 ---
 
-## 16.7 Summary of API Lineage: Commodore V39 → Planar RTG
+## 16.8 Summary of API Lineage: Commodore V39 → Planar RTG
 
 | Commodore V36–V40 Primitive | Role in Original Spec | Planar RTG Equivalent |
 |---|---|---|
@@ -256,11 +394,11 @@ Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-
 | `MakeVPort` + `MrgCop` | Compiles and merges `ViewPort`s into a Copper list | Plane planner in `intuition` + `display`: assigns visible layers to DPU hardware planes and falls back to composition only when planes are exhausted. |
 | `LoadView` | Latches new Copper list at vblank | Atomic DPU register commit latched on vertical blank. |
 | `AllocScreenBuffer` / `ChangeScreenBuffer` (`DBufInfo`) | Tear-free flipping via `dbi_SafeMessage` & `dbi_DispMessage` ports | Zero-trap `PresentWindow` / `ChangeScreenBuffer` ring messages with 64-bit `in_fence` (GPU sync) and `disp_seq` / `safe_seq` (`WaitAddr` vblank sync). |
-| `QBlit` / Copper / Hombre `Natalie` | Asynchronous coprocessor command queues | [§5.1 Queue Lease](05-coprocessors.md#51-the-abstraction) (`gpu-panthor`, `gpu-msm`) + `gfx.library` dual SIMD/GPU backend. |
+| `QBlit` / Copper / Hombre `Natalie` | Asynchronous coprocessor command queues | [§5.1 Queue Lease](05-coprocessors.md#51-the-abstraction) (`gpu-panthor`, `gpu-msm`) + `gfx.library` / `gfx3d.library`. |
 
 ---
 
-## 16.8 Open Questions
+## 16.9 Open Questions
 
 - **VQ38 Compressed / Tiled Framebuffer Modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. Linear-Only Surfaces in V5.**
   Both the CIX P1 (Immortalis-G720 + Linlon DPU) and RK3588 (Mali-G610 + VOP2) support **Arm Frame Buffer Compression (AFBC)** end-to-end: the GPU renders compressed 16×16 superblocks into memory and the DPU scans them out directly, cutting memory bandwidth by ~40–50%. However, CPU SIMD (`GFX_BACKEND_SIMD`) cannot cheaply draw single pixels into an AFBC buffer without a tile decoder/encoder. Should `AllocBitMap` default to `MOD_LINEAR` and reserve `MOD_AFBC_16x16` for explicit `BMF_GPU_RENDER | BMF_DISPLAYABLE` surfaces?
@@ -273,3 +411,7 @@ Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-
 - **VQ40 Color Space and HDR10 / Wide-Gamut Scanout (`XRGB2101010`, `FP16`).**
   Linlon (CIX P1), VOP2 (RK3588) and MDSS (Q8B) all have per-plane hardware degamma/CSC/gamma blocks capable of blending sRGB UI planes (`ARGB8888`) with 10-bit HDR (`RGB10A2` / `BT.2020 PQ`) video or GPU planes on the fly during scanout. Should `BitMap` carry `bm_ColorSpace` from day one so `MakeVPort` can program the DPU's per-plane CSC matrices automatically?
   *Leaning:* yes; `bm_ColorSpace` defaults to `CS_SRGB` (`0`), costs 4 bytes in `struct BitMap`, and lets the DPU hardware colour-manage HDR/YUV planes without touching `intuition`'s sRGB UI rendering.
+
+- **VQ41 Shader compilation pipeline (`tools/shaderc` fat `.gbin` vs. runtime micro-JIT in `gfx3d.library`).**
+  Should shaders ship as fat `.gbin` binaries compiled on the host by `tools/shaderc` (carrying Valhall/Immortalis, Adreno A6xx and SIMD bytecode sections) or should `gfx3d.library` include a small (~5–8k LoC) runtime translator from a restricted pointer-based SPIR-V subset to native GPU ISA?
+  *Leaning:* build-time `tools/shaderc` `.gbin` bundles first for V5 (so the V5 triangle and compute demos need zero runtime compiler complexity on the board), then add a tiny pointer-first SPIR-V translator in user space once both G720/G610 and Adreno 690 are up.

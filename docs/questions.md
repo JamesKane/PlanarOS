@@ -213,7 +213,13 @@ Raised in §16.3 and §16.8.
 
 Should `BitMap` carry `bm_ColorSpace` (`CS_SRGB`, `CS_BT709`, `CS_BT2020_PQ`) from day one so `MakeVPort` can program the DPU's hardware per-plane degamma/CSC/gamma blocks automatically? *Leaning:* yes; it defaults to `CS_SRGB` (`0`) and lets the DPU blend sRGB UI planes with HDR10/YUV planes during scanout.
 
-Raised in §16.3 and §16.8.
+Raised in §16.3 and §16.9.
+
+**VQ41 Shader compilation pipeline (`tools/shaderc` fat `.gbin` vs. runtime micro-JIT in `gfx3d.library`).**
+
+Should shaders ship as fat `.gbin` binaries compiled on the host by `tools/shaderc` (carrying Valhall/Immortalis, Adreno A6xx and SIMD bytecode sections) or should `gfx3d.library` include a small (~5–8k LoC) runtime translator from a restricted pointer-based SPIR-V subset to native GPU ISA? *Leaning:* build-time `tools/shaderc` `.gbin` bundles first for V5 (so the V5 triangle and compute demos need zero runtime compiler complexity on the board), then add a tiny pointer-first SPIR-V translator in user space once both G720/G610 and Adreno 690 are up.
+
+Raised in §16.5 and §16.9.
 
 ## Audio and DSP
 
