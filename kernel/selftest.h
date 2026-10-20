@@ -28,4 +28,9 @@ void selftest_tasks(void *);
 /* V1 step 4: processes in user mode. Called from selftest_tasks. */
 void selftest_user(void);
 
+/* V1 step 5: Areas, in the boot's layout, and the VQ3 soak of both
+ * layouts. Called from selftest_tasks. */
+void selftest_areas(void);
+void selftest_vq3(void);
+
 #endif /* KERNEL_SELFTEST_H */

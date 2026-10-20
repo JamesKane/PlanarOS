@@ -24,14 +24,18 @@ BUILD := build/$(PLATFORM)
 # Portable compile units: built for every platform.
 PORTABLE_SRCS := \
 	kernel/main.c \
+	kernel/area.c \
+	kernel/bootargs.c \
 	kernel/console.c \
 	kernel/fdt.c \
 	kernel/handle.c \
 	kernel/intc.c \
 	kernel/irq.c \
+	kernel/kmalloc.c \
 	kernel/kprintf.c \
 	kernel/kstring.c \
 	kernel/ktime.c \
+	kernel/layout.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
 	kernel/process.c \
@@ -39,17 +43,24 @@ PORTABLE_SRCS := \
 	kernel/selftest.c \
 	kernel/smp.c \
 	kernel/syscall.c \
+	kernel/va.c \
 	drivers/pl011.c \
 	drivers/plic.c \
 	drivers/uart8250.c
 
 # What every boot transcript must end with (tools/boot-check.py).
-EXPECT := V1.4 done
+EXPECT := V1.5 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 CPPFLAGS := -Iinclude -Ikernel -Idrivers
 
 include mk/toolchain.mk
+
+# Kernel arguments for QEMU runs: the user layout (docs §3.1, VQ3;
+# kernel/layout.h) and anything else (BOOTARGS=vq3 runs the VQ3 soak).
+LAYOUT ?= identity
+BOOTARGS ?=
+QEMU_MEM ?= 256M
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
@@ -62,7 +73,7 @@ CPPFLAGS += -Iarch/$(ARCH)/include
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all soak check clean
+.PHONY: all run test test-all vq3 soak check clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -80,15 +91,25 @@ $(BUILD)/%.S.o: %.S
 test: $(IMAGE)
 	python3 -I tools/boot-check.py --expect '$(EXPECT)' -- $(RUN_CMD)
 
-TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64 hosted
 
-# ...and AArch64 once more entered at EL2, as the CIX and RK3588 boards
-# enter it (the drop to EL1, PSCI over smc).
+TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
+
+# Both ISAs in both layouts, AArch64 once more entered at EL2 (as the CIX
+# and RK3588 boards enter it), and the hosted build.
 test-all:
+	@for p in $(TEST_PLATFORMS); do for l in identity global; do \
+	  $(MAKE) --no-print-directory PLATFORM=$$p LAYOUT=$$l test || exit 1; \
+	done; done
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 LAYOUT=global test
+	@$(MAKE) --no-print-directory PLATFORM=hosted test
+
+# The VQ3 measurement (docs/v1-plan.md): the same random workload against
+# both layouts, on each QEMU platform. Slow, so not part of make test.
+vq3:
 	@for p in $(TEST_PLATFORMS); do \
-	  $(MAKE) --no-print-directory PLATFORM=$$p test || exit 1; \
+	  $(MAKE) --no-print-directory PLATFORM=$$p BOOTARGS=vq3 QEMU_MEM=$(QEMU_MEM) test | \
+	    grep -E 'V1.5 vq3|boot-check'; \
 	done
-	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 test
 
 # Boot many times and count failures: races that show once in a hundred
 # boots don't show in one. make PLATFORM=... soak [SOAK=100]

@@ -4,6 +4,7 @@
 #include <planar/syscalls.h>
 
 #include "arch.h"
+#include "area.h"
 #include "handle.h"
 #include "kprintf.h"
 #include "process.h"
@@ -87,6 +88,18 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
         if ((int64_t)a[0] >= 16 && (int64_t)a[0] < 64)
             self->sig_alloc &= ~(1ULL << a[0]);
         return 0;
+    case SYS_ALLOC_AREA:
+        return area_alloc_call(a[0], (uint32_t)a[1], a[2]);
+    case SYS_FREE_AREA:
+        return area_free_call((uint32_t)a[0]);
+    case SYS_SHARE_AREA:
+        return area_share_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2]);
+    case SYS_UNSHARE_AREA:
+        return area_unshare_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_PROTECT_AREA:
+        return area_protect_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_QUERY_AREA:
+        return area_query_call(a[0], a[1]);
     default:
         return ERR_NOSYS;
     }

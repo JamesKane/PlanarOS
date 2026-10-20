@@ -135,6 +135,10 @@ void arch_domain_switch(struct arch_domain *d);
 /* ASIDs in use, for leak checks. */
 unsigned arch_domains_live(void);
 
+/* Page-table pages a domain holds for its own half, root included (the
+ * VQ3 measurements). */
+unsigned arch_domain_tables(struct arch_domain *d);
+
 /* Leave the kernel for user mode at 'pc' with 'sp', and 'arg0' and 'arg1'
  * as the first two arguments, in the running task's domain. The task
  * comes back through the trap path. */

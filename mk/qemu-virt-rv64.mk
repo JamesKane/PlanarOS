@@ -9,8 +9,8 @@ PLAT_SRCS := \
 
 QEMU ?= qemu-system-riscv64
 
-RUN_CMD := $(QEMU) -machine virt -cpu rv64,v=true,vlen=256 -smp 4 -m 256M \
-	-nographic -bios default -kernel $(IMAGE)
+RUN_CMD := $(QEMU) -machine virt -cpu rv64,v=true,vlen=256 -smp 4 -m $(QEMU_MEM) \
+	-nographic -bios default -kernel $(IMAGE) -append 'layout=$(LAYOUT) $(BOOTARGS)'
 
 run: $(IMAGE)
 	$(RUN_CMD)

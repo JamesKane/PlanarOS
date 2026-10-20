@@ -15,6 +15,7 @@
 enum handle_type : uint8_t {
     HANDLE_FREE,
     HANDLE_TASK,
+    HANDLE_AREA,
 };
 
 struct process;

@@ -2,8 +2,10 @@
  * arch/rv64/trap.c -- S-mode trap handling
  */
 #include "arch.h"
+#include "cpu.h"
 #include "irq.h"
 #include "kprintf.h"
+#include "pmm.h"
 #include "process.h"
 #include "riscv.h"
 #include "sched.h"
@@ -128,6 +130,17 @@ void trap_handler(struct trap_frame *f)
         user_return();      /* a killed task stops here */
         riscv_lazy_return(&f->sstatus, &task_self()->ctx);
         riscv_lazy_note_reuse(f->sstatus);
+        if (f->sepc >= ARCH_USER_TOP) {
+            /* Returning to user mode at a kernel address: the frame was
+             * overwritten. Always a kernel bug; say where. */
+            struct task *t = task_self();
+
+            kprintf("\nGuru Meditation: return to user at %p\n", (void *)f->sepc);
+            kprintf("  frame %p  task %p (%s)  cpu %u  stack %p-%p\n", (void *)f, (void *)t,
+                    t->name, this_cpu()->index, phys_to_virt(t->stack),
+                    phys_to_virt(t->stack + TASK_STACK_PAGES * PAGE_SIZE));
+            arch_halt();
+        }
     }
 }
 
@@ -141,9 +154,11 @@ void trap_handler(struct trap_frame *f)
     f.x[10] = arg0;
     f.x[11] = arg1;
     f.sepc = pc;
-    /* User mode, interrupts on after sret, FP and vector off. */
-    f.sstatus = (csr_read_sstatus() & ~(SSTATUS_SPP | SSTATUS_SUM | SSTATUS_FS |
-                                        SSTATUS_VS_MASK)) | SSTATUS_SPIE;
+    /* User mode, interrupts on after sret (SPIE) but not before (SIE:
+     * they're still on here, and trap_return writes this sstatus before
+     * its sret), FP and vector off. */
+    f.sstatus = (csr_read_sstatus() & ~(SSTATUS_SIE | SSTATUS_SPP | SSTATUS_SUM |
+                                        SSTATUS_FS | SSTATUS_VS_MASK)) | SSTATUS_SPIE;
     arch_irq_disable();
     trap_resume(&f);
 }

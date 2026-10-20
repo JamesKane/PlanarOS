@@ -8,8 +8,9 @@ USER_CFLAGS  := -std=c23 -Wall -Wextra -O2 $(USER_FLAGS) -ffreestanding -fno-bui
 	-fno-stack-protector -fno-pic -Iinclude -Iconformance
 USER_LDFLAGS := $(USER_FLAGS) -nostdlib -static --ld-path=$(LD_PATH) \
 	-Wl,-T,arch/$(ARCH)/user/user.ld -Wl,--no-dynamic-linker
+USER_ARCH_C  := $(basename $(notdir $(wildcard arch/$(ARCH)/user/*.c)))
 USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/string.o \
-	$(BUILD)/user/fpregs.o
+	$(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
 
 $(BUILD)/user/%.o: arch/$(ARCH)/user/%.S
 	@mkdir -p $(dir $@)

@@ -19,6 +19,13 @@ Step 4a's design points:
 - **AArch64 PAN.** With `SCTLR.SPAN` clear, PAN is set on every exception to EL1. User copies use `ldtrb`/`sttrb`, which are checked with EL0 permissions.
 - **Testing.** Mutation tests confirmed the step 4a checks catch W^X turned off, missing kill IPIs, and leaked process memory.
 
+Step 5 delivers:
+- **Areas** (omega's calls) over both layouts. The layout is chosen at boot with `layout=identity|global`.
+- **The A1 tests that need no IPC:** `areas` (omega's, less the parts that use ports), `overrun`, `rofault`, and cross-process sharing tested from the kernel. The A1 tests built on ports (`echo`, `client`, `pingpong`) move to V2.
+- **The VQ3 soak** (`make vq3`). The results are in [vq3-results.md](vq3-results.md).
+
+Step 5 also found and fixed a RISC-V bug, which omega has too. A new task's first user frame carried `SIE=1`, so `trap_return` turned interrupts on just before its `sret`. An interrupt in that window took itself for a trap from user mode and overwrote the frame being restored, sending the task to user mode at a kernel address, about one boot in 300. `trap_return` now always writes `sstatus` with `SIE` clear. After the fix, 950 boots across both ISAs and both layouts all passed.
+
 Step 4b's design: registers are saved eagerly, at the switch away and only if they were written, and loaded lazily, on first use. So no CPU ever holds state a task needs on another CPU. The load is skipped when this CPU still holds the task's registers and the task hasn't run anywhere else since (`lazy_cpu`). AArch64 has no dirty bit, so having access turned on counts as written. The QEMU counters show the mechanism working but don't settle eager vs. lazy (§7.4). That waits for boards running real programs.
 
 What step 3 delivers, and what it doesn't yet:
@@ -35,7 +42,7 @@ Step 2's first QEMU numbers are under TCG, so they say nothing about the hardwar
 | **3. Tasks and scheduler** ✅ | Kernel tasks; per-CPU run queues with Exec's priorities (−128..127, round robin within a level); preemption; placement by core class; migration and load balancing; signals (`Wait`, `Signal`, `SetSignal`). Measure context switches and cross-CPU `Signal`. | yes |
 | **4a. Domains and user mode** ✅ | `arch_domain_*` (Sv39; VMSAv8-64 TTBR0 with ASIDs), user entry, system calls, the handle table, processes from built-in images, faults, reclamation on exit, deferred kill across CPUs. User memory is identity-mapped until step 5. | yes |
 | **4b. Lazy FP and vector state** ✅ | `sstatus.FS`/`VS` on RISC-V; first-use trap through `CPACR_EL1.FPEN` on AArch64, with an eager-vs-lazy measurement (§7.4). User programs get FP and vector. | yes |
-| **5. Areas and the two layouts** | Areas over zoned physical memory. User VA allocators: `identity` (VA = PA) and `global` (a VA window, as in omega), chosen at boot. Port the A1 acceptance tests. Measure a soak test for VQ3. | yes |
+| **5. Areas and the two layouts** ✅ | Areas over zoned physical memory. User VA allocators: `identity` (VA = PA) and `global` (a VA window, as in omega), chosen at boot. Port the A1 acceptance tests. Measure a soak test for VQ3. | yes |
 
 ## Decision taken in step 1: the kernel stays in the upper half in both layouts
 

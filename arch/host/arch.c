@@ -172,6 +172,11 @@ unsigned arch_domains_live(void)
     return 0;
 }
 
+unsigned arch_domain_tables(struct arch_domain *)
+{
+    return 0;
+}
+
 [[noreturn]] void arch_user_enter(uint64_t, uint64_t, uint64_t, uint64_t)
 {
     abort();

@@ -48,6 +48,7 @@ enum task_state : uint8_t {
     TASK_DEAD,
 };
 
+struct area;
 struct cpu;
 struct process;
 
@@ -77,6 +78,7 @@ struct task {
     struct process *process;
     struct arch_domain *domain;     /* nullptr: the kernel's alone */
     struct task *next_in_proc;
+    struct area *user_stack;
     uint32_t handle;
     atomic_bool killed;             /* stop at the next return to user mode */
     uint64_t user_pc, user_sp, user_arg[2];

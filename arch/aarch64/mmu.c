@@ -79,6 +79,23 @@ unsigned arch_domains_live(void)
     return asids_live;
 }
 
+static unsigned count_tables(uint64_t pa, int level)
+{
+    desc_t *t = table(pa);
+    unsigned n = 1;
+
+    if (level < 3)
+        for (unsigned i = 0; i < PTES; i++)
+            if ((t[i] & 3) == DESC_TABLE)
+                n += count_tables(t[i] & ADDR_MASK, level + 1);
+    return n;
+}
+
+unsigned arch_domain_tables(struct arch_domain *d)
+{
+    return count_tables(d->root, 0);
+}
+
 bool arch_domain_create(struct arch_domain *d)
 {
     if (!(d->asid = asid_alloc()))

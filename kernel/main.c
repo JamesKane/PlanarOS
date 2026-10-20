@@ -11,11 +11,13 @@
 #include <stdint.h>
 
 #include "arch.h"
+#include "bootargs.h"
 #include "console.h"
 #include "cpu.h"
 #include "fdt.h"
 #include "intc.h"
 #include "kprintf.h"
+#include "layout.h"
 #include "ktime.h"
 #include "memmap.h"
 #include "plat.h"
@@ -48,6 +50,11 @@
         memmap_report();
         pmm_init();
     }
+    if (have_fdt) {
+        bootargs_init();
+        layout_init();
+    }
+    kprintf("planar: user layout %s\n", layout_name(layout_boot()));
 
     if (have_fdt && cpu_enumerate(boot_cpu))
         kprintf("planar: %u CPUs; booted on %llx\n", ncpus, (unsigned long long)boot_cpu);
@@ -82,6 +89,8 @@
         kprintf("V1.3 done\n");
         kprintf("V1.4 user skipped: no tasks\n");
         kprintf("V1.4 done\n");
+        kprintf("V1.5 areas skipped: no tasks\n");
+        kprintf("V1.5 done\n");
         arch_halt();
     }
     sched_idle();

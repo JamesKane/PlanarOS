@@ -17,6 +17,7 @@
 
 #define FRAME_SIZE  (34 * 8)
 #define SSTATUS_SPP (1 << 8)
+#define SSTATUS_SIE (1 << 1)
 
     .section .text
     .balign 4
@@ -52,10 +53,16 @@ saved:
     mv      a0, sp
     call    trap_handler
 
-/* Pop the frame at sp and return to wherever it says. */
+/*
+ * Pop the frame at sp and return to wherever it says. sstatus is written
+ * with SIE clear whatever the frame holds: an interrupt taken between
+ * here and sret would find sscratch already pointing at the slot, take
+ * itself for a trap from user mode and build its frame over this one.
+ */
     .globl  trap_return
 trap_return:
     ld      t0, 33*8(sp)
+    andi    t0, t0, ~SSTATUS_SIE
     csrw    sstatus, t0
     andi    t0, t0, SSTATUS_SPP
     bnez    t0, to_kernel

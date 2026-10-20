@@ -19,7 +19,10 @@ Each entry gives the question, where it came up, and the current leaning or deci
 
 **VQ3 ★ Identity SAS (VA = PA) or global-VA SAS (Omega). Decide from measurements.**
 
-No commitment until V1 has numbers from the RV2 and at least one Arm board. The kernel builds both layouts behind `arch_domain_*`. The global-VA layout comes straight from omega.
+No commitment until V1 has numbers from the RV2 and at least one Arm board. Both layouts are built (V1 step 5) and chosen at boot with `layout=`. The **first QEMU results are in [vq3-results.md](vq3-results.md)**:
+- Under memory pressure, identity fails about 0.2% of allocations even though enough memory is free.
+- Global leaves physical memory about 2.8× more fragmented.
+- Page tables and allocation time are about the same.
 
 V1 measures:
 - Largest free run per zone after a soak test that creates and destroys processes and grows and shrinks heaps.

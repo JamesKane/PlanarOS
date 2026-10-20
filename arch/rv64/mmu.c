@@ -116,6 +116,22 @@ static void fence_all(uint32_t asid, uint64_t va, uint64_t size)
     sbi_call5(SBI_EXT_RFENCE, SBI_RFENCE_SFENCE_VMA_ASID, 0, SBI_ALL_HARTS, va, size, asid);
 }
 
+static unsigned count_tables(uint64_t pa, int level, unsigned limit)
+{
+    pte_t *t = table(pa);
+    unsigned n = 1;
+
+    for (unsigned i = 0; i < limit; i++)
+        if ((t[i] & PTE_V) && !(t[i] & PTE_LEAF) && level > 0)
+            n += count_tables(pte_pa(t[i]), level - 1, PTES);
+    return n;
+}
+
+unsigned arch_domain_tables(struct arch_domain *d)
+{
+    return count_tables(d->root, 2, PTES / 2);
+}
+
 bool arch_domain_create(struct arch_domain *d)
 {
     pte_t *root;

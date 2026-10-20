@@ -18,8 +18,8 @@ else
 QEMU_MACHINE := virt,gic-version=3
 endif
 
-RUN_CMD := $(QEMU) -machine $(QEMU_MACHINE) -cpu cortex-a76 -smp 4 -m 256M \
-	-nographic -kernel $(IMAGE)
+RUN_CMD := $(QEMU) -machine $(QEMU_MACHINE) -cpu cortex-a76 -smp 4 -m $(QEMU_MEM) \
+	-nographic -kernel $(IMAGE) -append 'layout=$(LAYOUT) $(BOOTARGS)'
 
 run: $(IMAGE)
 	$(RUN_CMD)

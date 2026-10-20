@@ -18,6 +18,12 @@
 #define SYS_EXIT_TASK       8
 #define SYS_ALLOC_SIGNAL    9
 #define SYS_FREE_SIGNAL     10
+#define SYS_ALLOC_AREA      11
+#define SYS_FREE_AREA       12
+#define SYS_SHARE_AREA      13
+#define SYS_UNSHARE_AREA    14
+#define SYS_PROTECT_AREA    15
+#define SYS_QUERY_AREA      16
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)
@@ -25,5 +31,7 @@
 #define ERR_NOMEM           (-4)
 #define ERR_NOTFOUND        (-5)
 #define ERR_BADARG          (-6)
+#define ERR_EXISTS          (-7)
+#define ERR_RIGHTS          (-8)        /* rights the Area's flags don't allow */
 
 #endif /* PLANAR_SYSCALLS_H */

@@ -2,11 +2,13 @@
  * kernel/process.c -- processes: protection domains that own resources
  */
 #include <planar/endian.h>
+#include <planar/exec.h>
 #include <planar/syscalls.h>
 
 #include "cpu.h"
 #include "handle.h"
 #include "kprintf.h"
+#include "area.h"
 #include "kstring.h"
 #include "pmm.h"
 #include "process.h"
@@ -33,42 +35,19 @@ static const struct user_image *find_image(const char *name)
     return nullptr;
 }
 
-/*
- * 'pages' of zeroed, physically contiguous memory, recorded so the
- * process gives it back, and identity-mapped (VA = PA) with 'flags' up
- * to 'split' bytes and 'flags2' after. 0 if there's no memory.
- */
-static uint64_t region_alloc(struct process *p, uint32_t pages, uint32_t flags,
-                             uint64_t split, uint32_t flags2)
+/* A stack Area for a new task in 'p', mapped; its top, or 0. */
+static uint64_t new_stack(struct process *p, struct area **out)
 {
-    uint64_t pa = pmm_alloc_contig(pages);
+    struct area *a = area_new(layout_boot(), STACK_PAGES, 0, true);
 
-    if (!pa)
+    if (!a)
         return 0;
-    unsigned long was = spin_lock_irqsave(&p->lock);
-    if (p->nregions == PROCESS_REGIONS) {
-        spin_unlock_irqrestore(&p->lock, was);
-        for (uint32_t i = 0; i < pages; i++)
-            pmm_free(pa + i * PAGE_SIZE);
+    if (!area_map(a, p, AREAR_READ | AREAR_WRITE, 0)) {
+        area_destroy(a);
         return 0;
     }
-    p->regions[p->nregions++] = (struct region){ .va = pa, .pa = pa, .pages = pages };
-    spin_unlock_irqrestore(&p->lock, was);
-    for (uint32_t i = 0; i < pages; i++) {
-        uint64_t off = (uint64_t)i * PAGE_SIZE;
-
-        if (!arch_map(&p->domain, pa + off, pa + off, off < split ? flags : flags2))
-            return 0;           /* the region is recorded: reclaim frees it */
-    }
-    return pa;
-}
-
-static void free_regions(struct process *p)
-{
-    for (unsigned r = 0; r < p->nregions; r++)
-        for (uint32_t i = 0; i < p->regions[r].pages; i++)
-            pmm_free(p->regions[r].pa + (uint64_t)i * PAGE_SIZE);
-    p->nregions = 0;
+    *out = a;
+    return area_base(a) + area_size(a);
 }
 
 /* --- Tasks of a process. --- */
@@ -82,17 +61,18 @@ static void user_start(void *)
 }
 
 /* A task in 'p' starting at 'pc' with 'sp', not yet launched. */
-static struct task *new_user_task(struct process *p, uint64_t pc, uint64_t sp,
+static struct task *new_user_task(struct process *p, uint64_t pc, struct area *stack,
                                   uint64_t arg0, uint64_t arg1)
 {
     struct task *t = task_new(p->name, p->pri, TASK_ANY_CPU, user_start, nullptr);
 
     if (!t)
         return nullptr;
+    t->user_stack = stack;
     t->process = p;
     t->domain = &p->domain;
     t->user_pc = pc;
-    t->user_sp = sp;
+    t->user_sp = area_base(stack) + area_size(stack);
     t->user_arg[0] = arg0;
     t->user_arg[1] = arg1;
     t->handle = handle_new(HANDLE_TASK, t, p);
@@ -111,6 +91,7 @@ static bool launch(struct process *p, struct task *t)
     if (atomic_load(&p->dying)) {
         spin_unlock_irqrestore(&p->lock, was);
         handle_free(t->handle);
+        area_release(t->user_stack, p);
         task_discard(t);
         return false;
     }
@@ -127,9 +108,10 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
 {
     const struct user_image *img = find_image(name);
     const uint8_t *file;
-    uint64_t file_size, etext, end, base, stack, page;
+    uint64_t file_size, etext, end, page;
+    struct area *image = nullptr, *stack = nullptr;
     struct process *p;
-    struct task *t;
+    struct task *t = nullptr;
 
     if (!img)
         return nullptr;
@@ -153,18 +135,25 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
     }
     atomic_fetch_add(&live_records, 1);
 
-    /* Code and constants RX, then data and .bss RW. */
-    base = region_alloc(p, (uint32_t)((end + PAGE_SIZE - 1) / PAGE_SIZE),
-                        MAP_USER | MAP_READ | MAP_EXEC, etext, MAP_USER | MAP_READ | MAP_WRITE);
-    stack = region_alloc(p, STACK_PAGES, MAP_USER | MAP_READ | MAP_WRITE, ~0ULL, 0);
-    if (base && stack) {
-        memcpy(phys_to_virt(base), file, file_size);
-        arch_sync_icache(phys_to_virt(base), file_size);
+    /* One Area for the image, so code and data stay where PC-relative
+     * code expects them: code and constants read and execute, then data
+     * and .bss read and write. */
+    image = area_new(layout_boot(), (end + PAGE_SIZE - 1) / PAGE_SIZE, AREAF_EXEC, false);
+    if (image) {
+        area_copy_in(image, 0, file, file_size);
+        for (uint64_t off = 0; off < etext; off += PAGE_SIZE)
+            arch_sync_icache(phys_to_virt(area_pa(image, off)), PAGE_SIZE);
+        if (!area_map(image, p, AREAR_READ | AREAR_WRITE, etext)) {
+            area_destroy(image);
+            image = nullptr;
+        }
     }
-    t = base && stack ? new_user_task(p, base, stack + STACK_PAGES * PAGE_SIZE, arg, 0)
-                      : nullptr;
+    if (image && new_stack(p, &stack)) {
+        p->stack_base = area_base(stack);
+        t = new_user_task(p, area_base(image), stack, arg, 0);
+    }
     if (!t) {
-        free_regions(p);
+        area_process_died(p);
         arch_domain_destroy(&p->domain);
         process_free(p);
         return nullptr;
@@ -204,6 +193,11 @@ static void kill_tasks(struct process *p, struct task *except)
     *pp = self->next_in_proc;
     spin_unlock_irqrestore(&p->lock, was);
     handle_free(self->handle);
+    /* Its stack goes now, unless it's the last task: then the whole
+     * process goes once it has switched away (its stack is in use until
+     * then, and the domain with it). */
+    if (p->tasks)
+        area_release(self->user_stack, p);
     task_exit();                /* finish_switch then calls process_task_finished */
 }
 
@@ -216,11 +210,13 @@ void process_kill(struct process *p)
 static void set_result(struct process *p, int64_t code, enum fault kind, uint64_t pc,
                        uint64_t addr)
 {
+    bool mapped = kind != FAULT_NONE && arch_lookup(&p->domain, addr & ~(PAGE_SIZE - 1)) != 0;
     unsigned long was = spin_lock_irqsave(&p->lock);
 
     if (!atomic_load(&p->dying)) {
         p->exit_code = code;
         p->fault = kind;
+        p->fault_mapped = mapped;
         p->fault_pc = pc;
         p->fault_addr = addr;
     }
@@ -250,14 +246,15 @@ static void set_result(struct process *p, int64_t code, enum fault kind, uint64_
 int64_t process_create_task(uint64_t entry, uint64_t arg)
 {
     struct process *p = task_self()->process;
-    uint64_t stack = region_alloc(p, STACK_PAGES, MAP_USER | MAP_READ | MAP_WRITE, ~0ULL, 0);
+    struct area *stack;
     struct task *t;
 
-    if (!stack)
+    if (!new_stack(p, &stack))
         return ERR_NOMEM;
-    t = new_user_task(p, entry, stack + STACK_PAGES * PAGE_SIZE, arg, 0);
-    if (!t)
+    if (!(t = new_user_task(p, entry, stack, arg, 0))) {
+        area_release(stack, p);
         return ERR_NOMEM;
+    }
     if (!launch(p, t))
         return ERR_NOTFOUND;
     return t->handle;
@@ -281,7 +278,7 @@ void user_return(void)
  */
 static void reclaim(struct process *p)
 {
-    free_regions(p);
+    area_process_died(p);
     arch_domain_destroy(&p->domain);
     handle_free_owner(p);
     atomic_store(&p->dead, true);

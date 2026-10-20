@@ -127,18 +127,28 @@ uint64_t pmm_alloc(void)
 
 uint64_t pmm_alloc_contig(size_t n)
 {
-    uint64_t start = 0, len = 0, page = 0;
+    return n == 1 ? pmm_alloc() : pmm_alloc_contig_aligned(n, PAGE_SIZE);
+}
 
-    if (n == 1)
-        return pmm_alloc();
-    if (n == 0)
+uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align)
+{
+    uint64_t start = 0, len = 0, page = 0, step = align / PAGE_SIZE;
+
+    if (n == 0 || step == 0 || (step & (step - 1)))
         return 0;
     unsigned long was = spin_lock_irqsave(&lock);
     for (uint64_t i = 0; nfree >= n && i < npages; i++) {
+        if (i % 64 == 0 && bitmap[i / 64] == ~0ULL) {
+            i += 63;                /* a word of taken pages at a time */
+            len = 0;
+            continue;
+        }
         if (taken(i)) {
             len = 0;
             continue;
         }
+        if (len == 0 && (base_pfn + i) % step)
+            continue;               /* a run may only start aligned */
         if (len++ == 0)
             start = i;
         if (len == n) {

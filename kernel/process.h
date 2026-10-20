@@ -11,9 +11,10 @@
  * the last time, so no CPU still has its domain loaded: memory, page
  * tables, ASID and handles go back, and whoever watches it is signalled.
  *
- * Built-in programs (conformance/) are flat images; until V1 step 5 adds
- * Areas and the two layouts, a process's memory is identity-mapped
- * (VA = PA), which also leaves every stack an unmapped guard below it.
+ * Built-in programs (conformance/) are flat images. A process's memory
+ * is Areas (kernel/area.c): its image (code read and execute, the rest
+ * read and write), a stack per task with a guard below, and what it
+ * allocates; the boot's layout decides where they live.
  */
 #ifndef KERNEL_PROCESS_H
 #define KERNEL_PROCESS_H
@@ -37,29 +38,25 @@ enum fault : uint8_t {
 
 struct task;
 
-struct region {
-    uint64_t va, pa;
-    uint32_t pages;
-};
-
-constexpr unsigned PROCESS_REGIONS = 64;
+struct mapping;
 
 struct process {
     struct arch_domain domain;
     const char *name;
     int pri;
-    spinlock_t lock;                /* tasks, regions */
+    spinlock_t lock;                /* tasks */
     struct task *tasks;             /* by next_in_proc */
     atomic_uint unfinished;         /* tasks not yet switched away for good */
-    struct region regions[PROCESS_REGIONS];
-    unsigned nregions;
+    struct mapping *maps;           /* the Areas it maps (kernel/area.c's lock) */
     atomic_bool dying;
     atomic_bool dead;               /* reclaimed: only the record is left */
     int64_t exit_code;
     enum fault fault;
+    bool fault_mapped;              /* the faulting page was mapped (a rights fault) */
     uint64_t fault_pc, fault_addr;
     struct task *watcher;           /* signalled with watch_sig when dead */
     uint64_t watch_sig;
+    uint64_t stack_base;            /* the first task's stack, for the overrun test */
 };
 
 /* Load built-in program 'name' into a new process and start it at 'pri'

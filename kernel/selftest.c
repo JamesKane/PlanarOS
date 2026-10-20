@@ -1,15 +1,23 @@
 /*
  * kernel/selftest.c -- boot-time self-tests
  */
+#include <planar/exec.h>
+#include <planar/syscalls.h>
+
 #include "arch.h"
 #include "cpu.h"
 #include "kprintf.h"
 #include "ktime.h"
 #include "pmm.h"
+#include "area.h"
+#include "bootargs.h"
 #include "handle.h"
+#include "kmalloc.h"
+#include "layout.h"
 #include "process.h"
 #include "syscall.h"
 #include "userimg.h"
+#include "va.h"
 #include "sched.h"
 #include "selftest.h"
 
@@ -368,9 +376,15 @@ static uint64_t cpu_mask(unsigned i)
 constexpr unsigned SPAWN = 24;
 static atomic_uint spawned_done;
 static atomic_uint_fast64_t ran_on_mask;
+static atomic_bool spawn_go;
 
+/* Each spins until all are created, so they're alive together: a task
+ * that ended before the next was made would leave its CPU idle again,
+ * and placement would choose it every time. */
 static void spawn_fn(void *)
 {
+    while (!atomic_load(&spawn_go))
+        arch_cpu_relax();
     atomic_fetch_or(&ran_on_mask, 1ULL << this_cpu()->index);
     if (atomic_fetch_add(&spawned_done, 1) + 1 == SPAWN)
         task_signal(tester, SIGF_TEST);
@@ -383,9 +397,11 @@ static void test_spawn(void)
 
     atomic_store(&spawned_done, 0);
     atomic_store(&ran_on_mask, 0);
+    atomic_store(&spawn_go, false);
     for (unsigned i = 0; i < SPAWN; i++)
         if (!task_create("spawn", 5, TASK_ANY_CPU, spawn_fn, nullptr))
             fail("V1.3 tasks", "task_create failed");
+    atomic_store(&spawn_go, true);
     if (!wait_test(1000000) || atomic_load(&spawned_done) != SPAWN)
         fail("V1.3 tasks", "not every task ran");
     /* Dead tasks are freed by the next switch on their CPU. */
@@ -608,6 +624,9 @@ void selftest_tasks(void *)
     kprintf("V1.3 done\n");
     selftest_user();
     kprintf("V1.4 done\n");
+    selftest_areas();
+    selftest_vq3();
+    kprintf("V1.5 done\n");
 }
 
 /* ---------------------------------------------------------------------
@@ -734,7 +753,7 @@ static void test_fpu(void)
 
 void selftest_user(void)
 {
-    uint64_t free_before = pmm_free_pages(), spin_us, wait_us;
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages(), spin_us, wait_us;
     unsigned handles_before = handle_count(), domains_before = arch_domains_live();
     uint64_t kernel_page = pmm_alloc();
 
@@ -763,7 +782,7 @@ void selftest_user(void)
 
     /* Reclamation is asynchronous only by a switch; give it a moment. */
     task_sleep_until(time_now() + time_us(5000));
-    if (pmm_free_pages() != free_before)
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V1.4 reclaim", "pages leaked");
     if (handle_count() != handles_before)
         fail("V1.4 reclaim", "handles leaked");
@@ -773,4 +792,216 @@ void selftest_user(void)
         fail("V1.4 reclaim", "process records leaked");
     kprintf("V1.4 reclaim ok: every page, handle and ASID back; %llu kernel calls made\n",
             (unsigned long long)syscall_count());
+}
+
+/* ---------------------------------------------------------------------
+ * V1 step 5: Areas, run from the selftest task.
+ */
+
+/* Two processes share an Area: same address, same page, in both; it
+ * lives while either maps it and goes when the last one does. */
+static void test_share(void)
+{
+    struct process *p1, *p2;
+    struct area *a;
+    uint64_t va;
+    unsigned areas_before = area_count(), with_processes;
+
+    task_set_signal(0, SIGF_DEAD);
+    p1 = process_create("waiter", 5, 0, task_self(), SIGF_DEAD);
+    p2 = process_create("waiter", 5, 0, task_self(), SIGF_DEAD);
+    if (!p1 || !p2)
+        fail("V1.5 share", "process_create failed");
+    with_processes = area_count();      /* their images and stacks */
+    if (!(a = area_new(layout_boot(), 3, 0, false)))
+        fail("V1.5 share", "area_new failed");
+    va = area_base(a);
+    if (!area_map(a, p1, AREAR_READ | AREAR_WRITE, 0) || area_share(a, p2, AREAR_READ) != 0)
+        fail("V1.5 share", "mapping failed");
+    if (area_share(a, p2, AREAR_READ) != ERR_EXISTS)
+        fail("V1.5 share", "shared twice");
+    for (uint64_t off = 0; off < 3 * PAGE_SIZE; off += PAGE_SIZE)
+        if (arch_lookup(&p1->domain, va + off) != area_pa(a, off) ||
+            arch_lookup(&p2->domain, va + off) != area_pa(a, off))
+            fail("V1.5 share", "not the same pages at the same address");
+    area_release(a, p1);
+    if (arch_lookup(&p1->domain, va) || arch_lookup(&p2->domain, va) != area_pa(a, 0) ||
+        area_count() != with_processes + 1)
+        fail("V1.5 share", "release took the Area from the wrong process");
+    process_kill(p1);
+    process_kill(p2);
+    while (!atomic_load(&p1->dead) || !atomic_load(&p2->dead))
+        wait_test_dead();
+    process_free(p1);
+    process_free(p2);
+    if (area_count() != areas_before)
+        fail("V1.5 share", "the Area outlived everyone mapping it");
+    kprintf("V1.5 share ok: one Area at %p in two processes, freed with the last\n",
+            (void *)va);
+}
+
+void selftest_areas(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    uint64_t va_before = va_free_bytes();
+    struct process *p;
+
+    if (!user_images[0].name) {
+        kprintf("V1.5 areas skipped: no user programs\n");
+        return;
+    }
+    expect_exit("areas", 0);
+    kprintf("V1.5 areas ok (%s layout): allocate, query, protect, run written code, "
+            "free, churn\n", layout_name(layout_boot()));
+
+    p = run("overrun", 0, 1000000);
+    /* In the guard page, and the guard unmapped: a page below that is
+     * merely read-only (code, say) would fault too, and prove nothing. */
+    if (!atomic_load(&p->dead) || p->fault != FAULT_WRITE || p->fault_mapped ||
+        p->fault_addr >= p->stack_base || p->fault_addr < p->stack_base - PAGE_SIZE)
+        fail("V1.5 guard", "stack overrun didn't fault in an unmapped guard page");
+    kprintf("V1.5 guard ok: overrun faulted at %p, just below its stack at %p\n",
+            (void *)p->fault_addr, (void *)p->stack_base);
+    process_free(p);
+    expect_fault("rofault", 0, FAULT_WRITE, 0);
+    kprintf("V1.5 rights ok: a write to a read-only Area faulted\n");
+
+    test_share();
+
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V1.5 reclaim", "pages leaked");
+    if (area_count() != 0)
+        fail("V1.5 reclaim", "Areas leaked");
+    if (va_free_bytes() != va_before)
+        fail("V1.5 reclaim", "address space leaked");
+    kprintf("V1.5 reclaim ok: every page, Area and address back\n");
+}
+
+/* ---------------------------------------------------------------------
+ * The VQ3 soak: the same random workload against both layouts.
+ */
+
+constexpr unsigned SOAK_OPS = 6000;
+constexpr unsigned SOAK_HELD = 1024;
+constexpr unsigned SOAK_PROC = 32;      /* Areas per measured "process" */
+
+static uint64_t soak_rng;
+
+static uint64_t soak_random(void)
+{
+    soak_rng ^= soak_rng << 13;
+    soak_rng ^= soak_rng >> 7;
+    soak_rng ^= soak_rng << 17;
+    return soak_rng;
+}
+
+/* Mostly small, some medium, a few large (4 MiB): heaps, buffers, frames. */
+static uint64_t soak_size(void)
+{
+    uint64_t r = soak_random() % 100;
+
+    if (r < 70)
+        return 1 + soak_random() % 8;
+    if (r < 95)
+        return 9 + soak_random() % 120;
+    return 129 + soak_random() % 896;
+}
+
+struct soak_result {
+    uint64_t attempts, failures, needless, alloc_ticks, peak_pages, largest_run;
+    uint64_t tables, domains, guarded;
+};
+
+static void soak(enum layout l, struct soak_result *r)
+{
+    static struct area *held[SOAK_HELD];
+    static uint64_t held_pages[SOAK_HELD];
+    unsigned nheld = 0;
+    uint64_t in_use = 0, target = pmm_free_pages() * 9 / 10;
+
+    *r = (struct soak_result){ 0 };
+    soak_rng = 0x9e3779b97f4a7c15ULL;       /* the same workload for both */
+    for (unsigned op = 0; op < SOAK_OPS; op++) {
+        bool grow = nheld == 0 || (nheld < SOAK_HELD && in_use < target && soak_random() % 3);
+
+        if (grow) {
+            uint64_t n = soak_size(), t0 = time_now();
+            bool guard = soak_random() % 8 == 0;    /* a stack */
+            struct area *a = area_new(l, n, 0, guard);
+
+            r->alloc_ticks += time_now() - t0;
+            r->attempts++;
+            if (!a) {
+                r->failures++;
+                if (pmm_free_pages() >= n + guard)
+                    r->needless++;      /* enough memory, but not in one piece */
+                continue;
+            }
+            r->guarded += guard;
+            held[nheld] = a;
+            held_pages[nheld++] = n;
+            in_use += n;
+            if (in_use > r->peak_pages)
+                r->peak_pages = in_use;
+        } else {
+            unsigned i = (unsigned)(soak_random() % nheld);
+
+            area_destroy(held[i]);
+            in_use -= held_pages[i];
+            held[i] = held[--nheld];
+            held_pages[i] = held_pages[nheld];
+        }
+        /* Every so often, map a process's worth of Areas into a fresh
+         * domain and count the page-table pages it takes. */
+        if (op % 250 == 249 && nheld) {
+            struct arch_domain d;
+
+            if (arch_domain_create(&d)) {
+                unsigned n = nheld < SOAK_PROC ? nheld : SOAK_PROC;
+
+                for (unsigned i = 0; i < n; i++)
+                    area_map_domain(held[i], &d);
+                r->tables += arch_domain_tables(&d);
+                r->domains++;
+                for (unsigned i = 0; i < n; i++)
+                    area_unmap_domain(held[i], &d);
+                arch_domain_destroy(&d);
+            }
+        }
+    }
+    r->largest_run = pmm_largest_free_run();
+    while (nheld)
+        area_destroy(held[--nheld]);
+}
+
+static void report(enum layout l, const struct soak_result *r)
+{
+    kprintf("V1.5 vq3 %s: %llu of %llu allocations failed, %llu with enough memory free; "
+            "%llu ns each (zero-filling included); peak %llu MiB; largest free run after "
+            "%llu MiB; %llu page-table pages per %u-Area process\n",
+            layout_name(l), (unsigned long long)r->failures, (unsigned long long)r->attempts,
+            (unsigned long long)r->needless,
+            (unsigned long long)(time_to_us(r->alloc_ticks * 1000) / (r->attempts ? r->attempts : 1)),
+            (unsigned long long)(r->peak_pages >> 8), (unsigned long long)(r->largest_run >> 8),
+            (unsigned long long)(r->domains ? r->tables / r->domains : 0), SOAK_PROC);
+}
+
+void selftest_vq3(void)
+{
+    struct soak_result id, gl;
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+
+    if (pmm_total() == 0 || !bootargs_has("vq3")) {
+        kprintf("V1.5 vq3 skipped: %s\n", pmm_total() ? "not asked for (make vq3)" : "no managed memory");
+        return;
+    }
+    soak(LAYOUT_IDENTITY, &id);
+    soak(LAYOUT_GLOBAL, &gl);
+    report(LAYOUT_IDENTITY, &id);
+    report(LAYOUT_GLOBAL, &gl);
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before || area_count())
+        fail("V1.5 vq3", "the soak leaked");
+    if (gl.needless)
+        fail("V1.5 vq3", "the global layout failed with memory free");
 }

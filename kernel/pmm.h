@@ -30,6 +30,9 @@ void pmm_free(uint64_t page);
 /* 'n' physically contiguous pages, zeroed, or 0. Freed page by page. */
 uint64_t pmm_alloc_contig(size_t n);
 
+/* The same, starting at a multiple of 'align' bytes (a power of two). */
+uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align);
+
 /* Pages managed in total, and how many are free now. */
 uint64_t pmm_total(void);
 uint64_t pmm_free_pages(void);
