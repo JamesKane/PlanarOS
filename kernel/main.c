@@ -72,6 +72,7 @@
     selftest_pmm();
     selftest_fault();
     selftest_timer();
+    selftest_fdt();
     kprintf("V1.1 done\n");
 
     if (ncpus > 1 && pmm_total())

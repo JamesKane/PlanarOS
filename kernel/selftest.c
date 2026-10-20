@@ -6,6 +6,7 @@
 
 #include "arch.h"
 #include "cpu.h"
+#include "fdt.h"
 #include "kprintf.h"
 #include "ktime.h"
 #include "plat.h"
@@ -120,6 +121,78 @@ void selftest_fault(void)
     if (arch_probe_read(0x1000, &v))
         fail("V1.1 fault", "unmapped read didn't fault");
     kprintf("V1.1 fault ok\n");
+}
+
+/* --- the device-tree parser against blobs built to break it --- */
+
+static uint32_t bad_blob[64];
+
+static void be32_at(unsigned word, uint32_t v)
+{
+    uint8_t *p = (uint8_t *)&bad_blob[word];
+
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+/* A blob: the header, an empty reservation map at 40, the structure
+ * block at 56 from 'words', and a strings block of "x" after it. */
+static void build_blob(const uint32_t *words, unsigned n)
+{
+    unsigned so = 56, to = so + 4 * n;
+
+    for (unsigned i = 0; i < 64; i++)
+        bad_blob[i] = 0;
+    be32_at(0, 0xd00dfeed);
+    be32_at(1, to + 4);             /* totalsize */
+    be32_at(2, so);
+    be32_at(3, to);
+    be32_at(4, 40);                 /* the reservation map */
+    be32_at(5, 17);
+    be32_at(6, 16);
+    be32_at(8, 2);                  /* strings size */
+    be32_at(9, 4 * n);              /* structure size */
+    for (unsigned i = 0; i < n; i++)
+        be32_at(so / 4 + i, words[i]);
+    be32_at(to / 4, 0x78000000);    /* "x" */
+}
+
+/*
+ * A property length that wraps the offset round to itself, more ends of
+ * nodes than beginnings, blocks past the end of the blob, a node name
+ * that never ends: the parser must give up on each, not hang or write
+ * below its stack (review M14). The real tree is put back after.
+ */
+void selftest_fdt(void)
+{
+    const void *real = fdt_blob();
+    static const uint32_t wraps[] = { 1, 0, 3, 0xfffffff4, 0, 2, 9 };
+    static const uint32_t extra_ends[] = { 1, 0, 2, 2, 2, 1, 0x78000000, 2, 9 };
+    static const uint32_t no_name_end[] = { 1, 0x61616161, 0x61616161, 0x61616161 };
+    bool ok;
+
+    if (!real) {
+        kprintf("V1.1 fdt skipped: no device tree\n");
+        return;
+    }
+    build_blob(wraps, 7);
+    ok = fdt_init(bad_blob) && fdt_find_name(-1, "x") < 0 &&
+         fdt_getprop(0, "x", nullptr) == nullptr;
+    build_blob(extra_ends, 9);
+    ok &= fdt_init(bad_blob) && fdt_find_name(-1, "x") < 0;
+    build_blob(no_name_end, 4);
+    ok &= fdt_init(bad_blob) && fdt_find_name(-1, "aaa") < 0 && fdt_node_name(0)[0] == '\0';
+    build_blob(wraps, 7);
+    be32_at(2, 4096);               /* the structure block past the end */
+    ok &= !fdt_init(bad_blob);
+    if (!fdt_init(real))
+        fail("V1.1 fdt", "the real device tree no longer reads");
+    if (!ok)
+        fail("V1.1 fdt", "a broken device tree got past the parser");
+    kprintf("V1.1 fdt ok: a wrapping length, extra node ends, blocks past the end and an "
+            "endless name were all refused\n");
 }
 
 static void deadline_fn(void *)

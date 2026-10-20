@@ -14,6 +14,7 @@
 void selftest_pmm(void);
 void selftest_fault(void);
 void selftest_timer(void);
+void selftest_fdt(void);
 
 /* V1 step 2: SMP. */
 void selftest_smp(void);

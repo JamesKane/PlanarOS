@@ -2,7 +2,10 @@
  * kernel/fdt.c -- read-only flattened device tree access
  *
  * The blob is big-endian on every target, so every field goes through
- * get_be32.
+ * get_be32. The firmware wrote it, but a bad blob should make a missing
+ * device, not a hang or a stray write (review M14): every offset is
+ * checked against its block, every walk moves forward, and every string
+ * is bounded.
  */
 #include <planar/endian.h>
 
@@ -22,7 +25,23 @@ constexpr int MAX_DEPTH = 16;
 static const uint8_t *blob;
 static const uint8_t *structs;
 static const char *strings;
-static uint32_t struct_size;
+static uint32_t struct_size, strings_size, total_size, rsvmap_off;
+
+/* The length of the string at 'p' if it ends before 'max' bytes, else -1. */
+static int64_t bounded_len(const char *p, uint64_t max)
+{
+    for (uint64_t i = 0; i < max; i++)
+        if (!p[i])
+            return (int64_t)i;
+    return -1;
+}
+
+/* The strings-block string at 'off', or "" if it isn't one. */
+static const char *string_at(uint32_t off)
+{
+    return off < strings_size && bounded_len(strings + off, strings_size - off) >= 0
+               ? strings + off : "";
+}
 
 /* Does node name 'name' ("memory@40000000") match path component 'comp'? */
 static bool name_matches(const char *name, const char *comp, size_t len)
@@ -43,15 +62,30 @@ static uint32_t token(uint32_t off)
     return off + 4 <= struct_size ? get_be32(structs + off) : FDT_END;
 }
 
-static uint32_t align4(uint32_t x)
+/* The token after the property at 'off': its length is checked in 64
+ * bits, so a huge one ends the walk instead of wrapping round. */
+static uint32_t prop_next(uint32_t off)
 {
-    return (x + 3) & ~3u;
+    uint64_t next = ((uint64_t)off + 12 + token(off + 4) + 3) & ~3ULL;
+
+    return next <= struct_size ? (uint32_t)next : struct_size;
 }
 
-/* Offset of the first token after a node's BEGIN_NODE and name. */
+/* Does the property at 'off' have all its value inside the block? */
+static bool prop_fits(uint32_t off)
+{
+    return (uint64_t)off + 12 + token(off + 4) <= struct_size;
+}
+
+/* Offset of the first token after a node's BEGIN_NODE and name; the end
+ * of the block if the name doesn't end in it. */
 static uint32_t node_body(int32_t node)
 {
-    return align4((uint32_t)node + 4 + (uint32_t)kstrlen(fdt_node_name(node)) + 1);
+    int64_t n = bounded_len((const char *)structs + node + 4, struct_size - (uint32_t)node - 4);
+
+    if (n < 0)
+        return struct_size;
+    return (uint32_t)(((uint64_t)node + 4 + (uint64_t)n + 1 + 3) & ~3ULL);
 }
 
 /* The next node in document order, adjusting *depth by the levels moved. */
@@ -67,7 +101,7 @@ static int32_t next_node(int32_t node, int *depth)
     for (;;) {
         switch (token(off)) {
         case FDT_PROP:
-            off = align4(off + 12 + token(off + 4));
+            off = prop_next(off);
             break;
         case FDT_NOP:
             off += 4;
@@ -76,6 +110,8 @@ static int32_t next_node(int32_t node, int *depth)
             (*depth)++;
             return (int32_t)off;
         case FDT_END_NODE:
+            if (*depth == 0)
+                return -1;          /* past the root: the tree has ended */
             (*depth)--;
             off += 4;
             break;
@@ -88,13 +124,26 @@ static int32_t next_node(int32_t node, int *depth)
 bool fdt_init(const void *b)
 {
     const uint8_t *p = b;
+    uint64_t total, so, ss, to, ts, ro;
 
     if (!p || get_be32(p) != FDT_MAGIC || get_be32(p + 20) < 17)
         return false;
+    total = get_be32(p + 4);
+    so = get_be32(p + 8);
+    to = get_be32(p + 12);
+    ro = get_be32(p + 16);
+    ts = get_be32(p + 32);
+    ss = get_be32(p + 36);
+    /* Every block inside the blob, the structure block word-aligned. */
+    if (total < 40 || so % 4 || ro % 8 || so + ss > total || to + ts > total || ro + 16 > total)
+        return false;
     blob = p;
-    structs = p + get_be32(p + 8);
-    strings = (const char *)(p + get_be32(p + 12));
-    struct_size = get_be32(p + 36);
+    structs = p + so;
+    strings = (const char *)(p + to);
+    struct_size = (uint32_t)ss & ~3u;
+    strings_size = (uint32_t)ts;
+    total_size = (uint32_t)total;
+    rsvmap_off = (uint32_t)ro;
     return true;
 }
 
@@ -105,16 +154,16 @@ const void *fdt_blob(void)
 
 uint32_t fdt_size(void)
 {
-    return blob ? get_be32(blob + 4) : 0;
+    return blob ? total_size : 0;
 }
 
 bool fdt_memreserve(uint32_t index, uint64_t *addr, uint64_t *size)
 {
     const uint8_t *p;
 
-    if (!blob)
+    if (!blob || (uint64_t)rsvmap_off + 16 * ((uint64_t)index + 1) > total_size)
         return false;
-    p = blob + get_be32(blob + 16) + 16 * index;
+    p = blob + rsvmap_off + 16 * index;
     *addr = get_be64(p);
     *size = get_be64(p + 8);
     return *addr || *size;
@@ -122,7 +171,9 @@ bool fdt_memreserve(uint32_t index, uint64_t *addr, uint64_t *size)
 
 const char *fdt_node_name(int32_t node)
 {
-    return (const char *)(structs + node + 4);
+    const char *name = (const char *)(structs + node + 4);
+
+    return node_body(node) < struct_size ? name : "";
 }
 
 const void *fdt_getprop(int32_t node, const char *name, uint32_t *len)
@@ -138,14 +189,14 @@ const void *fdt_getprop(int32_t node, const char *name, uint32_t *len)
             off += 4;
             continue;
         }
-        if (tok != FDT_PROP)
+        if (tok != FDT_PROP || !prop_fits(off))
             return nullptr;
-        if (kstreq(strings + token(off + 8), name)) {
+        if (kstreq(string_at(token(off + 8)), name)) {
             if (len)
                 *len = token(off + 4);
             return structs + off + 12;
         }
-        off = align4(off + 12 + token(off + 4));
+        off = prop_next(off);
     }
 }
 
@@ -212,14 +263,15 @@ int32_t fdt_path_or_alias(const char *path, size_t len)
             off += 4;
             continue;
         }
-        if (tok != FDT_PROP)
+        if (tok != FDT_PROP || !prop_fits(off))
             return -1;
-        name = strings + token(off + 8);
+        name = string_at(token(off + 8));
         if (kstrlen(name) == len && memcmp(name, path, len) == 0) {
             const char *target = (const char *)(structs + off + 12);
-            return fdt_path(target);
+
+            return bounded_len(target, token(off + 4)) >= 0 ? fdt_path(target) : -1;
         }
-        off = align4(off + 12 + token(off + 4));
+        off = prop_next(off);
     }
 }
 
@@ -231,9 +283,13 @@ bool fdt_is_compatible(int32_t node, const char *compat)
     if (!list)
         return false;
     while (off < len) {
+        int64_t n = bounded_len(list + off, len - off);
+
+        if (n < 0)
+            return false;           /* not a string list */
         if (kstreq(list + off, compat))
             return true;
-        off += (uint32_t)kstrlen(list + off) + 1;
+        off += (uint32_t)n + 1;
     }
     return false;
 }
@@ -283,7 +339,7 @@ static int32_t parent_of(int32_t target)
     int32_t node = next_node(-1, &depth);
 
     while (node >= 0 && node != target) {
-        if (depth < MAX_DEPTH)
+        if (depth >= 0 && depth < MAX_DEPTH)
             stack[depth] = node;
         node = next_node(node, &depth);
     }
@@ -385,10 +441,10 @@ void fdt_dump_node(int32_t node, const char *const *only)
             off += 4;
             continue;
         }
-        if (tok != FDT_PROP)
+        if (tok != FDT_PROP || !prop_fits(off))
             return;
         len = token(off + 4);
-        name = strings + token(off + 8);
+        name = string_at(token(off + 8));
         for (o = only; o && *o && !kstreq(*o, name); o++)
             ;
         if (!only || *o) {
@@ -399,19 +455,20 @@ void fdt_dump_node(int32_t node, const char *const *only)
             }
             kputs("\n");
         }
-        off = align4(off + 12 + len);
+        off = prop_next(off);
     }
 }
 
 void fdt_report(void)
 {
-    const char *model = fdt_getprop(fdt_path("/"), "model", nullptr);
+    uint32_t mlen;
+    const char *model = fdt_getprop(fdt_path("/"), "model", &mlen);
     int32_t node = -1, cpus = fdt_path("/cpus");
     uint64_t addr, size;
     unsigned ncpu = 0;
 
     kprintf("planar: device tree at %p, %u bytes, model \"%s\"\n",
-            (const void *)blob, fdt_size(), model ? model : "?");
+            (const void *)blob, fdt_size(), model && bounded_len(model, mlen) >= 0 ? model : "?");
     while ((node = fdt_find_name(node, "memory")) >= 0)
         for (uint32_t i = 0; fdt_reg(node, i, &addr, &size); i++)
             kprintf("planar: memory %p, %llu MiB\n", (void *)(uintptr_t)addr,
