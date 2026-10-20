@@ -126,6 +126,10 @@ bool fdt_init(const void *b)
     const uint8_t *p = b;
     uint64_t total, so, ss, to, ts, ro;
 
+    /* No tree until this one checks out: then every call finds nothing. */
+    blob = structs = nullptr;
+    strings = nullptr;
+    struct_size = strings_size = total_size = rsvmap_off = 0;
     if (!p || get_be32(p) != FDT_MAGIC || get_be32(p + 20) < 17)
         return false;
     total = get_be32(p + 4);

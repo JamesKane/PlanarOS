@@ -1,0 +1,18 @@
+# What the kernel must read from the CIX P1's ACPI tables (the .dat files
+# in acpi/), run hosted: make PLATFORM=hosted ACPI_BOARD=cix-p1 test.
+# Each line must appear in the transcript, whole. The facts are in
+# README.md; any change here should be one there too.
+planar: ACPI from CIXTEK SKY1EDK2 (RSDP revision 2): APIC CSRT DBG2 FACP GTDT IORT MCFG PCCT PPTT SDEI SSDT SSDT
+planar: ACPI quirks for the CIX P1: the console from the DBG2; reserved 0x00000000d0000000+700000 0x00000000d0700000+700000 0x00000000cde08000+100000
+planar: ACPI GICv4: GICD 0x000000000e010000, GICR 0x000000000e090000+300000, ITS 0x000000000e050000
+planar: ACPI 12 CPUs, 12 enabled; UID:MPIDR 0:a00 1:b00 2:0 3:100 4:200 5:300 6:400 7:500 8:600 9:700 10:800 11:900
+planar: ACPI timer: EL1 physical 30, virtual 27, EL2 26
+planar: ACPI watchdog: refresh 0x0000000016008000, control 0x0000000016003000, GSIV 408
+planar: ACPI console from the DBG2: PL011 at 0x00000000040d0000
+planar: ACPI PSCI over SMC
+planar: ACPI PCI segment 0, buses 192-255 at 0x0000000020000000
+planar: ACPI PCI segment 0, buses 96-127 at 0x0000000020000000
+planar: ACPI PCI segment 0, buses 48-79 at 0x0000000020000000
+planar: 12 CPUs; booted on a00
+hw: cpus 0 100 200 300 400 500 600 700 800 900 a00 b00; boot a00
+V3.2 acpi ok: described by ACPI (with quirks); good tables read, 13 broken sets refused or cut short

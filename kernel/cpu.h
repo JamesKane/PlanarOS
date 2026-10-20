@@ -1,9 +1,9 @@
 /*
  * kernel/cpu.h -- the CPUs, and what each one keeps for itself
  *
- * CPUs come from the firmware description (/cpus). Index 0 is always the
- * CPU that booted, which on RISC-V is whichever hart won OpenSBI's
- * lottery; the rest follow in device-tree order. this_cpu() is one
+ * CPUs come from the firmware description (/cpus, or the MADT). Index 0
+ * is always the CPU that booted, which on RISC-V is whichever hart won
+ * OpenSBI's lottery; the rest follow in the description's order. this_cpu() is one
  * register read (tp on RISC-V, TPIDR_EL1 on AArch64).
  */
 #ifndef KERNEL_CPU_H
@@ -34,7 +34,7 @@ struct cpu {
     struct task *current, *idle;    /* near the start: arch_current() loads it in one go */
     unsigned index;
     uint64_t hwid;              /* hart ID, or MPIDR Aff2.Aff1.Aff0 */
-    int32_t node;               /* its /cpus node */
+    int32_t node;               /* its /cpus node; -1 from ACPI */
     atomic_bool online;
 
     spinlock_t timer_lock;      /* kernel timers armed on this CPU */
@@ -73,8 +73,9 @@ extern unsigned ncpus;
 /* The CPU this runs on. Valid from the first line of kmain(). */
 static inline struct cpu *this_cpu(void);
 
-/* Read /cpus. The boot CPU, already running as cpus[0], is found by its
- * hardware ID. False if the description lists no CPUs. */
+/* Read /cpus, or the MADT's enabled CPUs. The boot CPU, already running
+ * as cpus[0], is found by its hardware ID. False if the description
+ * doesn't list it. */
 bool cpu_enumerate(uint64_t boot_hwid);
 
 /* Start every other CPU and wait for each to come online. Returns how

@@ -2,6 +2,7 @@
  * kernel/memmap.c -- the physical memory map, from the EFI memory map or
  * the device tree
  */
+#include "acpi.h"
 #include "arch.h"
 #include "bootinfo.h"
 #include "efi.h"
@@ -154,6 +155,9 @@ bool memmap_init(void)
                 add(reserved, &nreserved, base, size);
     /* The device tree itself, which the kernel keeps reading. */
     add(reserved, &nreserved, virt_to_phys(fdt_blob()), fdt_size());
+    /* What an ACPI board's quirks say the map gets wrong (kernel/acpi.c). */
+    for (unsigned i = 0; acpi_reserved(i, &base, &size); i++)
+        add(reserved, &nreserved, base, size);
     return nram > 0;
 }
 

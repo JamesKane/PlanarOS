@@ -2,7 +2,7 @@
  * kernel/console.h -- the kernel's early console (docs §9.4, layer 0)
  *
  * Found from the firmware description: /chosen's stdout-path on FDT
- * boards (SPCR on ACPI boards, once the ACPI walker exists). Falls back to
+ * boards, the SPCR (or a quirk's DBG2) on ACPI boards. Falls back to
  * plat_console_putc() when the description names nothing the kernel can
  * drive.
  */
@@ -15,6 +15,9 @@ bool console_init(void);
 
 /* Describe the console in use, for the boot log. */
 void console_report(void);
+
+/* Its "hw: console" line, for hw_report() (kernel/hw.h). */
+void console_describe(void);
 
 /* Write one byte, waiting for room. */
 void console_putc(char c);

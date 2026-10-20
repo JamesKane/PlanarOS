@@ -3,14 +3,17 @@
  *
  * The UART drivers here are the polled kind the firmware leaves set up;
  * the kernel never programs baud rates. The serial server takes over
- * later.
+ * later. From the device tree, the console is /chosen's stdout-path;
+ * from ACPI, the SPCR's port (kernel/acpi.h).
  */
 #include <stdint.h>
 
 #include "arch.h"
 
+#include "acpi.h"
 #include "console.h"
 #include "fdt.h"
+#include "hw.h"
 #include "kprintf.h"
 #include "pl011.h"
 #include "plat.h"
@@ -22,6 +25,8 @@ static enum console_kind kind = CONSOLE_PLAT;
 static struct uart8250 u8250;
 static struct pl011 pl011;
 static int32_t console_node = -1;
+static uint64_t console_pa;
+static const char *console_table;      /* from ACPI: "SPCR" or "DBG2" */
 
 /* Device-tree compatibles of 8250-family UARTs the firmware leaves usable
  * by register writes alone. The K1's UART is an XScale variant; the
@@ -37,6 +42,7 @@ static bool try_node(int32_t node)
 
     if (node < 0 || !fdt_reg(node, 0, &base, &size))
         return false;
+    console_pa = base;
     if (fdt_is_compatible(node, "arm,pl011")) {
         pl011 = (struct pl011){ .base = (uintptr_t)phys_to_virt(base) };
         kind = CONSOLE_PL011;
@@ -58,11 +64,35 @@ static bool try_node(int32_t node)
     return false;
 }
 
+static bool try_acpi(void)
+{
+    struct acpi_console c;
+
+    if (!acpi_console(&c))
+        return false;
+    console_pa = c.base;
+    console_table = c.table;
+    if (c.kind == ACPI_UART_PL011) {
+        pl011 = (struct pl011){ .base = (uintptr_t)phys_to_virt(c.base) };
+        kind = CONSOLE_PL011;
+    } else {
+        u8250 = (struct uart8250){
+            .base = (uintptr_t)phys_to_virt(c.base),
+            .reg_shift = c.reg_shift, .reg_width = c.reg_width,
+        };
+        kind = CONSOLE_8250;
+    }
+    return true;
+}
+
 bool console_init(void)
 {
     uint32_t len;
-    const char *path = fdt_getprop(fdt_path("/chosen"), "stdout-path", &len);
+    const char *path;
 
+    if (hw_source() == HW_ACPI)
+        return try_acpi();
+    path = fdt_getprop(fdt_path("/chosen"), "stdout-path", &len);
     if (!path)
         path = fdt_getprop(fdt_path("/chosen"), "linux,stdout-path", &len);
     if (path) {
@@ -78,20 +108,41 @@ bool console_init(void)
     return false;
 }
 
+/* Where the console was found: its node, or its ACPI table. */
+static const char *console_name(void)
+{
+    return console_table ? console_table : fdt_node_name(console_node);
+}
+
 void console_report(void)
 {
     switch (kind) {
     case CONSOLE_8250:
         kprintf("planar: console %s, 8250 at %p, reg-shift %u, width %u\n",
-                fdt_node_name(console_node), (void *)u8250.base,
+                console_name(), (void *)u8250.base,
                 (unsigned)u8250.reg_shift, (unsigned)u8250.reg_width);
         break;
     case CONSOLE_PL011:
-        kprintf("planar: console %s, PL011 at %p\n",
-                fdt_node_name(console_node), (void *)pl011.base);
+        kprintf("planar: console %s, PL011 at %p\n", console_name(), (void *)pl011.base);
         break;
     case CONSOLE_PLAT:
         kprintf("planar: console from the platform (%s)\n", plat_name);
+        break;
+    }
+}
+
+void console_describe(void)
+{
+    switch (kind) {
+    case CONSOLE_8250:
+        kprintf("hw: console 8250 %p shift %u width %u\n", (void *)console_pa,
+                (unsigned)u8250.reg_shift, (unsigned)u8250.reg_width);
+        break;
+    case CONSOLE_PL011:
+        kprintf("hw: console pl011 %p\n", (void *)console_pa);
+        break;
+    case CONSOLE_PLAT:
+        kprintf("hw: console platform\n");
         break;
     }
 }

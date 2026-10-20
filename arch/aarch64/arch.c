@@ -2,9 +2,11 @@
  * arch/aarch64/arch.c -- AArch64 at EL1
  */
 #include "aarch64.h"
+#include "acpi.h"
 #include "arch.h"
 #include "cpu.h"
 #include "fdt.h"
+#include "hw.h"
 #include "intc.h"
 #include "kprintf.h"
 #include "memmap.h"
@@ -103,8 +105,8 @@ static int64_t psci_call(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
 constexpr uint64_t PSCI_CPU_ON = 0xc4000003;    /* SMC64 */
 
 /*
- * The conduit comes from the device tree, so it's read here, not in
- * arch_early_init(), which runs before the tree is. Getting it wrong
+ * The conduit comes from the device tree or the FADT, so it's read here,
+ * not in arch_early_init(), which runs before either is. Getting it wrong
  * isn't benign: from EL1, hvc goes to whatever EL2 has (nothing, once
  * the entry code has dropped from it), and smc to a firmware that may
  * not be there.
@@ -113,6 +115,11 @@ static bool psci_ready(void)
 {
     static bool conduit_known;
 
+    if (!conduit_known && hw_source() == HW_ACPI) {
+        if (!acpi_psci(&psci_smc))
+            return false;
+        conduit_known = true;
+    }
     if (!conduit_known) {
         int32_t psci = fdt_find_compatible(-1, "arm,psci-0.2");
         uint32_t len;
@@ -254,14 +261,21 @@ uint64_t arch_timebase_hz(void)
     return sysreg_read(cntfrq_el0);
 }
 
-/* The virtual timer's PPI: the third interrupt of the "arm,armv8-timer"
- * node (secure, non-secure physical, virtual, hypervisor); 27 by the
- * architecture's recommendation if the node is missing. */
+/* The virtual timer's PPI: the GTDT's, or the third interrupt of the
+ * "arm,armv8-timer" node (secure, non-secure physical, virtual,
+ * hypervisor); 27 by the architecture's recommendation if neither says. */
 uint32_t arch_timer_irq(void)
 {
-    int32_t node = fdt_find_compatible(-1, "arm,armv8-timer");
-    uint32_t irq = node >= 0 ? intc_fdt_irq(node, 2) : 0;
+    struct acpi_timer t;
+    int32_t node;
+    uint32_t irq = 0;
 
+    if (hw_source() == HW_ACPI) {
+        if (acpi_timer(&t))
+            irq = t.el1_virt;
+    } else if ((node = fdt_find_compatible(-1, "arm,armv8-timer")) >= 0) {
+        irq = intc_fdt_irq(node, 2);
+    }
     return irq ? irq : 27;
 }
 

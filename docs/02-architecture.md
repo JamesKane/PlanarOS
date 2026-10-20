@@ -91,6 +91,8 @@ Kernel entry contract (`arch_entry`):
 3. Calls `ExitBootServices` with the final memory map.
 4. Cleans the image from the caches, turns the MMU off, and enters the copy as any loader would.
 
+**Built (V3 step 2).** The kernel reads ACPI's static tables as a second source (`kernel/acpi.c`), and `kernel/hw.c` chooses between ACPI and the device tree: the DTB, unless `hw=acpi`.
+
 The stub is part of the kernel image, not a separate unit. The image header is both an arm64 `Image` header and a PE/COFF header, so one file boots through `booti`, QEMU's `-kernel` and UEFI. The stub runs before relocation, so it may use only PC-relative addresses. The build checks this.
 
 Hardware description: **VQ7. Needs a design session.** ACPI and FDT are both first-class sources:

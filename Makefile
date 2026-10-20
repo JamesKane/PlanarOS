@@ -2,11 +2,14 @@
 #
 #   make PLATFORM=qemu-virt-rv64   (default) RV64 image for QEMU's virt machine
 #   make PLATFORM=qemu-virt-a64    AArch64 image for QEMU's virt machine
-#                                  (EFI=1 runs it through UEFI, edk2)
+#                                  (EFI=1 runs it through UEFI, edk2;
+#                                  HW=acpi with ACPI, not a device tree)
 #   make PLATFORM=hosted           host executable
 #   make PLATFORM=... run          build and run where that makes sense
 #   make PLATFORM=... test         build, run, and check the boot transcript
 #   make test-all                  test every platform that can run here
+#   make compare-hw                the AArch64 boots took the same facts
+#                                  from the device tree and ACPI
 #   make PLATFORM=... soak         boot SOAK times (100) and count failures
 #   make check                     portable code must not test arch or platform
 #
@@ -25,12 +28,14 @@ BUILD = build/$(PLATFORM)$(BUILD_SUFFIX)
 # Portable compile units: built for every platform.
 PORTABLE_SRCS := \
 	kernel/main.c \
+	kernel/acpi.c \
 	kernel/area.c \
 	kernel/bootargs.c \
 	kernel/bootinfo.c \
 	kernel/console.c \
 	kernel/fdt.c \
 	kernel/handle.c \
+	kernel/hw.c \
 	kernel/intc.c \
 	kernel/irq.c \
 	kernel/kmalloc.c \
@@ -59,7 +64,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V3.1 done
+EXPECT := V3.2 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -89,7 +94,7 @@ CPPFLAGS += -Iarch/$(ARCH)/include
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all vq3 soak check clean
+.PHONY: all run test test-all compare-hw vq3 soak check clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -116,17 +121,38 @@ test: $(IMAGE)
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
 
 # Both ISAs in both layouts; AArch64 once more entered at EL2 (as the CIX
-# and RK3588 boards enter it), and through UEFI at EL1 and EL2; RV64 with
-# 17 GiB (RAM and the device tree above 16 GiB); and the hosted build.
+# and RK3588 boards enter it), and through UEFI at EL1 and EL2, from the
+# device tree and from ACPI; RV64 with 17 GiB (RAM and the device tree
+# above 16 GiB); the hosted build, alone and on the CIX's ACPI tables.
+# Then the AArch64 boots' facts are compared.
 test-all:
+	@rm -f $(A64_FACTS)/facts-*.txt
 	@for p in $(TEST_PLATFORMS); do for l in identity global; do \
 	  $(MAKE) --no-print-directory PLATFORM=$$p LAYOUT=$$l test || exit 1; \
 	done; done
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 LAYOUT=global test
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 LAYOUT=identity test
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 QEMU_EL2=1 LAYOUT=global test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 HW=acpi LAYOUT=identity test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 HW=acpi QEMU_EL2=1 LAYOUT=global test
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-rv64 QEMU_MEM=17G test
 	@$(MAKE) --no-print-directory PLATFORM=hosted test
+	@$(MAKE) --no-print-directory PLATFORM=hosted ACPI_BOARD=cix-p1 test
+	@$(MAKE) --no-print-directory compare-hw
+
+# One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
+# tree from -kernel, the device tree through edk2, and ACPI through edk2.
+# The kernel must take the same facts from each (kernel/hw.h).
+A64_FACTS := build/qemu-virt-a64
+compare-hw:
+	@for f in kernel efi-fdt efi-acpi; do \
+	  test -s $(A64_FACTS)/facts-$$f.txt || { echo "compare-hw: no facts from the $$f boot"; exit 1; }; \
+	done
+	@for f in efi-fdt efi-acpi; do \
+	  diff -u $(A64_FACTS)/facts-kernel.txt $(A64_FACTS)/facts-$$f.txt || \
+	    { echo "compare-hw: FAILED: the $$f boot took other facts"; exit 1; }; \
+	done
+	@echo "compare-hw: ok: $$(wc -l < $(A64_FACTS)/facts-kernel.txt | tr -d ' ') facts the same from the device tree, twice, and from ACPI"
 
 # The VQ3 measurement (docs/v1-plan.md): the same random workload against
 # both layouts, on each QEMU platform. Slow, so not part of make test.

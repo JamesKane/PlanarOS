@@ -15,4 +15,5 @@
 | 5 | QEMU `virt`, rv64 and aarch64 | `plat/qemu-virt/` |
 | 6 | Orange Pi RV2 (SpacemiT K1): serial boot, watchdog, the board's quirks | `plat/ky-x1/`, `tools/serial-boot.py` |
 | 7 | CIX P1, RK3588, SC8280XP | **Planned**, V3, V6, V7 |
+| 7a | Firmware descriptions: the device tree and ACPI, `hw=`, the `hw:` facts, board quirks | `kernel/hw.h`, `kernel/acpi.h`, `kernel/fdt.h`, `docs/boards/` |
 | 8 | The program image format (`PLNR` header) | `arch/<isa>/user/crt0.S`, `kernel/process.c` |

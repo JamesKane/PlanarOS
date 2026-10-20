@@ -29,7 +29,7 @@ Boards from the last year ship ACPI (the Q8B, the Orange Pi 6 Plus with the CIX 
   - `_DSD` properties in DT style (`mboxes`, `shmem`, `power-domains`).
 - **SCMI in AML is broken:** the AML's SCMI clock agent returns NOT_FOUND, so AbyssBSD spoke SCMI natively.
 - **Quirks:** the RSVL carve-outs are reported as free memory. Some objects are missing (`I2C0.UXC*`).
-- **No local dump.**
+- **Dumped on 2026-10-20:** [boards/cix-p1](boards/cix-p1/README.md) has every table.
 - Source: `AbyssBSD/docs/boards/orangepi-6-plus/`.
 
 **K3**
@@ -86,6 +86,11 @@ Two small parsers fill one `struct bootinfo`. The kernel uses nothing else.
 
 - Omega's `fdt.c` (384 lines) carries over. It gains phandle, `interrupts` and `ranges` helpers.
 - `acpi.c` walks static tables only and never runs AML. Its estimated size is 500–800 lines; the Rust port's `acpi.rs` is 470.
+- **Built (V3 step 2), differently from the diagram:** there is no `struct bootinfo` of facts.
+  - `kernel/hw.c` chooses one source (R6: a DTB wins, unless `hw=acpi`) and forgets the other.
+  - Each consumer asks the chosen parser directly. `acpi.c` is 490 lines.
+  - Every boot prints the facts it took as `hw:` lines, and `make compare-hw` checks that QEMU gives the same lines from both sources.
+  - The early quirk table lives in `acpi.c`: the CIX's DBG2 console and RSVL ranges.
 - The raw blobs are then handed to user space as a read-only Area.
 
 ### Layer 1: hwdb, the device graph (D2)
@@ -153,7 +158,7 @@ struct hw_node {
 
 ## 9.6 Open items for the session
 
-- **Dump the CIX tables** with redaction (192.168.0.27). Count how many devices actually need method execution, and whether `_CPC` and `_LPI` are static packages.
+- **The CIX tables are dumped** ([boards/cix-p1](boards/cix-p1/README.md)). Still to do: count how many devices actually need method execution, and whether `_CPC` and `_LPI` are static packages.
 - **K3:** revive the board, then dump RHCT and MADT and confirm it uses AIA.
 - **SCI and ACPI events.** Hardware-reduced ACPI uses GED or GPIO-signalled events. Does any target need them in v1? (Power button, lid.)
 - **Who owns PCIe enumeration:** the hwdb (ECAM from MCFG, or DT `ranges`) or a separate `pci` server. VectraOS-Odin ran devmgr's PCI scan before ACPI. *Proposed in [§11.6](11-driver-model.md#116-binding):* a `pci` server that is an hwdb source, as `acpid` is, publishing a child node per function.

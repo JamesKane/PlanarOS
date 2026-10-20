@@ -4,9 +4,11 @@
 #include <planar/exec.h>
 #include <planar/syscalls.h>
 
+#include "acpi.h"
 #include "arch.h"
 #include "cpu.h"
 #include "fdt.h"
+#include "hw.h"
 #include "kprintf.h"
 #include "memmap.h"
 #include "ktime.h"
@@ -18,6 +20,7 @@
 #include "efi.h"
 #include "handle.h"
 #include "kmalloc.h"
+#include "kstring.h"
 #include "layout.h"
 #include "port.h"
 #include "process.h"
@@ -177,7 +180,7 @@ static void build_blob(const uint32_t *words, unsigned n)
  * A property length that wraps the offset round to itself, more ends of
  * nodes than beginnings, blocks past the end of the blob, a node name
  * that never ends: the parser must give up on each, not hang or write
- * below its stack (review M14). The real tree is put back after.
+ * below its stack (review M14). The real tree, if any, is put back after.
  */
 void selftest_fdt(void)
 {
@@ -187,10 +190,6 @@ void selftest_fdt(void)
     static const uint32_t no_name_end[] = { 1, 0x61616161, 0x61616161, 0x61616161 };
     bool ok;
 
-    if (!real) {
-        kprintf("V1.1 fdt skipped: no device tree\n");
-        return;
-    }
     build_blob(wraps, 7);
     ok = fdt_init(bad_blob) && fdt_find_name(-1, "x") < 0 &&
          fdt_getprop(0, "x", nullptr) == nullptr;
@@ -201,8 +200,10 @@ void selftest_fdt(void)
     build_blob(wraps, 7);
     be32_at(2, 4096);               /* the structure block past the end */
     ok &= !fdt_init(bad_blob);
-    if (!fdt_init(real))
+    if (real && !fdt_init(real))
         fail("V1.1 fdt", "the real device tree no longer reads");
+    if (!real)
+        fdt_init(nullptr);          /* booted from ACPI, or from nothing */
     if (!ok)
         fail("V1.1 fdt", "a broken device tree got past the parser");
     kprintf("V1.1 fdt ok: a wrapping length, extra node ends, blocks past the end and an "
@@ -810,6 +811,234 @@ void selftest_boot(void)
             "loader keeps all reserved; arguments \"%s\"\n", descs, kept_ranges, bi->cmdline);
 }
 
+/* ---------------------------------------------------------------------
+ * V3 step 2: the ACPI parser against tables built here, good and broken.
+ */
+
+/* The tables: an RSDP, an XSDT and what it lists, at these offsets. */
+enum { T_RSDP = 0, T_XSDT = 64, T_MADT = 256, T_GTDT = 768, T_SPCR = 1024, T_FACP = 1152,
+       T_SIZE = 2048 };
+
+/* Ways to break them. */
+enum acpi_break {
+    B_NONE, B_RSDP_SUM, B_RSDP_REV, B_TABLE_SUM, B_FAR, B_XSDT_TAIL, B_MADT_ZERO,
+    B_MADT_PAST, B_GICC_SHORT, B_GTDT_COUNT, B_GTDT_SHORT, B_GTDT_PAST, B_LEN_HUGE,
+    B_LEN_SHORT, B_COUNT,
+};
+
+static uint8_t acpi_buf[T_SIZE] __attribute__((aligned(16)));
+
+static void put(uint32_t off, uint64_t v, unsigned bytes)
+{
+    for (unsigned i = 0; i < bytes; i++)
+        acpi_buf[off + i] = (uint8_t)(v >> 8 * i);
+}
+
+static void put_sig(uint32_t off, const char *s, unsigned n)
+{
+    memcpy(&acpi_buf[off], s, n);
+}
+
+/* Byte 'at' set so the 'len' bytes from 'off' sum to zero. */
+static void seal(uint32_t off, uint32_t len, uint32_t at)
+{
+    uint8_t sum = 0;
+
+    acpi_buf[at] = 0;
+    for (uint32_t i = 0; i < len; i++)
+        sum += acpi_buf[off + i];
+    acpi_buf[at] = (uint8_t)-sum;
+}
+
+static void header(uint32_t off, const char *sig, uint32_t len)
+{
+    put_sig(off, sig, 4);
+    put(off + 4, len, 4);
+    acpi_buf[off + 8] = 1;
+    put_sig(off + 10, "PLANARSELFTEST", 14);
+}
+
+static uint64_t pa_of(uint32_t off)
+{
+    return virt_to_phys(&acpi_buf[off]);
+}
+
+/* A machine like QEMU's: a GICv3, two CPUs, the timer, a PL011, PSCI
+ * over HVC and an SBSA watchdog; broken as 'b' says. */
+static void build_acpi(enum acpi_break b)
+{
+    uint32_t madt_len = 44 + 24 + 16 + 80 + 80, xsdt_len = 36 + 4 * 8, m, w, gtdt_len;
+
+    memset(acpi_buf, 0, sizeof acpi_buf);
+
+    m = T_MADT + 44;
+    put(m, 0x0c | 24 << 8, 2);
+    put(m + 8, 0x8000000, 8);
+    acpi_buf[m + 20] = 3;
+    m += 24;
+    put(m, 0x0e | 16 << 8, 2);
+    put(m + 4, 0x80a0000, 8);
+    put(m + 12, 0x40000, 4);
+    m += 16;
+    for (unsigned cpu = 0; cpu < 2; cpu++, m += 80) {
+        put(m, 0x0b | 80 << 8, 2);
+        put(m + 8, cpu, 4);                 /* UID */
+        put(m + 12, 1, 4);                  /* enabled */
+        put(m + 68, cpu, 8);                /* MPIDR */
+    }
+    m -= 80;                                /* the second GICC */
+    if (b == B_MADT_ZERO)
+        acpi_buf[m + 1] = 0;
+    if (b == B_MADT_PAST)
+        acpi_buf[m + 1] = 120;
+    if (b == B_GICC_SHORT) {
+        acpi_buf[m + 1] = 40;
+        madt_len -= 40;
+    }
+    header(T_MADT, "APIC", b == B_LEN_HUGE ? 0x7fffffff : madt_len);
+    seal(T_MADT, madt_len, T_MADT + 9);
+
+    /* The watchdog after the fixed part; or, broken, after an entry too
+     * short to move past, or past the table's end. */
+    w = b == B_GTDT_SHORT ? 107 : b == B_GTDT_PAST ? 140 : 104;
+    gtdt_len = b == B_GTDT_SHORT ? 136 : 132;
+    header(T_GTDT, "GTDT", gtdt_len);
+    put(T_GTDT + 56, 30, 4);
+    put(T_GTDT + 64, 27, 4);
+    put(T_GTDT + 72, 26, 4);
+    put(T_GTDT + 88, b == B_GTDT_COUNT ? 0xffffffff : b == B_GTDT_SHORT ? 2 : 1, 4);
+    put(T_GTDT + 92, b == B_GTDT_PAST ? 140 : 104, 4);
+    if (b == B_GTDT_SHORT)
+        put(T_GTDT + 104, 0 | 3 << 8, 3);   /* three bytes long: no room for a body */
+    put(T_GTDT + w, 1 | 28 << 8, 3);
+    put(T_GTDT + w + 4, 0x2a450000, 8);
+    put(T_GTDT + w + 12, 0x2a440000, 8);
+    put(T_GTDT + w + 20, 59, 4);
+    if (b == B_GTDT_COUNT)
+        put(T_GTDT + w + 1, 0, 2);          /* and an endless run of empty ones */
+    seal(T_GTDT, gtdt_len, T_GTDT + 9);
+    if (b == B_TABLE_SUM)
+        acpi_buf[T_GTDT + 100] ^= 1;
+
+    header(T_SPCR, "SPCR", b == B_LEN_SHORT ? 8 : 80);
+    acpi_buf[T_SPCR + 36] = 3;              /* PL011 */
+    put(T_SPCR + 40, 0 | 32 << 8 | 3 << 24, 4);
+    put(T_SPCR + 44, 0x9000000, 8);
+    seal(T_SPCR, 80, T_SPCR + 9);
+
+    header(T_FACP, "FACP", 140);
+    put(T_FACP + 129, 3, 2);                /* PSCI, over HVC */
+    seal(T_FACP, 140, T_FACP + 9);
+
+    if (b == B_FAR)
+        xsdt_len += 16;
+    if (b == B_XSDT_TAIL)
+        xsdt_len += 4;
+    header(T_XSDT, "XSDT", xsdt_len);
+    put(T_XSDT + 36, pa_of(T_MADT), 8);
+    put(T_XSDT + 44, pa_of(T_GTDT), 8);
+    put(T_XSDT + 52, pa_of(T_SPCR), 8);
+    put(T_XSDT + 60, pa_of(T_FACP), 8);
+    if (b == B_FAR) {
+        put(T_XSDT + 68, ((uint64_t)ARCH_DIRECT_MAP_GIB << 30) - 8, 8);
+        put(T_XSDT + 76, ~0ULL, 8);
+    }
+    if (b == B_XSDT_TAIL)
+        put(T_XSDT + 68, 0xffffffff, 4);
+    seal(T_XSDT, xsdt_len, T_XSDT + 9);
+
+    put_sig(T_RSDP, "RSD PTR ", 8);
+    acpi_buf[T_RSDP + 15] = b == B_RSDP_REV ? 0 : 2;
+    put(T_RSDP + 20, 36, 4);
+    put(T_RSDP + 24, pa_of(T_XSDT), 8);
+    seal(T_RSDP, 20, T_RSDP + 8);
+    seal(T_RSDP, 36, T_RSDP + 32);
+    if (b == B_RSDP_SUM)
+        acpi_buf[T_RSDP + 33] ^= 0x10;      /* reserved: only the extended checksum covers it */
+}
+
+/* What the parser should make of each: the RSDP refused, or what's
+ * left of the machine. */
+static bool acpi_case_ok(enum acpi_break b)
+{
+    struct acpi_gic g;
+    struct acpi_cpu c;
+    struct acpi_timer t;
+    struct acpi_watchdog w;
+    struct acpi_console con;
+    unsigned found = 0;
+    bool smc = true, ok;
+
+    build_acpi(b);
+    ok = acpi_init(acpi_buf);
+    if (b == B_RSDP_SUM || b == B_RSDP_REV)
+        return !ok && !acpi_table("APIC", nullptr);
+    if (!ok)
+        return false;
+    for (unsigned i = 0; acpi_cpu(i, &c); i++)
+        found += c.enabled && c.mpidr == i && c.uid == i;
+    switch (b) {
+    case B_MADT_ZERO:
+    case B_MADT_PAST:
+    case B_GICC_SHORT:
+        return found == 1 && acpi_gic(&g);
+    case B_LEN_HUGE:
+        return !acpi_table("APIC", nullptr) && !acpi_cpu(0, &c) && acpi_timer(&t);
+    case B_TABLE_SUM:
+        return !acpi_table("GTDT", nullptr) && !acpi_timer(&t) && found == 2;
+    case B_GTDT_COUNT:
+    case B_GTDT_SHORT:
+    case B_GTDT_PAST:
+        return acpi_timer(&t) && !acpi_watchdog(0, &w);
+    case B_LEN_SHORT:
+        return !acpi_console(&con) && found == 2;
+    default:
+        break;
+    }
+    /* Whole, or broken only where nothing is read (B_FAR, B_XSDT_TAIL). */
+    return found == 2 && acpi_gic(&g) && g.gicd == 0x8000000 && g.ngicr == 1 &&
+           g.gicr[0].size == 0x40000 && g.version == 3 &&
+           acpi_timer(&t) && t.el1_virt == 27 &&
+           acpi_watchdog(0, &w) && w.refresh == 0x2a450000 && w.gsiv == 59 &&
+           !acpi_watchdog(1, &w) &&
+           acpi_console(&con) && con.kind == ACPI_UART_PL011 && con.base == 0x9000000 &&
+           acpi_psci(&smc) && !smc;
+}
+
+/*
+ * The choice of source (kernel/hw.c), then the parser: the good tables
+ * read right, and each broken set is refused, or read only as far as it
+ * is good, without a hang or a stray access. The real tables, if the
+ * kernel is reading ACPI, are read again at the end.
+ */
+void selftest_acpi(void)
+{
+    const struct boot_info *bi = bootinfo();
+    unsigned refused = 0;
+
+    if (hw_choose(true, true, false) != HW_FDT || hw_choose(true, true, true) != HW_ACPI ||
+        hw_choose(true, false, true) != HW_FDT || hw_choose(false, true, false) != HW_ACPI ||
+        hw_choose(false, false, true) != HW_NONE)
+        fail("V3.2 acpi", "the wrong firmware description was chosen");
+    for (enum acpi_break b = B_NONE; b < B_COUNT; b++) {
+        if (!acpi_case_ok(b)) {
+            kprintf("V3.2 acpi: case %u\n", (unsigned)b);
+            fail("V3.2 acpi", b ? "a broken table got past the parser"
+                                : "good tables didn't read");
+        }
+        refused += b != B_NONE;
+    }
+    if (hw_source() == HW_ACPI) {
+        if (!acpi_init(phys_to_virt(bi->rsdp)))
+            fail("V3.2 acpi", "the real tables no longer read");
+    } else {
+        acpi_init(nullptr);
+    }
+    kprintf("V3.2 acpi ok: described by %s%s; good tables read, %u broken sets refused or "
+            "cut short\n", hw_source_name(hw_source()),
+            acpi_quirk_name() ? " (with quirks)" : "", refused);
+}
+
 /* --- ping-pong: the cost of Signal + Wait, on one CPU and across two --- */
 
 constexpr unsigned PINGS = 2000;
@@ -886,6 +1115,8 @@ void selftest_tasks(void *)
     kprintf("V2.4 done\n");
     selftest_boot();
     kprintf("V3.1 done\n");
+    selftest_acpi();
+    kprintf("V3.2 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

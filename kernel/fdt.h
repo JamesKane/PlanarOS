@@ -14,7 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Validate the blob and make it the tree the other calls read. */
+/* Validate the blob and make it the tree the other calls read. If it
+ * isn't good (nullptr, say), there's no tree: every lookup finds nothing. */
 bool fdt_init(const void *blob);
 
 /* Node by absolute path. A component without '@' matches any unit address. */

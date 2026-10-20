@@ -14,9 +14,11 @@
 #include <planar/endian.h>
 
 #include "aarch64.h"
+#include "acpi.h"
 #include "cpu.h"
 #include "fdt.h"
 #include "intc.h"
+#include "kprintf.h"
 
 /* Distributor */
 constexpr uint64_t GICD_CTLR       = 0x0000;
@@ -45,8 +47,16 @@ constexpr uint64_t TYPER_LAST      = 1u << 4;
 
 constexpr uint32_t SPURIOUS        = 1020;   /* INTIDs 1020-1023 aren't interrupts */
 
-static uintptr_t dist, rdist_base;
+constexpr unsigned MAX_RDIST_REGIONS = 8;
+
+static uintptr_t dist;
+static uint64_t dist_pa;
 static uintptr_t rdists[MAX_CPUS];     /* each CPU's redistributor */
+
+/* Where the redistributors are: physical ranges, as the firmware gives
+ * them. Size 0 is one redistributor (an ACPI GICC entry's). */
+static struct { uint64_t base, size; } regions[MAX_RDIST_REGIONS];
+static unsigned nregions;
 
 #define rdist (rdists[this_cpu()->index])
 static uint32_t nlines;
@@ -68,16 +78,13 @@ static void dist_wait(void)
         ;
 }
 
-static bool probe(int32_t node)
+/* The distributor at physical 'pa', the redistributors in regions[]. */
+static bool setup(uint64_t pa)
 {
-    uint64_t addr, size;
-
-    if (!fdt_reg(node, 0, &addr, &size))
+    if (!pa || !nregions)
         return false;
-    dist = (uintptr_t)phys_to_virt(addr);
-    if (!fdt_reg(node, 1, &addr, &size))
-        return false;
-    rdist_base = (uintptr_t)phys_to_virt(addr);
+    dist_pa = pa;
+    dist = (uintptr_t)phys_to_virt(pa);
 
     *d32(GICD_CTLR) = 0;
     dist_wait();
@@ -97,20 +104,62 @@ static bool probe(int32_t node)
     return true;
 }
 
-/* The redistributor whose affinity matches 'cpu' (Aff2.Aff1.Aff0). */
+/* The device tree: reg is the distributor, then #redistributor-regions
+ * ranges of redistributors (then the GICv2 compatibility frames). */
+static bool probe(int32_t node)
+{
+    uint32_t n = fdt_getprop_u32(node, "#redistributor-regions", 1);
+    uint64_t addr, size;
+
+    nregions = 0;
+    for (uint32_t i = 1; i <= n && nregions < MAX_RDIST_REGIONS; i++) {
+        if (!fdt_reg(node, i, &regions[nregions].base, &regions[nregions].size))
+            return false;
+        nregions++;
+    }
+    return fdt_reg(node, 0, &addr, &size) && setup(addr);
+}
+
+/* ACPI: the MADT's GICD, and its GICR ranges or its CPUs' own. */
+static bool probe_acpi(void)
+{
+    struct acpi_gic g;
+
+    if (!acpi_gic(&g))
+        return false;
+    nregions = 0;
+    for (unsigned i = 0; i < g.ngicr && nregions < MAX_RDIST_REGIONS; i++, nregions++) {
+        regions[nregions].base = g.gicr[i].base;
+        regions[nregions].size = g.gicr[i].size;
+    }
+    return setup(g.gicd);
+}
+
+/* The redistributor whose affinity matches 'cpu' (Aff2.Aff1.Aff0). Each
+ * region is walked frame by frame (two 64 KiB frames, four with VLPIs:
+ * GICv4's), no further than its end or its last redistributor. */
 static uintptr_t find_rdist(uint64_t cpu)
 {
-    uintptr_t r = rdist_base;
+    for (unsigned i = 0; i < nregions; i++) {
+        for (uint64_t off = 0;;) {
+            uintptr_t r = (uintptr_t)phys_to_virt(regions[i].base + off);
+            uint64_t typer = *(volatile uint64_t *)(r + GICR_TYPER);
 
-    for (;;) {
-        uint64_t typer = *(volatile uint64_t *)(r + GICR_TYPER);
-
-        if ((typer >> 32) == cpu)
-            return r;
-        if (typer & TYPER_LAST)
-            return 0;
-        r += typer & TYPER_VLPIS ? 0x40000 : 0x20000;
+            if ((typer >> 32) == cpu)
+                return r;
+            off += typer & TYPER_VLPIS ? 0x40000 : 0x20000;
+            if (typer & TYPER_LAST || off >= regions[i].size)
+                break;
+        }
     }
+    return 0;
+}
+
+static void describe(void)
+{
+    kprintf(" dist %p redist", (void *)dist_pa);
+    for (unsigned i = 0; i < nregions; i++)
+        kprintf(" %p+%llx", (void *)regions[i].base, (unsigned long long)regions[i].size);
 }
 
 static bool init_cpu(uint64_t cpu)
@@ -194,9 +243,11 @@ const struct intc_driver gicv3_driver = {
     .name = "GICv3",
     .compatible = compatible,
     .probe = probe,
+    .probe_acpi = probe_acpi,
     .init_cpu = init_cpu,
     .set = set,
     .claim = claim,
     .complete = complete,
     .fdt_irq = fdt_irq,
+    .describe = describe,
 };

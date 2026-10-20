@@ -1,9 +1,11 @@
 /*
  * kernel/smp.c -- CPU enumeration, bring-up and cross-CPU calls
  */
+#include "acpi.h"
 #include "arch.h"
 #include "cpu.h"
 #include "fdt.h"
+#include "hw.h"
 #include "intc.h"
 #include "irq.h"
 #include "kprintf.h"
@@ -30,38 +32,67 @@ static bool cpu_node_ok(int32_t node)
     return !status || kstreq(status, "okay") || kstreq(status, "ok");
 }
 
+/* One more CPU, 'hwid', from node 'node' (-1 from ACPI). False if it's
+ * the boot CPU, which is cpus[0] already. */
+static bool add_cpu(uint64_t boot_hwid, uint64_t hwid, int32_t node, uint64_t capacity)
+{
+    if (hwid == boot_hwid) {
+        cpus[0].node = node;
+        cpus[0].capacity = capacity;
+        return false;
+    }
+    if (ncpus == MAX_CPUS) {
+        kprintf("planar: more than %u CPUs; cpu %llx stays off\n", MAX_CPUS,
+                (unsigned long long)hwid);
+        return true;
+    }
+    cpus[ncpus] = (struct cpu){
+        .index = ncpus, .hwid = hwid, .node = node, .capacity = capacity,
+    };
+    ncpus++;
+    return true;
+}
+
+/* The MADT's enabled CPUs; online-capable ones aren't started (no
+ * hot-plug). Capacities come with the PPTT (V3 step 4). */
+static bool acpi_cpus(uint64_t boot_hwid)
+{
+    struct acpi_cpu c;
+    bool boot_found = false;
+
+    for (unsigned i = 0; acpi_cpu(i, &c); i++) {
+        if (!c.enabled)
+            continue;
+        if (!add_cpu(boot_hwid, c.mpidr & 0xffffff, -1, 1024))
+            boot_found = true;
+    }
+    return boot_found;
+}
+
 bool cpu_enumerate(uint64_t boot_hwid)
 {
     int32_t list = fdt_path("/cpus");
     uint64_t hwid, size;
+    bool boot_found = false;
 
     cpus[0].index = 0;
     cpus[0].hwid = boot_hwid;
     cpus[0].node = -1;
+    cpus[0].capacity = 1024;
     atomic_store(&cpus[0].online, true);
     ncpus = 1;
+    if (hw_source() == HW_ACPI)
+        return acpi_cpus(boot_hwid);
     if (list < 0)
         return false;
     for (int32_t n = fdt_child(list, -1); n >= 0; n = fdt_child(list, n)) {
         if (!cpu_node_ok(n) || !fdt_reg(n, 0, &hwid, &size))
             continue;
         hwid &= 0xffffff;               /* MPIDR: Aff2.Aff1.Aff0 */
-        if (hwid == boot_hwid) {
-            cpus[0].node = n;
-            cpus[0].capacity = fdt_getprop_u32(n, "capacity-dmips-mhz", 1024);
-            continue;
-        }
-        if (ncpus == MAX_CPUS) {
-            kprintf("planar: more than %u CPUs; the rest stay off\n", MAX_CPUS);
-            break;
-        }
-        cpus[ncpus] = (struct cpu){
-            .index = ncpus, .hwid = hwid, .node = n,
-            .capacity = fdt_getprop_u32(n, "capacity-dmips-mhz", 1024),
-        };
-        ncpus++;
+        if (!add_cpu(boot_hwid, hwid, n, fdt_getprop_u32(n, "capacity-dmips-mhz", 1024)))
+            boot_found = true;
     }
-    return cpus[0].node >= 0;
+    return boot_found;
 }
 
 unsigned cpus_online(void)

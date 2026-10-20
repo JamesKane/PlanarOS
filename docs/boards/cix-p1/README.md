@@ -5,6 +5,7 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 | File | What |
 |---|---|
 | `acpi/*.dat` | Every ACPI table the XSDT lists, plus the XSDT and DSDT, read raw from `/dev/mem`. All checksums are good. They are fixtures for `kernel/acpi.c`'s hosted tests. |
+| `acpi-expect.txt` | The lines the kernel must print when it reads those tables, hosted: `make PLATFORM=hosted ACPI_BOARD=cix-p1 test` (part of `make test-all`). |
 | `firmware-boot.log` | UART2 from power-on to FreeBSD's loader: TF-A, OP-TEE, UEFI. Escape sequences stripped. |
 | `freebsd-dmesg.txt` | FreeBSD's boot messages: devices found through ACPI, the CPU feature registers. |
 
@@ -18,7 +19,7 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 
 **Console.**
 - UART2 is a PL011 at `0x40d0000`, at 115200 8N1, and is left set up by the firmware.
-- There's no SPCR. DBG2 names it: type `0x8000` (serial), subtype 3 (ARM SBSA, 32-bit access), `\_SB.COM2`.
+- There's no SPCR. DBG2 names it: type `0x8000` (serial), subtype 3 (ARM PL011), 32-bit access, `\_SB.COM2`. The kernel uses it through a quirk entry.
 - FreeBSD's own console goes to the screen, not UART2.
 
 **The interrupt controller and the CPUs** (from the MADT):

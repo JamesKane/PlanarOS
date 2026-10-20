@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: in progress (2026-10-20).** Step 1 done. All three decisions are made (end of this plan).
+**Status: in progress (2026-10-20).** Steps 1 and 2 done. All three decisions are made (end of this plan).
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -24,7 +24,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 | Step | Content |
 |---|---|
 | **1. UEFI entry, on QEMU** ✅ | The image is also an EFI application. A stub takes the memory map and the configuration tables, exits boot services and enters the kernel. It runs under edk2 on QEMU, at EL1 and at EL2. |
-| **2. ACPI, on QEMU** | `kernel/acpi.c` parses the static tables into the same facts `fdt.c` gives. Both sources are compared on one machine. |
+| **2. ACPI, on QEMU** ✅ | `kernel/acpi.c` parses the static tables into the same facts `fdt.c` gives. Both sources are compared on one machine. |
 | **3. The board** | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
 | **4. Big and little** | Core classes from the PPTT and MIDR, and costs per class. |
 | **5. Arm costs** | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
@@ -66,14 +66,46 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
   - the command line dropped.
 - **Not checked on QEMU:** the cache maintenance (QEMU has no caches to get wrong), and VHE at EL2 (edk2 doesn't enable it). Both are first tested on the CIX, in step 3.
 
-## 2. ACPI, on QEMU
+## 2. ACPI, on QEMU ✅
+
+**Done (2026-10-20).** `make test-all` runs 12 configurations, then `make compare-hw`. Two of them boot QEMU through edk2 from ACPI alone: EL1 with the identity layout, and EL2 with the global one. A 30-boot soak of the second had no failures. The transcript ends with `V3.2 done`.
+
+- **`kernel/acpi.c`** (490 lines) reads the RSDP, the XSDT and every table it lists, then answers questions: `acpi_gic`, `acpi_cpu`, `acpi_timer`, `acpi_watchdog`, `acpi_console`, `acpi_psci` (from the FADT) and `acpi_pci` (the MCFG).
+  - A table is used only if it's whole, inside the direct map, at most 16 MiB long, and its checksum is good. The RSDP must be revision 2 or later, with both checksums good.
+  - Every structure inside a table must fit in it, and every walk moves forward.
+  - Every read is a byte at a time. The tables are read before RAM is mapped as normal memory, and an unaligned load from Device memory faults. ACPI's fields are unaligned: the XSDT's 64-bit entries start at offset 36.
+- **`kernel/hw.c` chooses the source.** `hw=acpi` picks ACPI when both are present; otherwise the device tree wins. The losing source is forgotten. Each consumer asks `hw_source()`: the console, the CPU list, the GIC's probe, PSCI and the timer.
+  - On QEMU, edk2 passes ACPI or the device tree, never both. So the choice is tested in the self-test, not by a boot.
+- **The redistributors** are found by walking each range the firmware gives (MADT GICR entries, per-CPU GICC addresses, or the DT's `#redistributor-regions`), and never past a range's end.
+  - The stride comes from each frame's `GICR_TYPER.VLPIS`: 0x40000 with VLPI frames (GICv4, the CIX), else 0x20000. The MADT has no stride field.
+- **The comparison.** Every boot prints its facts as `hw:` lines: RAM, the CPUs (sorted), the interrupt controller, the timer's interrupt and the console. boot-check saves them, and `make compare-hw` requires the `-kernel` boot, the edk2 device-tree boot and the edk2 ACPI boot to agree (5 lines on QEMU).
+- **The CIX's own tables, on the host.** `make PLATFORM=hosted ACPI_BOARD=cix-p1 test` runs the kernel on `docs/boards/cix-p1/acpi/*.dat`, under a new XSDT. The transcript must contain every line of `acpi-expect.txt`: the GICv4 at `0xe010000`, 12 CPUs in the MADT's order, the timer PPIs 30/27/26, the watchdog, UART2 from the DBG2, PSCI over SMC, and the quirk entry.
+- **Quirks** are a table in `acpi.c`, keyed by the XSDT's OEM ID and OEM table ID. The CIX entry (`CIXTEK`/`SKY1EDK2`):
+  - takes the console from the DBG2 (elsewhere only the SPCR names the console);
+  - reserves the DSDT's three RSVL ranges.
+- **`V3.2 acpi`** checks the choice of source in 5 cases. It then checks the parser against tables it builds: a good set, read in full, and 13 broken sets, each refused or read only as far as it is good:
+  - an RSDP with a bad checksum or revision 0;
+  - a bad table checksum;
+  - XSDT entries outside the direct map, or a partial last entry;
+  - MADT entries of length 0, past the end, or too short for a GICC;
+  - GTDT timer lists with a huge count, an entry too short to move past, or a start past the end;
+  - a table length over the limit, or under the header.
+- **Also changed:**
+  - `fdt_init` forgets the old tree when it refuses a new one, so a refused or dropped tree is never half-read;
+  - the device-tree self-test runs on every boot, with or without a tree;
+  - CPUs the hosted build can't start are dropped.
+- **Mutation tests:** 21 of 23 caught, by the hosted CIX run, QEMU boots and `compare-hw`. The cases that first got through led to stronger tests: the GTDT start past the end, the 3-byte GTDT entry, a flip in the RSDP's reserved bytes, and an over-long table (caught on QEMU only).
+  - **Two checks can't be caught.** The RSDP's 20-byte checksum covers bytes the extended checksum also covers. The bound on a redistributor walk isn't reached on QEMU, because QEMU marks the last frame in each range.
+- **Left for later steps:** the PPTT (step 4); MCFG and the ITS are only recorded (V4); the GTDT watchdog is read, but nothing drives it yet (step 3).
+
+### The plan, as written before the step
 
 `kernel/acpi.c` walks the static tables only and never runs AML (VQ7, D1). docs/09 estimates 500–800 lines.
 
 - **RSDP → XSDT:** with checksums. Every length is bounded by its table, with the same hardening as the device-tree parser after review M14. It's tested against broken tables, as `fdt.c` is.
 - **MADT:**
   - the GICD;
-  - the redistributors, as GICR ranges or per-CPU GICC entries. The stride comes from the table: 0x40000 for v4.1 frames on the CIX;
+  - the redistributors, as GICR ranges or per-CPU GICC entries. The stride is 0x40000 for v4.1 frames on the CIX (as built: from `GICR_TYPER`, not the table);
   - the CPUs, by MPIDR, with their enabled flags.
 
   The ITS is recorded for V4.

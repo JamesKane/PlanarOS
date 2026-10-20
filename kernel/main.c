@@ -15,7 +15,9 @@
 #include "bootinfo.h"
 #include "console.h"
 #include "cpu.h"
+#include "acpi.h"
 #include "fdt.h"
+#include "hw.h"
 #include "intc.h"
 #include "kprintf.h"
 #include "layout.h"
@@ -30,15 +32,17 @@
 
 [[noreturn]] void kmain(uint64_t boot_cpu, uint64_t firmware_data)
 {
-    bool have_fdt, have_memory = false;
+    bool have_hw, have_memory = false;
+    enum hw_source hw;
     uint64_t dtb;
 
     arch_set_this_cpu(&cpus[0]);
     arch_early_init();
     sched_init_cpu();
     dtb = bootinfo_init(firmware_data);
-    have_fdt = dtb && fdt_init(phys_to_virt(dtb));
-    if (have_fdt && (have_memory = memmap_init()))
+    hw = hw_init(dtb, bootinfo() ? bootinfo()->rsdp : 0);
+    have_hw = hw != HW_NONE;
+    if (have_hw && (have_memory = memmap_init()))
         arch_memory_init();
     plat_early_init();
 
@@ -47,31 +51,33 @@
     console_report();
     if (bootinfo())
         kprintf("planar: booted through UEFI\n");
-    if (have_fdt)
+    if (hw == HW_FDT)
         fdt_report();
+    else if (hw == HW_ACPI)
+        acpi_report();
     else
-        kprintf("planar: no device tree (firmware data %p)\n", (void *)firmware_data);
+        kprintf("planar: no device tree or ACPI (firmware data %p)\n", (void *)firmware_data);
     if (have_memory) {
         memmap_report();
         pmm_init();
     }
-    if (have_fdt) {
-        bootargs_init();
+    if (have_hw)
         layout_init();
-    }
     kprintf("planar: user layout %s, %u-bit ASIDs\n", layout_name(layout_boot()),
             arch_asid_bits());
 
-    if (have_fdt && cpu_enumerate(boot_cpu))
+    if (have_hw && cpu_enumerate(boot_cpu))
         kprintf("planar: %u CPUs; booted on %llx\n", ncpus, (unsigned long long)boot_cpu);
     else
         cpu_enumerate(boot_cpu);
-    if (have_fdt && intc_init(boot_cpu))
+    if (have_hw && intc_init(boot_cpu))
         kprintf("planar: interrupt controller %s\n", intc()->name);
     else
         kprintf("planar: no interrupt controller\n");
     if (!time_init())
         kprintf("planar: no timer\n");
+    if (have_hw)
+        hw_report();
     ipi_init_cpu();
     arch_irq_enable();
 
@@ -81,8 +87,13 @@
     selftest_fdt();
     kprintf("V1.1 done\n");
 
-    if (ncpus > 1 && pmm_total())
+    if (ncpus > 1 && pmm_total()) {
         kprintf("planar: %u of %u CPUs online\n", smp_start(), ncpus);
+    } else if (ncpus > 1) {
+        /* No stacks for them (the hosted build): the rest stay off. */
+        kprintf("planar: no memory to start the other %u CPUs\n", ncpus - 1);
+        ncpus = 1;
+    }
     plat_late_init();
     selftest_smp();
     selftest_ipi();
@@ -109,6 +120,8 @@
         kprintf("V2.4 done\n");
         kprintf("V3.1 boot skipped: no tasks\n");
         kprintf("V3.1 done\n");
+        selftest_acpi();            /* needs no tasks */
+        kprintf("V3.2 done\n");
         arch_halt();
     }
     sched_idle();
