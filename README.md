@@ -9,7 +9,7 @@ Planar is an operating system for one person and one machine. It turns a modern 
 - **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
 - **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
 
-Today Planar boots on QEMU (riscv64 and aarch64) and on the Orange Pi RV2. It has SMP scheduling, user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md)).
+Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). There are no drivers, filesystem or display yet; those are V4.
 
 The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
@@ -26,9 +26,10 @@ The structure follows omega's:
 | `qemu-virt-rv64` (default) | `rv64` | QEMU's riscv64 `virt` machine under OpenSBI, S-mode |
 | `qemu-virt-a64` | `aarch64` | QEMU's aarch64 `virt` machine, EL1. `QEMU_EL2=1` enters at EL2 to test the drop to EL1. |
 | `ky-x1` | `rv64` | Orange Pi RV2 (SpacemiT K1), booted over its serial console through U-Boot (`tools/serial-boot.py`) |
-| `hosted` | `host` | A host executable. It can be given a `.dtb` to parse. |
+| `uefi-a64` | `aarch64` | One UEFI image for Arm boards, with ACPI or a device tree. Today the CIX P1, installed and booted from the board's FreeBSD over ssh (`tools/efi-boot.py`). `EFI=1` on `qemu-virt-a64` boots the same image through QEMU's edk2. |
+| `hosted` | `host` | A host executable. It can be given a `.dtb` to parse, or a board's ACPI tables (`ACPI_BOARD=cix-p1`). |
 
-Both QEMU platforms share `plat/qemu-virt/`. Everything V0 needs, including the console, comes from the device tree.
+Both QEMU platforms share `plat/qemu-virt/`. The hardware comes from the device tree or ACPI, whichever the firmware gives (`kernel/hw.c`).
 
 ## Building
 
@@ -40,8 +41,11 @@ make run                      # boot it in QEMU (Ctrl-A X quits)
 make PLATFORM=qemu-virt-a64 run
 make PLATFORM=hosted run      # or: build/hosted/planar some.dtb
 make PLATFORM=... test        # boot and check the transcript (tools/boot-check.py)
-make test-all                 # all three platforms
+make test-all                 # every platform that runs here: 10 boots, then compare-hw
 make check                    # portable code must not test arch or platform
+make PLATFORM=ky-x1 test      # the RV2, over the serial console
+make PLATFORM=uefi-a64 test   # the CIX P1, through its FreeBSD (BOARD=root@…)
+make vq3                      # the VQ3 soak of Areas under memory pressure
 ```
 
 | Board | SoC | ISA |
@@ -66,7 +70,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 1. [Vision and principles](docs/00-vision.md): what Planar is and isn't, and how it relates to Omega, HellFire and the earlier VectraOS corpus.
 2. [Review of the vision paper](docs/01-spec-review.md): each claim checked against the hardware. Says what survives, what has to change, and what the paper leaves out.
 3. [Architecture overview](docs/02-architecture.md): layers, kernel and server split, boot, the arch/plat contract.
-4. [Memory and protection](docs/03-memory.md): single address space (identity vs. global-VA pending measurement), protection domains, and the PMP and MPU back ends.
+4. [Memory and protection](docs/03-memory.md): the identity single address space (VQ3, decided by measurement), protection domains, and the PMP and MPU back ends.
 5. [IPC](docs/04-ipc.md): ports, messages, rings, signals and doorbells.
 6. [Coprocessors](docs/05-coprocessors.md): queue leases for GPU and NPU, board by board.
 7. [Platforms](docs/06-platforms.md): board profiles, boot chains, hazards.
@@ -79,21 +83,29 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 14. [OpenType and TrueType font engine](docs/14-font-engine.md): clean-room `font.library` from the spec for English layouts, stubbed non-English/colour features, and host-side FreeType/HarfBuzz test oracle (proposed).
 15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
-17. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
-18. [Open questions](docs/questions.md): the question register.
+17. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes).
+18. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
+19. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
+20. [Open questions](docs/questions.md): the question register.
 
 ## Status
 
-Decided on 2026-10-19:
+| Phase | Done |
+|---|---|
+| V0. Tree, toolchain, device-tree console | 2026-10-19 |
+| V1. Single address space, SMP, tasks, signals, Areas (QEMU and the RV2) | 2026-10-19 |
+| V2. IPC: connections, rings, `DoMsg`, death notices; then hardening (V2.5) | 2026-10-20 |
+| V3. The CIX P1 through UEFI and ACPI, 12 cores in two classes, Arm costs, VQ3 | 2026-10-20 |
+
+Decided so far (the full register is [questions.md](docs/questions.md)):
 - Copy what we can from omega (VQ1).
 - The project is named Planar (VQ2).
+- The identity single address space (VQ3, by measurement). The global layout was deleted after V3.
+- The kernel in the upper half, with a direct map (VQ4).
+- ACPI and FDT through the `hwdb` device graph, with ACPICA in user space (VQ7).
 - SMP from V1 (VQ8).
 - C23 plus assembly, with no SIMD in the kernel (VQ12).
 - FAT32 plus a modern native filesystem (VQ14).
-- ACPI and FDT through the `hwdb` device graph, with ACPICA in user space (VQ7).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next:
-- The VQ3 measurements in V1.
-- Dump the CIX ACPI tables (§9.6).
-- Start V0.
+Next: V4, the hardware model, drivers and servers ([roadmap](docs/08-roadmap.md)): boot from storage to a shell on the framebuffer, on the RV2 and the CIX.

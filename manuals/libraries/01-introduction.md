@@ -1,6 +1,6 @@
 # 1. Introduction to Planar programming
 
-*Checked against V2.*
+*Checked against V3.*
 
 Planar is a single-user system in the Amiga tradition: tasks wait on signals, talk by passing pointers to messages, and the system stays small. Unlike AmigaOS, programs run in **protection domains**: a program can only touch the memory it has been given. This chapter is the vocabulary for the rest of the volume.
 

@@ -6,10 +6,10 @@
 
 | # | Chapter | State |
 |---|---|---|
-| 1 | [Introduction to Planar programming](01-introduction.md): the single address space, processes and tasks, handles, kernel calls and errors | Written, V2 |
-| 2 | [Exec: tasks and signals](02-tasks-and-signals.md) | Written, V2 |
-| 3 | [Exec: memory and Areas](03-areas.md) | Written, V2 |
-| 4 | [Exec: ports, connections and messages](04-messages.md) | Written, V2 |
+| 1 | [Introduction to Planar programming](01-introduction.md): the single address space, processes and tasks, handles, kernel calls and errors | Written, V3 |
+| 2 | [Exec: tasks and signals](02-tasks-and-signals.md) | Written, V3 |
+| 3 | [Exec: memory and Areas](03-areas.md) | Written, V3 |
+| 4 | [Exec: ports, connections and messages](04-messages.md) | Written, V3 |
 | 5 | Exec: interrupts and driver tasks (`AckIrq`) | **Planned**, V4 ([docs §4.6](../../docs/04-ipc.md)) |
 | 6 | Exec: lending memory with a request (`IOF_LEND`) | **Planned** ([docs §4.2](../../docs/04-ipc.md)) |
 | 7 | Exec: futexes (`WaitAddr`, `WakeAddr`) | **Planned** ([docs §4.1](../../docs/04-ipc.md)) |

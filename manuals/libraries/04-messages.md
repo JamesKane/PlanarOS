@@ -1,6 +1,6 @@
 # 4. Exec: ports, connections and messages
 
-*Checked against V2.*
+*Checked against V3.*
 
 Programs talk by sending **messages**: structures in shared memory, passed by address and replied to in place, as on the Amiga. What Planar adds is protection. Two programs can exchange messages only over a **connection**, and a connection's memory is mapped into those two programs and no others.
 

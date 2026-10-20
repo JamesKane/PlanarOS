@@ -16,7 +16,7 @@ The RKM was split into volumes by what the reader is doing. Planar keeps the spl
 |---|---|---|---|
 | [**Libraries**](libraries/README.md) | *Libraries* | How to program Planar. Concepts, worked examples, rules. Exec first: tasks, signals, Areas, ports and messages. | Exec chapters started |
 | [**Devices**](devices/README.md) | *Devices* | The I/O model (`IORequest`, `DoIO`, `SendIO`) and each device or driver server. | Outline only; nothing built |
-| [**Autodocs**](autodocs/README.md) | *Includes and Autodocs* | One entry per call, in the RKM's NAME / SYNOPSIS / FUNCTION / … format. The reference, not the tutorial. | Every V2 call documented |
+| [**Autodocs**](autodocs/README.md) | *Includes and Autodocs* | One entry per call, in the RKM's NAME / SYNOPSIS / FUNCTION / … format. The reference, not the tutorial. | Every call documented (V3) |
 | [**Includes**](includes/README.md) | *Includes and Autodocs* | Each public header in `include/planar/`: its structures, constants and ABI promises. | Index and ABI rules |
 | [**Hardware**](hardware/README.md) | *Hardware Reference Manual* | The machines Planar runs on, and the `arch_*`/`plat_*` contract a port implements. | Outline only |
 

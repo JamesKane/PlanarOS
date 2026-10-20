@@ -6,6 +6,8 @@
 #                                  HW=acpi with ACPI, not a device tree)
 #   make PLATFORM=uefi-a64         AArch64 image for UEFI boards with ACPI
 #                                  (the CIX P1; run and test boot it there)
+#   make PLATFORM=ky-x1            RV64 image for the Orange Pi RV2
+#                                  (run and test boot it over the serial console)
 #   make PLATFORM=hosted           host executable
 #   make PLATFORM=... run          build and run where that makes sense
 #   make PLATFORM=... test         build, run, and check the boot transcript
@@ -13,6 +15,7 @@
 #   make compare-hw                the AArch64 boots took the same facts
 #                                  from the device tree and ACPI
 #   make PLATFORM=... soak         boot SOAK times (100) and count failures
+#   make vq3                       the VQ3 soak of Areas, on each QEMU platform
 #   make check                     portable code must not test arch or platform
 #
 # mk/<platform>.mk names the arch and board compile units, and includes

@@ -1,6 +1,6 @@
 # exec: kernel calls
 
-*Checked against V2.*
+*Checked against V3.*
 
 The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas) and `planar/ipc.h` (ports and connections). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
@@ -77,15 +77,16 @@ A kernel call.
 
 **RESULT**
 The Area's handle (positive), or:
-- `ERR_BADARG` -- `size` is 0 or more than half the user address window, or `flags` has an unknown bit.
-- `ERR_NOMEM` -- out of memory, or the system's handle table is full. A `size` of more pages than are free fails at once, before anything is allocated.
+- `ERR_BADARG` -- `size` is 0, or `flags` has an unknown bit.
+- `ERR_NOMEM` -- out of memory, no run of free pages is long enough, or the system's handle table is full. A `size` of more pages than are free fails at once, before anything is allocated.
 - `ERR_LIMIT` -- the calling process already holds 256 handles.
 - `ERR_BADADDR` -- `address` isn't writable. The Area has been freed again.
 - `ERR_BADHANDLE` -- another task of the process freed the new handle before this call returned.
 
 **NOTES**
 - The Area starts with `AREAR_READ | AREAR_WRITE` rights, even with `AREAF_EXEC`. Use `ProtectArea` to make it executable.
-- `AREAF_CLEAR` changes nothing: every Area is zeroed.
+- `AREAF_CLEAR` changes nothing: every Area is zeroed. `AREAF_CONTIG` changes nothing either: an Area's address is its physical address, so every Area is one physical run.
+- A large Area can fail with `ERR_NOMEM` while enough memory is free in total, if it's fragmented. Under heavy load, about 0.15% of allocations do (VQ3).
 - Keep the result in an `int64_t` and test it with `< 0`; cast to `Handle` only once it's known to be one.
 
 **BUGS**

@@ -1,6 +1,6 @@
 # 3. Exec: memory and Areas
 
-*Checked against V2.*
+*Checked against V3.*
 
 An **Area** is Planar's unit of memory a program can ask for, give to another process, or make executable. Areas are page-rounded and fairly expensive to make, so a program allocates a few large ones and divides them up itself. (A `malloc`-style allocator over Areas is **planned** as part of the C runtime.)
 
