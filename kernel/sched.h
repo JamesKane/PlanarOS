@@ -155,5 +155,6 @@ void irq_exit(void);
 /* Counters for the self-tests. */
 uint64_t sched_switches(void);
 uint64_t sched_steals(void);
+uint64_t sched_handoffs(void);
 
 #endif /* KERNEL_SCHED_H */

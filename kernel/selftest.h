@@ -39,4 +39,7 @@ void selftest_ipc(void);
 /* V2 step 2: rings, with the echo server and its client. */
 void selftest_rings(void);
 
+/* V2 step 3: DoMsg's handoff and priority loan, and its cost. */
+void selftest_domsg(void);
+
 #endif /* KERNEL_SELFTEST_H */

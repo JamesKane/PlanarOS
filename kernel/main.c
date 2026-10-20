@@ -96,6 +96,8 @@
         kprintf("V2.1 done\n");
         kprintf("V2.2 rings skipped: no tasks\n");
         kprintf("V2.2 done\n");
+        kprintf("V2.3 domsg skipped: no tasks\n");
+        kprintf("V2.3 done\n");
         arch_halt();
     }
     sched_idle();

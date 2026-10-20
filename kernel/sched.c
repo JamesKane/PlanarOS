@@ -9,7 +9,7 @@
 #include "sched.h"
 
 static struct task idle_tasks[MAX_CPUS];
-static atomic_uint_fast64_t switches, steals;
+static atomic_uint_fast64_t switches, steals, handoffs;
 
 [[noreturn]] void task_start(void);
 
@@ -500,17 +500,24 @@ void task_set_pri(struct task *t, int pri)
         sched_kick(c);
 }
 
-void task_end_loan(void)
+/* Give back a loan; returns the CPU to kick, or nullptr. */
+static struct cpu *end_loan(struct task *self)
 {
-    struct task *self = task_self();
     unsigned long was;
     struct cpu *c;
 
     if (self->pri == self->base_pri)
-        return;
+        return nullptr;
     was = spin_lock_irqsave(&self->lock);
     c = set_pri(self, self->base_pri);
     spin_unlock_irqrestore(&self->lock, was);
+    return c;
+}
+
+void task_end_loan(void)
+{
+    struct cpu *c = end_loan(task_self());
+
     if (c)
         sched_kick(c);
 }
@@ -519,7 +526,9 @@ void task_end_loan(void)
 
 uint64_t task_wait(uint64_t mask)
 {
-    task_end_loan();
+    /* Kicked only if it doesn't wait: waiting switches anyway. */
+    struct cpu *loan = end_loan(task_self());
+
     for (;;) {
         unsigned long was = arch_irq_save();
         struct task *self = this_cpu()->current;
@@ -527,16 +536,13 @@ uint64_t task_wait(uint64_t mask)
 
         spin_lock(&self->lock);
         got = self->sig_received & mask;
-        if (atomic_load(&self->killed)) {
+        if (atomic_load(&self->killed) || got) {
             /* Killed: back out of the kernel call; user_return() ends it. */
-            spin_unlock(&self->lock);
-            arch_irq_restore(was);
-            return got;
-        }
-        if (got) {
             self->sig_received &= ~got;
             spin_unlock(&self->lock);
             arch_irq_restore(was);
+            if (loan)
+                sched_kick(loan);
             return got;
         }
         self->sig_waiting = mask | SIGF_KILL;
@@ -544,6 +550,7 @@ uint64_t task_wait(uint64_t mask)
         self->state = TASK_WAITING;
         spin_unlock(&self->cpu->rq_lock);
         spin_unlock(&self->lock);
+        loan = nullptr;
         schedule();
         arch_irq_restore(was);
     }
@@ -575,6 +582,7 @@ struct cpu *task_post(struct task *t, uint64_t mask, bool handoff)
                 if (t->pri < me->pri)
                     t->pri = me->pri;   /* lent until it next signals or waits */
                 enqueue_head(c, t);
+                atomic_fetch_add_explicit(&handoffs, 1, memory_order_relaxed);
             } else if (!t->on_rq) {
                 enqueue(c, t);
             }
@@ -635,4 +643,9 @@ uint64_t sched_switches(void)
 uint64_t sched_steals(void)
 {
     return atomic_load(&steals);
+}
+
+uint64_t sched_handoffs(void)
+{
+    return atomic_load(&handoffs);
 }

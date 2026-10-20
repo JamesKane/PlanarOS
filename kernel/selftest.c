@@ -633,6 +633,8 @@ void selftest_tasks(void *)
     kprintf("V2.1 done\n");
     selftest_rings();
     kprintf("V2.2 done\n");
+    selftest_domsg();
+    kprintf("V2.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1142,7 +1144,7 @@ constexpr uint64_t STREAM = 20000;
 
 /* Start the echo server and run 'client' with 'arg' against it. Returns
  * the kernel calls each made meanwhile: [0] the server, [1] the client. */
-static void with_echo(uint64_t arg, uint64_t calls[2])
+static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
 {
     struct process *echo, *client;
     uint64_t before;
@@ -1152,7 +1154,7 @@ static void with_echo(uint64_t arg, uint64_t calls[2])
         fail("V2.2 echo", "process_create failed");
     task_sleep_until(time_now() + time_us(2000));       /* let it make its port */
     before = atomic_load(&echo->calls);
-    client = run("client", arg, 10000000);
+    client = run(prog, arg, 10000000);
     calls[0] = atomic_load(&echo->calls) - before;
     calls[1] = atomic_load(&client->calls);
     if (!atomic_load(&client->dead) || client->fault != FAULT_NONE || client->exit_code != 0) {
@@ -1177,11 +1179,11 @@ void selftest_rings(void)
         kprintf("V2.2 rings skipped: no user programs\n");
         return;
     }
-    with_echo(0, calls);
+    with_echo("client", 0, calls);
     kprintf("V2.2 echo ok: 2000 PutMsg/WaitPort and 2000 DoMsg round trips, every reply "
             "right\n");
 
-    with_echo(STREAM, calls);
+    with_echo("client", STREAM, calls);
     /* Busy on both sides, a stream needs a kernel call only when one
      * side runs dry and sleeps: far fewer than one per message. */
     if (calls[0] + calls[1] > STREAM / 4)
@@ -1197,4 +1199,139 @@ void selftest_rings(void)
     if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0)
         fail("V2.2 reclaim", "handles, ports, connections or Areas leaked");
     kprintf("V2.2 reclaim ok\n");
+}
+
+/* ---------------------------------------------------------------------
+ * V2 step 3: DoMsg's handoff and priority loan, run from the selftest task.
+ */
+
+constexpr uint64_t SIGF_REPLY = 1ULL << 18;
+static atomic_int server_cpu, server_pri;
+static atomic_uint_fast64_t server_saw;     /* the bystander's count, when it ran */
+
+/* Stands in for a server: each time it's woken it notes where and at
+ * what priority it runs, and answers. */
+static void fake_server(void *)
+{
+    for (;;) {
+        task_wait(SIGF_TEST);
+        atomic_store(&server_cpu, (int)this_cpu()->index);
+        atomic_store(&server_pri, task_self()->pri);
+        atomic_store(&server_saw, atomic_load(&spin_counts[1]));
+        task_signal(tester, SIGF_REPLY);
+    }
+}
+
+/* Wait for SIGF_REPLY for at most 'us'. */
+static bool wait_reply(uint64_t us)
+{
+    struct task *self = task_self();
+    uint64_t got;
+
+    task_set_signal(0, SIGF_SLEEP);
+    self->sleep = (struct ktimer){ .fn = timeout_fire, .data = self };
+    ktimer_start(&self->sleep, time_now() + time_us(us));
+    got = task_wait(SIGF_REPLY | SIGF_SLEEP);
+    ktimer_stop(&self->sleep);
+    return got & SIGF_REPLY;
+}
+
+/* Wake 't' with a handoff and wait for its answer, as SignalWaitConn does. */
+static bool post_and_wait(struct task *t, uint64_t us)
+{
+    struct cpu *c = task_post(t, SIGF_TEST, true);
+    bool ok;
+
+    if (c && c != this_cpu())
+        sched_kick(c);
+    ok = wait_reply(us);
+    if (c == this_cpu())
+        sched_kick(c);
+    return ok;
+}
+
+/*
+ * A handoff brings a server waiting on another CPU to this one. A loan
+ * lets a low-priority server run past a medium-priority task hogging
+ * the CPU, and ends when the server waits again.
+ */
+static void test_handoff(void)
+{
+    unsigned k = ncpus > 1 ? 1 : 0, other = ncpus > 2 ? 2 : k;
+    struct task *server;
+
+    task_set_affinity(cpu_mask(k));
+    task_set_signal(0, SIGF_REPLY);
+    if (!(server = task_create("server", 1, cpu_mask(other), fake_server, nullptr)))
+        fail("V2.3 handoff", "task_create failed");
+    while (server->state != TASK_WAITING || atomic_load(&server->on_cpu))
+        task_sleep_until(time_now() + time_us(1000));
+    server->affinity = cpu_mask(k) | cpu_mask(other);  /* waiting: safe to change */
+    if (!post_and_wait(server, 100000) || atomic_load(&server_cpu) != (int)k)
+        fail("V2.3 handoff", "the server didn't run on the waker's CPU");
+
+    /* Now on this CPU only, under a medium-priority hog. */
+    while (server->state != TASK_WAITING || atomic_load(&server->on_cpu))
+        task_sleep_until(time_now() + time_us(1000));
+    server->affinity = cpu_mask(k);
+    atomic_store(&spin_stop, false);
+    atomic_store(&spin_finished, 0);
+    atomic_store(&spin_counts[0], 0);
+    if (!task_create("hog", 5, cpu_mask(k), spinner, (void *)0))
+        fail("V2.3 loan", "task_create failed");
+    if (!post_and_wait(server, 200000))
+        fail("V2.3 loan", "a low-priority server never ran under a medium-priority hog");
+    if (atomic_load(&server_pri) != 10)
+        fail("V2.3 loan", "the server didn't run at the waker's priority");
+    while (server->state != TASK_WAITING || atomic_load(&server->on_cpu))
+        task_sleep_until(time_now() + time_us(1000));
+    if (server->pri != 1)
+        fail("V2.3 loan", "the loan outlived the server's next wait");
+
+    /* Ahead of a ready task of the same priority: the bystander mustn't
+     * run between the handoff and the server. Interrupts stay off from
+     * the snapshot to the wait, so the quantum can't come in between.
+     * (After the server, the bystander does run before this task: the
+     * server's answer queues this task behind it.) */
+    atomic_store(&spin_counts[1], 0);
+    if (!task_create("bystander", 10, cpu_mask(k), spinner, (void *)1))
+        fail("V2.3 front", "task_create failed");
+    while (atomic_load(&spin_counts[1]) == 0)
+        task_yield();
+    unsigned long was = arch_irq_save();
+    uint64_t before = atomic_load(&spin_counts[1]);
+    atomic_store(&server_pri, 0);
+    task_post(server, SIGF_TEST, true);
+    task_wait(SIGF_REPLY);
+    arch_irq_restore(was);
+    bool first = atomic_load(&server_saw) == before;
+    if (!first || atomic_load(&server_pri) != 10)
+        fail("V2.3 front", "a ready task ran between the handoff and the server");
+    stop_spinners(2);
+    task_set_affinity(1);
+    kprintf("V2.3 handoff ok: a waiting server moved to the waker's CPU; lent priority 10 "
+            "it ran past a hog at 5 and ahead of a peer at 10, and went back to 1\n");
+}
+
+void selftest_domsg(void)
+{
+    uint64_t calls[2], before, start, ns;
+
+    test_handoff();
+    if (!user_images[0].name) {
+        kprintf("V2.3 domsg skipped: no user programs\n");
+        return;
+    }
+    before = sched_handoffs();
+    start = time_now();
+    with_echo("pingpong", 0, calls);
+    ns = time_to_us((time_now() - start) * 1000) / 20000;
+    if (sched_handoffs() - before < 20000 / 2)
+        fail("V2.3 domsg", "DoMsg seldom handed the CPU to the server");
+    kprintf("V2.3 domsg ok: %llu handoffs in 20000 round trips; kernel calls per round trip: "
+            "server %llu.%02llu, client %llu.%02llu; about %llu ns each, start to end\n",
+            (unsigned long long)(sched_handoffs() - before),
+            (unsigned long long)(calls[0] / 20000), (unsigned long long)(calls[0] % 20000 / 200),
+            (unsigned long long)(calls[1] / 20000), (unsigned long long)(calls[1] % 20000 / 200),
+            (unsigned long long)ns);
 }

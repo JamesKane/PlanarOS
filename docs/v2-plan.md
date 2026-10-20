@@ -13,7 +13,7 @@ Each step ends with `make test-all` green and a `V2.n done` line in the transcri
 |---|---|
 | **1. Ports and connections** ✅ | Named ports, connections with their arenas, accepting, closing, `SignalConn`. A fix for waking a task while holding a lock. Kernel-side tests. |
 | **2. Rings** ✅ | The arena format and a user library (`lib/exec/msg.c`): `PutMsg`, `GetMsg`, `ReplyMsg`, `WaitPort` over the rings with the `waiting` protocol. `echo` and `client`. Streaming measured in kernel calls per message. |
-| **3. `DoMsg`** | Send and wait for this message's reply, with the CPU handed straight to the server and priority lent to it. `pingpong` measures the round trip. |
+| **3. `DoMsg`** ✅ | Send and wait for this message's reply, with the CPU handed straight to the server and priority lent to it. `pingpong` measures the round trip. |
 | **4. Death and load** | Death notices tested from both ends: a client mid-`DoMsg` when its server dies, a server whose client dies. omega's "under load" run: a conversation kept up while other programs compete and crash. Soak, then the RV2. |
 
 Step 1 delivers `kernel/port.c` and `conformance/conn.c`. Two processes connect, check that they share the arena and trade signals. The server leaves a port behind with an unaccepted connection, the client leaves a connection open, and the kernel closes both when each exits. Mutation tests confirm the checks catch: a switch inside a lock, no self-IPI, no close flag, and no cleanup when a task ends. The close *signal* can't be checked by timing here, because the server usually closes before the client blocks. Step 4 kills a server whose client is known to be blocked.
@@ -26,6 +26,14 @@ Step 2 delivers:
 Streaming 20,000 messages with the ring kept full took about 24–32 kernel calls per 1,000 messages on each side, on QEMU with 4 CPUs. That is a call only each time one side ran dry. The test fails at one call per 4 messages.
 
 Mutation tests: a producer that never signals hangs the round trips, and one that always signals fails the streaming bound. A consumer that doesn't look again after setting `cr_Waiting` passes a single boot but fails 26 of 40 boots in `make soak`, so that check lives in the soak. The real code passed 250 boots: 100 RV64, 100 AArch64, and 50 RV64 in the global layout.
+
+Step 3 delivers `DoMsg` over `SignalWaitConn`, and `pingpong`. Kernel tasks test the mechanism directly:
+- A server waiting on another CPU runs on the waker's.
+- Lent priority 10, it runs past a priority-5 task hogging the CPU.
+- It runs ahead of a ready peer at priority 10.
+- It is back at priority 1 once it waits again.
+
+On QEMU, about 98% of `DoMsg` round trips hand off. Each round trip costs the client one kernel call and the server two (`SignalConn` for the reply, then `Wait`). Mutation tests confirm each of these checks catches: no handoff, no loan, a loan that outlives the next wait, and a handoff queued at the back. Waiting ends a loan without an extra switch, unless the wait returns at once. 250 more soak boots passed.
 
 Step 1 also serialises `kprintf` across CPUs. Lines from different CPUs used to interleave mid-line.
 
