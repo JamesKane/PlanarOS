@@ -32,7 +32,7 @@ int main(void)
             struct MsgPort *mp = &clients[i];
             struct Message *m;
 
-            while ((m = GetMsg(mp))) {
+            while ((m = GetMsgSized(mp, sizeof(struct EchoMsg)))) {
                 ((struct EchoMsg *)m)->em_Value++;
                 if (ReplyMsgLater(mp, m) < 0)
                     break;      /* gone, or a client overfilling its replies */

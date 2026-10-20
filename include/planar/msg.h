@@ -23,6 +23,9 @@
 
 #include <planar/ipc.h>
 
+/* Replies DoMsg can set aside while it waits for its own. */
+constexpr unsigned MSGPORT_STASH = 32;
+
 struct MsgPort {
     struct ConnArena *mp_Arena;
     struct ConnRing *mp_Out;        /* the ring this end fills */
@@ -37,7 +40,10 @@ struct MsgPort {
     uint64_t mp_HeapNext;           /* AllocMsg's next byte */
     bool mp_Broken;
     bool mp_Owed;                   /* ReplyMsgLater held back a signal */
-    struct Message *mp_Stash;       /* replies DoMsg set aside, oldest first */
+    uint8_t mp_StashHead, mp_StashCount;
+    /* Replies DoMsg set aside, oldest first: in this end's own memory,
+     * never linked through messages the peer can write (review H5). */
+    struct Message *mp_Stash[MSGPORT_STASH];
 };
 
 /* The client's end: a connection to port 'name'. 0 or an error. */
@@ -66,8 +72,13 @@ int64_t ReplyMsg(struct MsgPort *mp, struct Message *m);
 int64_t ReplyMsgLater(struct MsgPort *mp, struct Message *m);
 void FlushPort(struct MsgPort *mp);
 
-/* The next message or reply, or nullptr if there's none (yet). */
+/* The next message or reply, or nullptr if there's none (yet). Only its
+ * header is known to lie in the arena; GetMsgSized() checks that 'size'
+ * bytes do, so a server can read and write that much of it without
+ * reaching outside (review H4). A message that fails breaks the
+ * connection. */
 struct Message *GetMsg(struct MsgPort *mp);
+struct Message *GetMsgSized(struct MsgPort *mp, uint64_t size);
 
 /* Wait for the next message or reply; nullptr once the peer has gone
  * and nothing is left. */
@@ -91,7 +102,8 @@ uint64_t WaitPorts(struct MsgPort *ports, unsigned n, uint64_t mask);
 bool PortGone(const struct MsgPort *mp);
 
 /* Send a message and wait for its reply: 0, or ERR_PORT_DIED (and then
- * mn_Error says so too). Other replies arriving first wait for GetMsg. */
+ * mn_Error says so too). Other replies arriving first wait for GetMsg,
+ * up to MSGPORT_STASH of them; ERR_FULL if there are more. */
 int64_t DoMsg(struct MsgPort *mp, struct Message *m);
 
 #endif /* PLANAR_MSG_H */

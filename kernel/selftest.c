@@ -1548,14 +1548,14 @@ static void test_client_dies(void)
     if (ipc_count() != 1)
         fail("V2.4 client", "the server kept a dead client's connection");
 
-    for (uint64_t how = 0; how < 3; how++)
+    for (uint64_t how = 0; how < 4; how++)
         expect_clean_exit("V2.4 rogue", start("V2.4 rogue", "rogue", how), 1000000);
     if (atomic_load(&echo->dead))
         fail("V2.4 rogue", "a rogue client killed the server");
     expect_clean_exit("V2.4 rogue", start("V2.4 rogue", "client", 0), 10000000);
     kill_and_free(echo);
-    kprintf("V2.4 client ok: the server dropped a killed client, and three rogue ones "
-            "(a pointer outside the heap, a broken ring, scribbling), and served on\n");
+    kprintf("V2.4 client ok: the server dropped a killed client, and four rogue ones "
+            "(a pointer outside the heap, a broken ring, scribbling, a message running off the heap), and served on\n");
 }
 
 /* omega's run under load: two conversations go on while competitors
@@ -1603,6 +1603,9 @@ void selftest_death(void)
         return;
     }
     test_server_dies();
+    expect_pair("V2.4 stash", "stashserver", 0, "stasher", 0);
+    kprintf("V2.4 stash ok: DoMsg set two replies aside and GetMsg gave them back in order, "
+            "while the server rewrote their links\n");
     test_client_dies();
     test_load();
 

@@ -94,10 +94,10 @@ void *AllocMsg(struct MsgPort *mp, uint64_t size)
     return (void *)at;
 }
 
-static bool in_heap(const struct MsgPort *mp, uint64_t m)
+/* Do 'size' bytes at 'm' lie in the heap? */
+static bool in_heap(const struct MsgPort *mp, uint64_t m, uint64_t size)
 {
-    return !(m & 7) && m >= mp->mp_HeapLo && m < mp->mp_HeapHi &&
-           mp->mp_HeapHi - m >= sizeof(struct Message);
+    return !(m & 7) && m >= mp->mp_HeapLo && m < mp->mp_HeapHi && mp->mp_HeapHi - m >= size;
 }
 
 /* --- The rings. --- */
@@ -112,7 +112,7 @@ static int64_t put(struct MsgPort *mp, struct Message *m, bool *asleep)
     *asleep = false;
     if (PortGone(mp))
         return ERR_PORT_DIED;
-    if (!in_heap(mp, (uint64_t)m))
+    if (!in_heap(mp, (uint64_t)m, sizeof *m))
         return ERR_BADADDR;
     if (head - tail > mp->mp_Slots) {
         mp->mp_Broken = true;
@@ -136,8 +136,9 @@ static bool pending(struct MsgPort *mp)
     return atomic_load_explicit(&mp->mp_In->cr_Head, memory_order_acquire) != mp->mp_InTail;
 }
 
-/* Take the next message from the ring, or nullptr. */
-static struct Message *take(struct MsgPort *mp)
+/* Take the next message from the ring, or nullptr; 'size' bytes of it
+ * must lie in the heap. */
+static struct Message *take(struct MsgPort *mp, uint64_t size)
 {
     struct ConnRing *r = mp->mp_In;
     uint32_t tail = mp->mp_InTail;
@@ -153,7 +154,7 @@ static struct Message *take(struct MsgPort *mp)
     m = ((volatile uint64_t *)r->cr_Slot)[tail & (mp->mp_Slots - 1)];
     mp->mp_InTail = ++tail;
     atomic_store_explicit(&r->cr_Tail, tail, memory_order_release);
-    if (!in_heap(mp, m)) {
+    if (!in_heap(mp, m, size)) {
         mp->mp_Broken = true;
         return nullptr;
     }
@@ -165,7 +166,7 @@ bool ArmPort(struct MsgPort *mp)
     atomic_store_explicit(&mp->mp_In->cr_Waiting, 1, memory_order_relaxed);
     /* Against the producer's: fill the slot, then look at cr_Waiting. */
     atomic_thread_fence(memory_order_seq_cst);
-    if (mp->mp_Stash || pending(mp) || PortGone(mp)) {
+    if (mp->mp_StashCount || pending(mp) || PortGone(mp)) {
         atomic_store_explicit(&mp->mp_In->cr_Waiting, 0, memory_order_relaxed);
         return false;
     }
@@ -232,15 +233,26 @@ uint64_t WaitPorts(struct MsgPort *ports, unsigned n, uint64_t mask)
     return Wait(mask);
 }
 
+/* Replies set aside come first; each was checked as a whole message of
+ * its sender's (this end's own, so its size is the caller's to know). */
+struct Message *GetMsgSized(struct MsgPort *mp, uint64_t size)
+{
+    if (mp->mp_StashCount) {
+        struct Message *m = mp->mp_Stash[mp->mp_StashHead];
+
+        mp->mp_StashHead = (uint8_t)((mp->mp_StashHead + 1) % MSGPORT_STASH);
+        mp->mp_StashCount--;
+        if (in_heap(mp, (uint64_t)m, size))
+            return m;
+        mp->mp_Broken = true;
+        return nullptr;
+    }
+    return take(mp, size < sizeof(struct Message) ? sizeof(struct Message) : size);
+}
+
 struct Message *GetMsg(struct MsgPort *mp)
 {
-    struct Message *m = mp->mp_Stash;
-
-    if (m) {
-        mp->mp_Stash = (struct Message *)m->mn_Node.mln_Succ;
-        return m;
-    }
-    return take(mp);
+    return GetMsgSized(mp, sizeof(struct Message));
 }
 
 struct Message *WaitPort(struct MsgPort *mp)
@@ -257,14 +269,11 @@ struct Message *WaitPort(struct MsgPort *mp)
     }
 }
 
+/* Set a reply aside for GetMsg; the caller made sure there's room. */
 static void stash(struct MsgPort *mp, struct Message *m)
 {
-    struct Message **pp = &mp->mp_Stash;
-
-    while (*pp)
-        pp = (struct Message **)&(*pp)->mn_Node.mln_Succ;
-    m->mn_Node.mln_Succ = nullptr;
-    *pp = m;
+    mp->mp_Stash[(mp->mp_StashHead + mp->mp_StashCount) % MSGPORT_STASH] = m;
+    mp->mp_StashCount++;
 }
 
 int64_t DoMsg(struct MsgPort *mp, struct Message *m)
@@ -276,11 +285,15 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m)
     if (err)
         return err;
     for (;;) {
-        while ((r = take(mp))) {
+        /* Room first: a reply taken must never be dropped. With none,
+         * this one's reply is still to come: the caller GetMsgs for it. */
+        while (mp->mp_StashCount < MSGPORT_STASH && (r = take(mp, sizeof *r))) {
             if (r == m)
                 goto replied;
             stash(mp, r);
         }
+        if (mp->mp_StashCount == MSGPORT_STASH && pending(mp))
+            return ERR_FULL;
         if (PortGone(mp))
             break;
         atomic_store_explicit(&mp->mp_In->cr_Waiting, 1, memory_order_relaxed);
@@ -303,11 +316,11 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m)
         }
     }
     /* The server went; it may have answered on its way. */
-    while ((r = take(mp)))
+    while (mp->mp_StashCount < MSGPORT_STASH && (r = take(mp, sizeof *r))) {
         if (r == m)
             goto replied;
-        else
-            stash(mp, r);
+        stash(mp, r);
+    }
     m->mn_Error = ERR_PORT_DIED;
     return ERR_PORT_DIED;
 replied:
