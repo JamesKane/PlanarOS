@@ -145,6 +145,24 @@ Should the filesystem hold an NVMe I/O queue pair as a lease, taking the driver 
 
 Raised in §11.8.
 
+**VQ28 Ports across a server restart.**
+
+When a server or driver crashes and its supervisor restarts it, `drop_port` currently deletes the port name, leaving a window where `OpenPort` returns `ERR_NOTFOUND`. Should the supervisor hold the port handle across restarts (socket-activation style), or should `OpenPort` gain a wait-for-port option? *Leaning:* supervisor-held port handles for supervised services, plus a bounded wait option on `OpenPort` for boot ordering.
+
+Raised in §12.6.
+
+**VQ29 Supervision tree for core servers.**
+
+`hwdb` supervises drivers (§11.10). Who supervises `hwdb`, `power`, `dos` and `display`, and what happens if `hwdb` itself crashes? *Leaning:* a tiny `init` starts and watches the root servers; a crash in `hwdb` logs a meditation and reboots via the watchdog in V4, while filesystem handlers and leaf drivers restart in place.
+
+Raised in §12.7.
+
+**VQ30 Recovering `power` state after a crash.**
+
+If the `power` server crashes and restarts while drivers are running, how does it know which power domains and clocks must stay on? *Leaning:* `hwdb` already tracks which nodes were powered before granting leases (D3, §11.5), so `hwdb` replays the active node set to `power` on reconnect.
+
+Raised in §12.7.
+
 ## Coprocessors
 
 **VQ16 Is the Hexagon CDSP in scope?**

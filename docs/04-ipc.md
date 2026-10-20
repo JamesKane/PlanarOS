@@ -8,7 +8,7 @@
 | **Ports** | Built (V2) | A port is a named rendezvous kept in the kernel's name table, and the server holds a handle to it. **A port has no ring.** Clients reach it through connections. |
 | **Connections** | Built (V2) | Made by `OpenPort(name)`. The kernel allocates an **arena** Area and maps it RW into exactly the client and the server. It puts a **request ring** and a **reply ring** at the start of the arena, and assigns the server a signal bit for the connection. It also registers death notices in both directions. |
 | **Messages** | Built (V2) | Live inside an arena (V2), or later inside an Area lent to the peer. They are passed by pointer and replied to in place. |
-| **Futex** | Proposed | `WaitAddr`/`WakeAddr` on a word in shared memory. Higher-level locks are built on it. |
+| **Futex** | Proposed | `WaitAddr`/`WakeAddr` on a word in shared memory. Used for locks within a process or monotonic sequence numbers, never cross-process mutexes ([§12.5](12-let-it-crash.md#125-shared-memory-without-state-spill)). |
 
 ## 4.2 Message header
 

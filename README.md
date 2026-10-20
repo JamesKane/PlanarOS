@@ -74,8 +74,9 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 9. [Roadmap](docs/08-roadmap.md): phased plan and board order.
 10. [Hardware description](docs/09-hardware-description.md): ACPI and FDT, the hwdb device graph, AML isolation (VQ7, decided).
 11. [Driver model](docs/11-driver-model.md): lessons from other systems' driver models, applied to user-mode drivers (proposed).
-12. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
-13. [Open questions](docs/questions.md): the question register.
+12. [Fault tolerance: let it crash](docs/12-let-it-crash.md): Erlang-style crash recovery, supervision and its hardware limits (proposed).
+13. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
+14. [Open questions](docs/questions.md): the question register.
 
 ## Status
 

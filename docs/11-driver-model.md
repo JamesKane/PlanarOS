@@ -232,7 +232,7 @@ Rules for every class protocol:
 
 ## 11.10 Robustness and verification
 
-**Driver restart.** A dead driver is a process exit. The hwdb restarts it (MINIX's reincarnation server), with backoff, and gives up after a few failures in a short window. The node stays in the graph and keeps its unit, so the new driver republishes the same names and clients reconnect. Stateless drivers recover completely. Stateful ones recover what their class can retry. Restart is cheap in Planar, unlike in AbyssBSD, so it belongs in V4 rather than "never" (VQ23).
+**Driver restart.** A dead driver is a process exit. The hwdb restarts it (MINIX's reincarnation server), with backoff, and gives up after a few failures in a short window. The node stays in the graph and keeps its unit, so the new driver republishes the same names and clients reconnect. Stateless drivers recover completely. Stateful ones recover what their class can retry. Restart is cheap in Planar, unlike in AbyssBSD, so it belongs in V4 rather than "never" (VQ23; see [§12](12-let-it-crash.md) for port continuity and the supervision tree).
 
 **Device reset.** A driver that finds its device wedged asks the hwdb for a reset. The hwdb unbinds (§11.4), runs the bus or power reset, and binds again. This is Windows' TDR, applied to any device (S§7.1).
 

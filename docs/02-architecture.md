@@ -42,7 +42,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 ## 2.3 Process model
 
 **Proposed. Inherited from Omega.**
-- A **process** is a protection domain plus everything it owns. A **task** is the unit that gets scheduled. A process holds one or more tasks.
+- A **process** is a protection domain plus everything it owns. A **task** is the unit that gets scheduled. A process holds one or more tasks. The process, not the task, is the unit of failure ([§12.4](12-let-it-crash.md#124-the-process-is-the-unit-of-failure), proposed).
 - Each task has a fixed user stack with an unmapped guard region, and its own kernel stack.
 - Exit reclaims resources in this order:
   1. Stop the tasks. A task that is inside a kernel call is killed when it reaches a safe point; omega learned this when a test leaked 441 pages without it.
@@ -50,7 +50,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
   3. Send death notices to peers.
   4. Revoke leases. This drains or resets coprocessor queues (§5.4), and runs each device lease's stop method: bus mastering off, a reset asserted, or the power domain off (§11.4, proposed).
   5. Free Areas. Areas tied to a device lease are quarantined until the stop method has run, and are never reused if the device can't be stopped (§11.4, proposed).
-  6. Wake futex waiters.
+  6. Wake futex waiters (§12.5, proposed).
   7. Free the domain and its ASID.
 
 ## 2.4 Servers (initial set)
