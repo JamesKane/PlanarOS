@@ -12,6 +12,7 @@
 
 #include "acpi.h"
 #include "console.h"
+#include "devmem.h"
 #include "fdt.h"
 #include "hw.h"
 #include "kprintf.h"
@@ -43,6 +44,7 @@ static bool try_node(int32_t node)
     if (node < 0 || !fdt_reg(node, 0, &base, &size))
         return false;
     console_pa = base;
+    devmem_claim(base, size ? size : 1);
     if (fdt_is_compatible(node, "arm,pl011")) {
         pl011 = (struct pl011){ .base = (uintptr_t)phys_to_virt(base) };
         kind = CONSOLE_PL011;
@@ -71,6 +73,7 @@ static bool try_acpi(void)
     if (!acpi_console(&c))
         return false;
     console_pa = c.base;
+    devmem_claim(c.base, 1);
     console_table = c.table;
     if (c.kind == ACPI_UART_PL011) {
         pl011 = (struct pl011){ .base = (uintptr_t)phys_to_virt(c.base) };
@@ -160,4 +163,9 @@ void console_putc(char c)
         plat_console_putc(c);
         break;
     }
+}
+
+uint64_t console_base(void)
+{
+    return console_pa;
 }

@@ -9,6 +9,7 @@
 #include "handle.h"
 #include "kprintf.h"
 #include "ktime.h"
+#include "lease.h"
 #include "port.h"
 #include "process.h"
 #include "prof.h"
@@ -166,7 +167,7 @@ static int64_t sys_close_handle(struct task *self, Handle h)
     struct process *p = handle_take(h, HANDLE_PROCESS, self->process);
 
     if (!p)
-        return ERR_BADHANDLE;
+        return lease_close_call(h);
     process_release(p);
     return 0;
 }
@@ -241,6 +242,24 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return (int64_t)time_ns(time_now());
     case SYS_ARM_TIMER:
         return sys_arm_timer(self, a[0], (int64_t)a[1]);
+    case SYS_CREATE_LEASE:
+        return lease_create_call((uint32_t)a[0], a[1], a[2], a[3], (uint32_t)a[4]);
+    case SYS_GRANT_LEASE:
+        return lease_grant_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_REVOKE_LEASE:
+        return lease_revoke_call((uint32_t)a[0]);
+    case SYS_QUERY_LEASE:
+        return lease_query_call((uint32_t)a[0], a[1]);
+    case SYS_MAP_LEASE:
+        return lease_map_call((uint32_t)a[0], a[1]);
+    case SYS_BIND_IRQ:
+        return lease_bind_call((uint32_t)a[0], (uint32_t)a[1], (int64_t)a[2]);
+    case SYS_ACK_WAIT_IRQ:
+        return (int64_t)lease_ack_wait_call((uint32_t)a[0], (uint32_t)a[1], a[2] & ~SIGF_KERNEL);
+    case SYS_ALLOC_DMA_AREA:
+        return lease_dma_call((uint32_t)a[0], a[1], (uint32_t)a[2], a[3]);
+    case SYS_MAP_FIRMWARE:
+        return lease_firmware_call((uint32_t)a[0], a[1]);
     default:
         return ERR_NOSYS;
     }

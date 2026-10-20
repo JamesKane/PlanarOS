@@ -6,6 +6,7 @@
 
 #include "acpi.h"
 #include "arch.h"
+#include "console.h"
 #include "cpu.h"
 #include "cpuclass.h"
 #include "fdt.h"
@@ -20,6 +21,8 @@
 #include "bootinfo.h"
 #include "efi.h"
 #include "handle.h"
+#include "intc.h"
+#include "lease.h"
 #include "kmalloc.h"
 #include "kstring.h"
 #include "port.h"
@@ -1333,6 +1336,7 @@ void selftest_tasks(void *)
     kprintf("V3.6 done\n");
     selftest_processes();
     selftest_time();
+    selftest_leases();
     kprintf("V4.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
@@ -2559,4 +2563,66 @@ void selftest_time(void)
     expect_exit("timer", 0);
     kprintf("V4.1 time ok: alarms on time, at once when past, replaced, disarmed; "
             "%u tasks left with one firing\n", 200u);
+}
+
+/* A virtio entropy device on virtio-mmio, from the device tree: its
+ * registers and line. QEMU's machines have one (mk/qemu-virt-*.mk). */
+static bool find_virtio_rng(uint64_t *base, uint32_t *irq)
+{
+    if (hw_source() != HW_FDT)
+        return false;
+    for (int32_t n = -1; (n = fdt_find_compatible(n, "virtio,mmio")) >= 0;) {
+        uint64_t pa, size;
+        volatile uint32_t *r;
+
+        if (!fdt_reg(n, 0, &pa, &size))
+            continue;
+        r = phys_to_virt(pa);
+        if (r[0] == 0x74726976 && r[1] == 2 && r[2] == 4) {
+            *base = pa;
+            *irq = intc_fdt_irq(n, 0);
+            return *irq != 0;
+        }
+    }
+    return false;
+}
+
+/* Leases (conformance/leaser.c, which drives conformance/virtiorng.c). */
+void selftest_leases(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    uint64_t dev = 0, arg;
+    uint32_t irq = 0;
+    struct process *p;
+    bool have = find_virtio_rng(&dev, &irq);
+
+    if (!user_images[0].name) {
+        kprintf("V4.1 leases skipped: no user programs\n");
+        return;
+    }
+    arg = (have ? dev / 512 : 0) | (uint64_t)irq << 24 | console_base() / PAGE_SIZE << 34;
+    task_set_signal(0, SIGF_DEAD);
+    if (!(p = process_create_root("leaser", 5, arg, task_self(), SIGF_DEAD)))
+        fail("V4.1 leases", "process_create failed");
+    for (uint64_t end = time_now() + time_us(5000000); !atomic_load(&p->dead) && time_now() < end;)
+        wait_test_dead();
+    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+        kprintf("leaser: exit %lld, fault %d\n", (long long)p->exit_code, p->fault);
+        fail("V4.1 leases", "leaser failed");
+    }
+    process_free(p);
+    if (!processes_down_to(0, 1000000) || lease_count() || lease_quarantined() || area_count())
+        fail("V4.1 leases", "a process, lease or Area outlived the test");
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V4.1 leases", "pages leaked");
+    if (have)
+        kprintf("V4.1 leases ok: the firmware's tables read; refused over memory, the "
+                "kernel's devices and another lease; "
+                "a user-mode virtio driver at %p (line %u) mapped it, took its interrupt and "
+                "DMA; killed with DMA outstanding, its Areas waited in quarantine for "
+                "RevokeLease\n", (void *)dev, irq);
+    else
+        kprintf("V4.1 leases ok: the firmware's tables read; refused over memory, the "
+                "kernel's devices and bad arguments (no virtio test device here)\n");
 }

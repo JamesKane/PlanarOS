@@ -38,6 +38,15 @@
 #define SYS_CLOSE_HANDLE    28
 #define SYS_CURRENT_TIME    29
 #define SYS_ARM_TIMER       30
+#define SYS_CREATE_LEASE    31
+#define SYS_GRANT_LEASE     32
+#define SYS_REVOKE_LEASE    33
+#define SYS_QUERY_LEASE     34
+#define SYS_MAP_LEASE       35
+#define SYS_BIND_IRQ        36
+#define SYS_ACK_WAIT_IRQ    37
+#define SYS_ALLOC_DMA_AREA  38
+#define SYS_MAP_FIRMWARE    39
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)
@@ -50,5 +59,6 @@
 #define ERR_FULL            (-9)        /* a ring is full */
 #define ERR_PORT_DIED       (-10)       /* the other end of a connection went */
 #define ERR_LIMIT           (-11)       /* a per-process limit (handles, tasks, connections) */
+#define ERR_BUSY            (-12)       /* in use: a lease granted or stopping */
 
 #endif /* PLANAR_SYSCALLS_H */

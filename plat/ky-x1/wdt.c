@@ -14,6 +14,7 @@
  * reboot is a match at the next tick. U-Boot leaves its clock on.
  */
 #include "arch.h"
+#include "devmem.h"
 #include "fdt.h"
 #include "kprintf.h"
 #include "ktime.h"
@@ -73,6 +74,8 @@ void k1_wdt_init(void)
     }
     wdt = (uintptr_t)phys_to_virt(wdt_pa);
     aprr = (uintptr_t)phys_to_virt(aprr_pa);
+    devmem_claim(wdt_pa, 1);
+    devmem_claim(aprr_pa, 4);
     kprintf("planar: watchdog at %p (%s), APRR %p: %s, count %u of %u\n", (void *)wdt_pa,
             node >= 0 ? fdt_node_name(node) : "not in the tree", (void *)aprr_pa,
             read_reg(WDT_WMER) & 1 ? "running" : "stopped", read_reg(WDT_WVR),

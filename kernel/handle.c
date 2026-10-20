@@ -4,6 +4,7 @@
 #include <planar/syscalls.h>
 
 #include "handle.h"
+#include "lease.h"
 #include "process.h"
 #include "spinlock.h"
 
@@ -129,20 +130,28 @@ void *handle_take(Handle h, enum handle_type type, const struct process *owner)
 
 void handle_free_owner(struct process *owner)
 {
-    struct process *children[PROCESS_HANDLES];
-    unsigned n = 0;
-    unsigned long was = spin_lock_irqsave(&lock);
+    for (unsigned i = 1; i < HANDLES;) {
+        struct { enum handle_type type; void *obj; } held[16];
+        unsigned n = 0;
+        unsigned long was = spin_lock_irqsave(&lock);
 
-    for (unsigned i = 1; i < HANDLES; i++) {
-        if (table[i].type == HANDLE_FREE || table[i].owner != owner)
-            continue;
-        if (table[i].type == HANDLE_PROCESS && n < PROCESS_HANDLES)
-            children[n++] = table[i].obj;
-        release(&table[i]);
+        for (; i < HANDLES && n < 16; i++) {
+            if (table[i].type == HANDLE_FREE || table[i].owner != owner)
+                continue;
+            if (table[i].type == HANDLE_PROCESS || table[i].type == HANDLE_LEASE) {
+                held[n].type = table[i].type;
+                held[n++].obj = table[i].obj;
+            }
+            release(&table[i]);
+        }
+        spin_unlock_irqrestore(&lock, was);
+        for (unsigned k = 0; k < n; k++) {
+            if (held[k].type == HANDLE_PROCESS)
+                process_release(held[k].obj);
+            else
+                lease_release(held[k].obj);
+        }
     }
-    spin_unlock_irqrestore(&lock, was);
-    while (n)
-        process_release(children[--n]);
 }
 
 int64_t handle_error(const struct process *owner)

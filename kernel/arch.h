@@ -141,6 +141,7 @@ constexpr uint32_t MAP_READ  = 1u << 0;
 constexpr uint32_t MAP_WRITE = 1u << 1;
 constexpr uint32_t MAP_EXEC  = 1u << 2;
 constexpr uint32_t MAP_USER  = 1u << 3;
+constexpr uint32_t MAP_DEVICE = 1u << 4;    /* device registers, not memory */
 
 bool arch_domain_create(struct arch_domain *d);
 unsigned arch_asid_bits(void);                      /* 0: none, every switch flushes */

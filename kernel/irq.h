@@ -19,6 +19,14 @@ typedef void (*irq_handler_t)(void *data);
 /* Route interrupt 'source' to 'fn' at interrupt level 1-7. */
 bool irq_attach(uint32_t source, unsigned level, irq_handler_t fn, void *data);
 
+/* Stop delivering 'source' and mask it. Waits for its handler if that's
+ * running on another CPU, so must not be called with a lock the handler
+ * takes. */
+void irq_detach(uint32_t source);
+
+/* Has something attached to 'source'? */
+bool irq_attached(uint32_t source);
+
 /* Called by the architecture's trap code. */
 void irq_external(void);        /* the interrupt controller has a source */
 void irq_timer(void);           /* the timer deadline passed (RISC-V) */

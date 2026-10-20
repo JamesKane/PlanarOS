@@ -22,6 +22,7 @@
 #include "handle.h"
 #include "kmalloc.h"
 #include "kstring.h"
+#include "lease.h"
 #include "pmm.h"
 #include "port.h"
 #include "process.h"
@@ -44,6 +45,8 @@ struct area {
     uint64_t va, size;              /* bytes, page multiple, guard excluded */
     uint32_t flags;
     bool guard;
+    bool freed;                     /* its owner called FreeArea (lock) */
+    struct lease *lease;            /* a device's DMA memory (kernel/lease.c) */
     uint64_t run_pa, run_pages;     /* the whole run, guard included */
     unsigned sharers;
     unsigned refs;                  /* calls using it (lock held) */
@@ -106,12 +109,26 @@ struct area *area_new(uint64_t pages, uint32_t flags, bool guard)
     return a;
 }
 
-void area_destroy(struct area *a)
+static void free_area(struct area *a)
 {
     for (uint64_t i = 0; i < a->run_pages; i++)
         pmm_free(a->run_pa + i * PAGE_SIZE);
     kfree(a);
     atomic_fetch_sub(&live, 1);
+}
+
+/* A DMA Area nobody freed goes to its lease's quarantine instead, if
+ * the device may still write to it. */
+void area_destroy(struct area *a)
+{
+    if (a->lease && lease_dma_gone(a->lease, a, a->size / PAGE_SIZE, a->freed))
+        return;
+    free_area(a);
+}
+
+void area_unquarantine(struct area *a)
+{
+    free_area(a);
 }
 
 /* --- Mapping. --- */
@@ -284,6 +301,32 @@ void area_process_died(struct process *p)
     }
 }
 
+bool area_map_phys(struct process *p, uint64_t pa, uint64_t size, uint32_t flags)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    uint64_t off = 0;
+
+    for (; off < size; off += PAGE_SIZE)
+        if (!arch_map(&p->domain, pa + off, pa + off, flags))
+            break;
+    if (off < size)
+        while (off) {
+            off -= PAGE_SIZE;
+            arch_unmap(&p->domain, pa + off);
+        }
+    spin_unlock_irqrestore(&lock, was);
+    return off >= size;
+}
+
+void area_unmap_phys(struct process *p, uint64_t pa, uint64_t size)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+
+    for (uint64_t off = 0; off < size; off += PAGE_SIZE)
+        arch_unmap(&p->domain, pa + off);
+    spin_unlock_irqrestore(&lock, was);
+}
+
 bool area_map_domain(struct area *a, struct arch_domain *d)
 {
     for (uint64_t off = 0; off < a->size; off += PAGE_SIZE)
@@ -391,7 +434,8 @@ static int64_t check_rights(const struct area *a, uint32_t rights)
     return 0;
 }
 
-int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
+/* AllocArea, and AllocDmaArea with the lease 'l'. */
+static int64_t alloc(uint64_t size, uint32_t flags, uint64_t addr_out, struct lease *l)
 {
     struct process *p = task_self()->process;
     struct area *a;
@@ -407,7 +451,12 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
         return ERR_NOMEM;
     a->owner = p;
     a->refs = 1;                    /* ours, until the call is done */
+    if (l) {
+        a->lease = l;
+        lease_dma_new(l, a->size / PAGE_SIZE);
+    }
     if (!(h = a->handle = handle_new(HANDLE_AREA, a, p))) {
+        a->freed = true;
         area_destroy(a);
         return handle_error(p);
     }
@@ -427,6 +476,16 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
     return h;
 }
 
+int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
+{
+    return alloc(size, flags, addr_out, nullptr);
+}
+
+int64_t area_alloc_dma(struct lease *l, uint64_t size, uint32_t flags, uint64_t addr_out)
+{
+    return alloc(size, flags, addr_out, l);
+}
+
 /* The owner gives up its handle and its own mapping; the Area lives on
  * while anyone else maps it. */
 int64_t area_free_call(uint32_t h)
@@ -438,8 +497,10 @@ int64_t area_free_call(uint32_t h)
     if (!a)
         return ERR_BADHANDLE;
     unsigned long was = spin_lock_irqsave(&lock);
-    if ((mine = a->owner == p && a->handle == h))
+    if ((mine = a->owner == p && a->handle == h)) {
         a->handle = 0;              /* only one FreeArea gets here */
+        a->freed = true;
+    }
     spin_unlock_irqrestore(&lock, was);
     if (mine) {
         handle_free(h);

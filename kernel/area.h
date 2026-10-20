@@ -26,8 +26,11 @@ struct process;
  */
 struct area *area_new(uint64_t pages, uint32_t flags, bool guard);
 
-/* Free an Area nobody maps (the soak test's, or one never mapped). */
+/* Free an Area nobody maps (the soak test's, or one never mapped). A
+ * DMA Area its owner never freed may go to its lease's quarantine
+ * instead; area_unquarantine frees it from there. */
 void area_destroy(struct area *a);
+void area_unquarantine(struct area *a);
 
 /* Map 'a' into 'p' with 'rights' (AREAR_*). An image passes the bytes of
  * code at its start, mapped read and execute whatever 'rights' says. */
@@ -70,6 +73,17 @@ int64_t area_share_call(uint32_t area, uint32_t task, uint32_t rights);
 int64_t area_unshare_call(uint32_t area, uint32_t task);
 int64_t area_protect_call(uint32_t area, uint32_t rights);
 int64_t area_query_call(uint64_t addr, uint64_t info_out);
+
+/* Map [pa, pa + size) at VA = PA into 'p' with 'flags' (MAP_*), or take
+ * it out again: a lease's registers, or the firmware's tables. Under the
+ * lock that covers every mapping, so it can't race an Area being mapped
+ * into the same domain. False, with nothing mapped, if it can't. */
+bool area_map_phys(struct process *p, uint64_t pa, uint64_t size, uint32_t flags);
+void area_unmap_phys(struct process *p, uint64_t pa, uint64_t size);
+
+/* AllocDmaArea's work, once kernel/lease.c has checked the lease. */
+struct lease;
+int64_t area_alloc_dma(struct lease *l, uint64_t size, uint32_t flags, uint64_t addr_out);
 
 /* Sharing between two processes, for the kernel's own tests and later
  * the IPC connections (V2). */

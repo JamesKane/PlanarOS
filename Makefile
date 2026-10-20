@@ -39,6 +39,7 @@ PORTABLE_SRCS := \
 	kernel/bootinfo.c \
 	kernel/console.c \
 	kernel/cpuclass.c \
+	kernel/devmem.c \
 	kernel/fdt.c \
 	kernel/handle.c \
 	kernel/hw.c \
@@ -48,6 +49,7 @@ PORTABLE_SRCS := \
 	kernel/kprintf.c \
 	kernel/kstring.c \
 	kernel/ktime.c \
+	kernel/lease.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
 	kernel/port.c \

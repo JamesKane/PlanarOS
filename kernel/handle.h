@@ -19,6 +19,8 @@ enum handle_type : uint8_t {
     HANDLE_PORT,
     HANDLE_CONN,
     HANDLE_PROCESS,                 /* a process its owner created */
+    HANDLE_DEVROOT,                 /* may create leases (kernel/lease.c) */
+    HANDLE_LEASE,
 };
 
 struct process;
@@ -51,8 +53,9 @@ void *handle_get(Handle h, enum handle_type type, const struct process *owner);
  */
 void *handle_take(Handle h, enum handle_type type, const struct process *owner);
 
-/* Free every handle 'owner' holds. Processes it created are released
- * (process_release) once the table is unlocked. */
+/* Free every handle 'owner' holds. Processes it created and leases it
+ * owns are released (process_release, lease_release) once the table is
+ * unlocked. */
 void handle_free_owner(struct process *owner);
 
 /* Handles in use, for leak checks. */

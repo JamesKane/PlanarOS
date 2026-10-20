@@ -16,6 +16,7 @@
 #include "aarch64.h"
 #include "acpi.h"
 #include "cpu.h"
+#include "devmem.h"
 #include "fdt.h"
 #include "intc.h"
 #include "kprintf.h"
@@ -101,6 +102,9 @@ static bool setup(uint64_t pa)
         return false;
     dist_pa = pa;
     dist = (uintptr_t)phys_to_virt(pa);
+    devmem_claim(pa, 0x10000);
+    for (unsigned i = 0; i < nregions; i++)
+        devmem_claim(regions[i].base, regions[i].size);
 
     *d32(GICD_CTLR) = 0;
     dist_wait();

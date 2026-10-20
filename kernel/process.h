@@ -69,6 +69,7 @@ struct process {
     struct mapping *maps;           /* the Areas it maps (kernel/area.c's lock) */
     atomic_bool dying;
     bool maps_closed;               /* being reclaimed: nothing maps in (area.c's lock) */
+    bool leases_closed;             /* being reclaimed: nothing is granted (lease.c's lock) */
     atomic_uint refs;               /* the watcher's, and calls using the record */
     atomic_bool dead;               /* reclaimed: only the record is left */
     int64_t exit_code;
@@ -95,6 +96,11 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
 struct process *process_create_on(const char *name, int pri, uint64_t arg,
                                   struct task *watcher, uint64_t sig, uint64_t affinity);
 
+/* The same, with a device root handle (kernel/lease.h) as its second
+ * argument: the first server, or a test acting as one. */
+struct process *process_create_root(const char *name, int pri, uint64_t arg,
+                                    struct task *watcher, uint64_t sig);
+
 /* End a process from outside it. Returns at once; the watcher hears
  * when it's dead. */
 void process_kill(struct process *p);
@@ -102,6 +108,10 @@ void process_kill(struct process *p);
 /* Its handle is gone (CloseHandle, or the owner died): kill it, and let
  * the record go once it's dead. */
 void process_release(struct process *p);
+
+/* The process 'h' names, with a reference (process_put), if the calling
+ * task's process owns the handle; nullptr otherwise. */
+struct process *process_child(Handle h);
 
 /* The watcher's last word on a dead process: its record goes once no
  * kernel call is using it either. process_get/process_put are for those

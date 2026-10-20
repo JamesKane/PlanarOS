@@ -6,7 +6,8 @@
  * ASID (16 bits where ID_AA64MMFR0 says so, else 8), so switching is one
  * TTBR0 write. The kernel's own domain is an empty table with ASID 0.
  * User pages are non-global, never executable by the kernel (PXN), and
- * normal write-back memory. TLB invalidation uses the inner-shareable
+ * normal write-back memory, or Device-nGnRE and never executable for a
+ * lease's registers (MAP_DEVICE). TLB invalidation uses the inner-shareable
  * TLBI forms, which reach every CPU.
  */
 #include "aarch64.h"
@@ -18,6 +19,7 @@ constexpr unsigned PTES       = 512;
 constexpr uint64_t DESC_VALID = 1ULL << 0;
 constexpr uint64_t DESC_TABLE = 3;          /* levels 0-2 */
 constexpr uint64_t DESC_PAGE  = 3;          /* level 3 */
+constexpr uint64_t ATTR_DEVICE = 1ULL << 2; /* MAIR index 1: Device-nGnRE */
 constexpr uint64_t ATTR_NORMAL = 3ULL << 2; /* MAIR index 3 */
 constexpr uint64_t SH_INNER   = 3ULL << 8;
 constexpr uint64_t AF         = 1ULL << 10;
@@ -160,12 +162,13 @@ static desc_t *walk(struct arch_domain *d, uint64_t va, bool create)
 
 bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
 {
-    desc_t *e, bits = DESC_PAGE | ATTR_NORMAL | SH_INNER | AF | NG | PXN;
+    desc_t *e, bits = DESC_PAGE | AF | NG | PXN;
 
     if (va >= ARCH_USER_TOP || (va | pa) & (PAGE_SIZE - 1) || !(flags & MAP_READ))
         return false;
     if (!(e = walk(d, va, true)))
         return false;
+    bits |= flags & MAP_DEVICE ? ATTR_DEVICE | UXN : ATTR_NORMAL | SH_INNER;
     bits |= flags & MAP_USER ? AP_EL0 : 0;
     bits |= flags & MAP_WRITE ? 0 : AP_RO;
     bits |= flags & MAP_EXEC && flags & MAP_USER ? 0 : UXN;

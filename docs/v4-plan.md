@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** The four decisions at the end are made, as leaned. Step 1 is under way.
+**Status: in progress (2026-10-20).** Step 1 is done. The four decisions at the end are made, as leaned.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -22,7 +22,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 
 | Step | Content |
 |---|---|
-| **1. The kernel calls drivers need** | A boot bundle of servers, `CreateProcess`, handle passing, timers, device leases, interrupt binding, DMA Areas with quarantine, and the firmware tables as a read-only Area. |
+| **1. The kernel calls drivers need** ✅ | A boot bundle of servers, `CreateProcess`, handle passing, timers, device leases, interrupt binding, DMA Areas with quarantine, and the firmware tables as a read-only Area. |
 | **2. hwdb on the host** | The device graph from the device tree and from ACPI's static tables, quirks as data, match tables, ordering and the "what blocks whom" report. Tested against the captured trees and the CIX dumps. |
 | **3. hwdb as the first server** | hwdb starts drivers in graph order, supervises and restarts them. `drv.library`. The first drivers are small ones on QEMU, and the kill test starts here. |
 | **4. `acpid`** | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
@@ -30,7 +30,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 | **6. Files and programs** | FAT32 under `dos`, programs loaded from storage, and the boot moved onto each board's own storage. |
 | **7. A shell on the framebuffer** | The firmware framebuffer leased to `display`, a text console on it, and a shell. Then `power` (the K1 PMU, SCMI on the CIX) and native scanout where the exit needs it. |
 
-## 1. The kernel calls drivers need
+## 1. The kernel calls drivers need ✅
 
 §2.2 lists them. V4 adds the ones a driver can't do without, each with conformance programs on both ISAs:
 
@@ -44,6 +44,30 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 - **The firmware tables** as a read-only Area: the DTB, or the RSDP and every table it reaches. Only hwdb gets it.
 
 **Tested by** conformance programs that misuse each call. A lease over RAM, or over the GIC, is refused. A process killed with an interrupt bound and DMA outstanding shows the line masked and the Area quarantined. QEMU devices give a real target: the `edu` PCI device has DMA and interrupts, which is what it was made for.
+
+**Done (2026-10-20).** Sixteen new kernel calls (39 in all), on both ISAs. `make test-all` passes its 10 boots at `V4.1 done`, and so does the RV2. The calls are in [Autodocs](../manuals/autodocs/lease.md) and in `planar/exec.h` and `planar/lease.h`.
+
+- **Processes:** `CreateProcess`, optionally held for `StartProcess`, `KillProcess`, `QueryProcess` and `CloseHandle`. A process made by another is watched through a handle its creator's process owns, and never outlives it: closing the handle, or the owner dying, kills it. hwdb's children therefore die with hwdb.
+- **Time:** `CurrentTime` (nanoseconds) and `ArmTimer`, one alarm per task. A 2 ms alarm comes 450–600 µs late on QEMU's TCG.
+- **Leases** (`kernel/lease.c`):
+  - The kernel gives one process a *device root* handle (`process_create_root`). With it, `CreateLease` makes a lease: MMIO pages and up to four lines.
+  - A lease is refused over RAM or reserved memory, over the registers the kernel drives itself (now registered in `kernel/devmem.c`: the console, the GIC or PLIC, the watchdogs), over another lease, and over lines the kernel uses.
+  - Its owner grants it to one process with `GrantLease`. That process maps the registers at their physical address (Device-nGnRE on AArch64), binds lines to signals, and allocates DMA Areas against it.
+  - When the grantee dies, its lines are masked at once, and DMA Areas it hadn't freed are quarantined. The lease is *stopping* until its owner, which may now map the registers to stop the device, calls `RevokeLease`.
+- **The firmware's description:** `MapFirmware` maps the DTB, or the RSDP, the XSDT, every table and the DSDT and FACS, read-only at their physical addresses, for the device root's holder.
+- **Tested by** `conformance/spawner`, `timer` and `leaser`. `leaser` plays hwdb, and drives `virtiorng`: a user-mode driver for QEMU's virtio entropy device (`-device virtio-rng-device`, on both machines). The driver maps its lease, sets up a virtqueue in DMA Areas, takes the interrupt and checks the bytes. A second driver is killed with its request at the device: its two pages wait in quarantine until `leaser` has reset the device and revoked the lease. Mutations that skip the quarantine, skip the memory check, or skip killing an owner's children each fail the tests.
+
+**Not as planned:**
+- **No `SendHandle`.** hwdb keeps its leases and grants them, so a driver never owns one, and a supervisor that owns its leases is the simpler model. Handle passing can come when something needs it.
+- **No boot bundle yet.** The programs are still the `conformance/` images. The kernel starting hwdb belongs with step 3.
+- **Every line is masked when it fires,** edge-triggered ones too, and unmasked by `AckWaitIrq`. Not masking edge lines is an optimisation to measure later.
+- **The IOMMU isn't refused yet:** the kernel doesn't know where the SMMUs are until it reads the IORT (step 5).
+- **The firmware tables aren't an Area:** they're mapped where they lie, because they live in firmware memory and not in pages the kernel allocated.
+- **The test device is virtio, not `edu`:** `edu` is on PCI, which comes in step 5; virtio-mmio is in both QEMU device trees now. Under ACPI, and on the boards, the lease test runs its refusals and the firmware check only.
+
+**Fixed on the way:**
+- `ktimer_stop` and `irq_detach` now wait for a handler already running on another CPU, so what the handler uses can be freed once they return.
+- The process record holds a reference of its own while the process lives, and the watcher's fields are read before `dead` is set.
 
 ## 2. hwdb on the host
 

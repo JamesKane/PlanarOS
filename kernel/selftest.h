@@ -65,5 +65,6 @@ void selftest_tlb(void);
 /* V4 step 1: the kernel calls drivers need. Called from selftest_tasks. */
 void selftest_processes(void);
 void selftest_time(void);
+void selftest_leases(void);
 
 #endif /* KERNEL_SELFTEST_H */

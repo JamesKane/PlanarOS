@@ -210,6 +210,8 @@ bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
     bits |= flags & MAP_WRITE ? PTE_W : 0;
     bits |= flags & MAP_EXEC ? PTE_X : 0;
     bits |= flags & MAP_USER ? PTE_U : 0;
+    /* MAP_DEVICE needs nothing: the platform's PMAs make device ranges
+     * uncached I/O, on QEMU and the K1 alike (Svpbmt isn't relied on). */
     if (*pte & PTE_V) {
         /* Changing a live mapping: every hart may cache the old one, so
          * take it away everywhere before the new one goes in (review H2). */

@@ -9,6 +9,8 @@
 #ifndef KERNEL_CONSOLE_H
 #define KERNEL_CONSOLE_H
 
+#include <stdint.h>
+
 /* Pick the console from the firmware description. False if it names
  * none the kernel can drive; the platform's console is used instead. */
 bool console_init(void);
@@ -21,5 +23,8 @@ void console_describe(void);
 
 /* Write one byte, waiting for room. */
 void console_putc(char c);
+
+/* The console's registers (physical), or 0 if it has none. */
+uint64_t console_base(void);
 
 #endif /* KERNEL_CONSOLE_H */

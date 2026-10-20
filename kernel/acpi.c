@@ -68,7 +68,8 @@ struct table {
 
 static struct table tables[MAX_TABLES];
 static unsigned ntables, nrefused, nlisted;
-static const void *xsdt;
+static const void *xsdt, *rsdp_at;
+static uint32_t xsdt_len;
 static uint8_t rsdp_revision;
 static char oem_id[7], oem_table_id[9];
 
@@ -98,7 +99,7 @@ bool acpi_init(const void *rsdp)
 {
     uint32_t len, xlen;
 
-    xsdt = nullptr;
+    xsdt = rsdp_at = nullptr;
     ntables = nrefused = nlisted = 0;
     quirk = nullptr;
     oem_id[0] = oem_table_id[0] = '\0';
@@ -118,6 +119,8 @@ bool acpi_init(const void *rsdp)
         xsdt = nullptr;
         return false;
     }
+    rsdp_at = rsdp;
+    xsdt_len = xlen;
     for (unsigned i = 0; i < 6; i++)
         oem_id[i] = (char)rd8(xsdt, 10 + i);
     for (unsigned i = 0; i < 8; i++)
@@ -149,6 +152,50 @@ const void *acpi_table(const char *sig, uint32_t *len)
         }
     }
     return nullptr;
+}
+
+bool acpi_blob(unsigned index, uint64_t *pa, uint64_t *len)
+{
+    uint32_t flen, n;
+    const uint8_t *fadt;
+
+    if (!xsdt)
+        return false;
+    if (index == 0) {
+        *pa = virt_to_phys(rsdp_at);
+        *len = rd32(rsdp_at, 20);
+        return true;
+    }
+    if (index == 1) {
+        *pa = virt_to_phys(xsdt);
+        *len = xsdt_len;
+        return true;
+    }
+    if (index - 2 < ntables) {
+        *pa = virt_to_phys(tables[index - 2].p);
+        *len = tables[index - 2].len;
+        return true;
+    }
+    /* The FADT's X_DSDT (140) and X_FIRMWARE_CTRL (132), or their
+     * 32-bit forms (40, 36). */
+    index -= 2 + ntables;
+    if (index > 1 || !(fadt = acpi_table("FACP", &flen)))
+        return false;
+    if (index == 0) {
+        uint64_t dsdt = flen >= 148 ? rd64(fadt, 140) : 0;
+        const void *t = map_table(dsdt ? dsdt : rd32(fadt, 40), &n);
+
+        if (!t)
+            return false;
+        *pa = virt_to_phys(t);
+        *len = n;
+        return true;
+    }
+    uint64_t facs = flen >= 140 ? rd64(fadt, 132) : 0;
+
+    *pa = facs ? facs : rd32(fadt, 36);
+    *len = 64;                  /* its fixed part; it has no checksum */
+    return *pa != 0;
 }
 
 /* --- Board quirks: data, keyed by the XSDT's OEM ID and OEM table ID

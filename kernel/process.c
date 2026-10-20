@@ -11,6 +11,7 @@
 #include "ktime.h"
 #include "area.h"
 #include "kstring.h"
+#include "lease.h"
 #include "pmm.h"
 #include "port.h"
 #include "process.h"
@@ -198,6 +199,21 @@ struct process *process_create_on(const char *name, int pri, uint64_t arg,
     return create(name, pri, arg, watcher, 0, sig, affinity, false);
 }
 
+struct process *process_create_root(const char *name, int pri, uint64_t arg,
+                                    struct task *watcher, uint64_t sig)
+{
+    struct process *p = create(name, pri, arg, watcher, 0, sig, TASK_ANY_CPU, true);
+    struct task *t;
+
+    if (!p)
+        return nullptr;
+    t = p->held;
+    p->held = nullptr;
+    t->user_arg[1] = lease_root(p);
+    launch(p, t);
+    return p;
+}
+
 /* --- Ending. --- */
 
 /* Mark every task of 'p' but 'except' killed and make it notice. */
@@ -214,6 +230,7 @@ static void kill_tasks(struct process *p, struct task *except)
             arch_send_ipi(t->cpu);      /* out of user mode */
     }
     spin_unlock_irqrestore(&p->lock, was);
+    lease_process_dying(p);     /* its devices' lines, before anything else */
 }
 
 /* The calling task leaves its process for good. */
@@ -226,6 +243,7 @@ static void kill_tasks(struct process *p, struct task *except)
 
     ipc_task_gone(self);        /* its ports and connections close */
     ktimer_stop(&self->alarm);
+    lease_task_gone(self);
     was = spin_lock_irqsave(&p->lock);
     for (pp = &p->tasks; *pp != self; pp = &(*pp)->next_in_proc)
         ;
@@ -380,8 +398,7 @@ static void hold_fn(void *obj, void *arg)
     *(struct process **)arg = obj;
 }
 
-/* The process 'h' names, held, if the caller's process owns the handle. */
-static struct process *get_child(Handle h)
+struct process *process_child(Handle h)
 {
     struct process *p = nullptr;
 
@@ -396,7 +413,7 @@ static struct process *get_child(Handle h)
 
 int64_t process_start_call(uint32_t h)
 {
-    struct process *p = get_child(h);
+    struct process *p = process_child(h);
     struct task *t;
 
     if (!p)
@@ -410,7 +427,7 @@ int64_t process_start_call(uint32_t h)
 
 int64_t process_kill_call(uint32_t h)
 {
-    struct process *p = get_child(h);
+    struct process *p = process_child(h);
 
     if (!p)
         return ERR_BADHANDLE;
@@ -421,7 +438,7 @@ int64_t process_kill_call(uint32_t h)
 
 int64_t process_query_call(uint32_t h, uint64_t info_out)
 {
-    struct process *p = get_child(h);
+    struct process *p = process_child(h);
     struct ProcessInfo info = { 0 };
 
     if (!p)
@@ -466,6 +483,7 @@ static void reclaim(struct process *p)
     /* Handles first: once its Areas go, no handle may still find them.
      * The processes it created die with it. */
     handle_free_owner(p);
+    lease_process_died(p);      /* stopping: its DMA Areas are quarantined as they go */
     area_process_died(p);
     arch_domain_destroy(&p->domain);
     /* Its own reference, before 'dead': from then on the watcher may

@@ -33,7 +33,7 @@
 | Signals and waiting | `Wait`, `Signal`, `SetSignal`, `WaitAddr`, `WakeAddr` | Futex-style waiting is the basis of the trap-free fast path (§4). |
 | Ports and connections | `CreatePort`, `PublishPort`, `OpenPort`, `ClosePort`, `PutMsg`, `DoMsg` | Rings live in user memory. The kernel creates them, tears them down and wakes waiters. |
 | Time | `CreateTimer`, `ArmTimer`, `CurrentTime` | Tickless. The time counter can be read from user mode (`rdtime` / `CNTVCT_EL0`). |
-| Interrupts and leases | `GrantLease`, `RevokeLease`, `BindIrq`, `AckIrq` | A lease bundles MMIO pages, IRQs, an IOMMU context and a doorbell (§5). |
+| Interrupts and leases | `CreateLease`, `GrantLease`, `RevokeLease`, `MapLease`, `BindIrq`, `AckWaitIrq`, `AllocDmaArea` | A lease bundles MMIO pages, IRQs, an IOMMU context and a doorbell (§5). |
 | Handles | `CloseHandle`, `DupHandle`, `SendHandle` | Handles are generation plus index, in one system-wide table (as in 3DO and Omega). |
 | Diagnostics | `KLog`, `QuerySystem` | |
 
@@ -97,6 +97,8 @@ Kernel entry contract (`arch_entry`):
 **Built (V3 step 4).** Each CPU has a core class: its core type, from MIDR (or RISC-V's `marchid`), read on the CPU itself. The PPTT's clusters are a cross-check. A class's capacity is measured at boot, by timing one fixed workload on every CPU; the fastest class gets 1024. Placement fills idle big cores first, then idle little ones, then goes where a task gets the most capacity per task. On a symmetric machine that is the old least-loaded rule.
 
 **Built (V3 step 6).** VQ3 is decided: the identity layout (docs §3.1, [vq3-results.md](vq3-results.md)). `arch_tlb_count_start` and `arch_tlb_count_read` count user mode's TLB misses on a CPU, through the PMU on AArch64 and the SBI PMU on RISC-V. The global layout was then deleted, with `layout=` (v3-plan decision 3): an Area is one physically contiguous run, at VA = PA.
+
+**Built (V4 step 1).** The kernel calls drivers need ([v4-plan](v4-plan.md)): processes made by processes, which never outlive their creator's handle; `CurrentTime` and `ArmTimer`; device leases (`kernel/lease.c`), created only with the device root, granted to one driver at a time, with lines delivered as signals and DMA Areas quarantined when a driver dies with them; and `MapFirmware` for the firmware's tables. `GrantLease` replaces `SendHandle` for now: hwdb keeps the leases it hands out.
 
 **Built (V3 step 5).** On AArch64, as on RV64, a kernel call saves only what the calling convention keeps, and zeroes the scratch registers on the way out. On the CIX a null kernel call is 258 cycles on an A720 and 586 on an A520, and a `DoMsg` round trip 1,533 and 3,366 (the RV2: 469 and 3,209). `make PROFILE=1` profiles both ISAs.
 

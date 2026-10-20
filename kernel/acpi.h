@@ -29,6 +29,11 @@ bool acpi_init(const void *rsdp);
  * none. The first, if the XSDT lists more than one. */
 const void *acpi_table(const char *sig, uint32_t *len);
 
+/* Every blob of firmware data in the tables, by index from 0: the RSDP,
+ * the XSDT, each table it lists, and the FADT's DSDT and FACS. False
+ * past the last. For handing them to user mode (MapFirmware). */
+bool acpi_blob(unsigned index, uint64_t *pa, uint64_t *len);
+
 /* The GIC, from the MADT. Redistributors are GICR ranges, or one per
  * enabled CPU (size 0: one redistributor) where the MADT gives them in
  * its GICC entries instead. The ITSs are recorded for V4. */

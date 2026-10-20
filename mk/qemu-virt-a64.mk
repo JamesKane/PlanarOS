@@ -42,6 +42,7 @@ HW_CHECK := --forbid '^V3.2 acpi ok: described by (?!$(HW_NAME))' \
 	--facts $(BUILD)/facts-$(HOW).txt
 
 RUN_CMD := $(QEMU) -machine $(QEMU_MACHINE) -cpu cortex-a76 -smp 4 -m $(QEMU_MEM) \
+	-global virtio-mmio.force-legacy=false -device virtio-rng-device \
 	-nographic $(QEMU_FIRMWARE) -kernel $(IMAGE) -append 'qemu $(BOOTARGS)'
 
 run: $(IMAGE)

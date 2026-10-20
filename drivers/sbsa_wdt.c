@@ -14,6 +14,7 @@
  */
 #include "acpi.h"
 #include "arch.h"
+#include "devmem.h"
 #include "kprintf.h"
 #include "ktime.h"
 #include "sbsa_wdt.h"
@@ -57,6 +58,8 @@ bool sbsa_wdt_init(void)
     if (!acpi_watchdog(0, &w) || !w.control)
         return false;
     ctrl = (uintptr_t)phys_to_virt(w.control);
+    devmem_claim(w.control, 1);
+    devmem_claim(w.refresh, 1);
     was = *reg(WCS);
     max = ((*reg(W_IIDR) >> 16) & 0xf) >= 1 ? (1ULL << 48) - 1 : 0xffffffffULL;
     period = time_us(TIMEOUT_US);

@@ -10,6 +10,7 @@
 #include <planar/endian.h>
 
 #include "cpu.h"
+#include "devmem.h"
 #include "fdt.h"
 #include "plic.h"
 
@@ -39,6 +40,7 @@ static bool probe(int32_t node)
     if (!fdt_reg(node, 0, &addr, &size))
         return false;
     base = (uintptr_t)phys_to_virt(addr);
+    devmem_claim(addr, size);
     plic_node = node;
     nsources = fdt_getprop_u32(node, "riscv,ndev", 0);
     return nsources > 0;
