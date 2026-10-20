@@ -543,6 +543,95 @@ static void test_round_robin(void)
             (unsigned long long)a, (unsigned long long)b);
 }
 
+/* --- stranding: a task ready behind a busy CPU is taken by an idle one --- */
+
+static atomic_bool strandee_ran;
+
+static void strandee(void *)
+{
+    task_wait(SIGF_TEST);
+    atomic_store(&strandee_ran, true);
+}
+
+/*
+ * A low-priority task last ran on CPU 1, where a priority-20 hog now
+ * runs; it may run on CPU 2 too, which sits idle. Woken, it must not
+ * wait for the hog: CPU 2 has to be told (review H7). CPU 2 is idle
+ * before the wakeup, so it only looks if someone interrupts it.
+ */
+static void test_strand(void)
+{
+    struct task *t;
+    uint64_t end;
+
+    if (ncpus < 3) {
+        kprintf("V1.3 strand skipped: fewer than three CPUs\n");
+        return;
+    }
+    atomic_store(&strandee_ran, false);
+    if (!(t = task_create("strandee", 1, cpu_mask(1), strandee, nullptr)))
+        fail("V1.3 strand", "task_create failed");
+    while (t->state != TASK_WAITING || atomic_load(&t->on_cpu))
+        task_sleep_until(time_now() + time_us(1000));
+    t->affinity = cpu_mask(1) | cpu_mask(2);    /* waiting: safe to change */
+    atomic_store(&spin_stop, false);
+    atomic_store(&spin_finished, 0);
+    atomic_store(&spin_counts[0], 0);
+    if (!task_create("hog", 20, cpu_mask(1), spinner, (void *)0))
+        fail("V1.3 strand", "task_create failed");
+    while (atomic_load(&spin_counts[0]) == 0)
+        task_sleep_until(time_now() + time_us(1000));
+    task_signal(t, SIGF_TEST);
+    for (end = time_now() + time_us(50000); !atomic_load(&strandee_ran) && time_now() < end;)
+        task_sleep_until(time_now() + time_us(1000));
+    if (!atomic_load(&strandee_ran))
+        fail("V1.3 strand", "a ready task waited behind a busy CPU while another idled");
+    stop_spinners(1);
+    kprintf("V1.3 strand ok: a task ready behind a busy CPU ran on an idle one\n");
+}
+
+/* --- lowering: a running task lowered to a peer's level takes turns --- */
+
+static atomic_bool lower_go;
+
+static void lowered(void *)
+{
+    while (!atomic_load(&lower_go))
+        arch_cpu_relax();
+    task_set_pri(task_self(), 5);
+    while (!atomic_load(&spin_stop))
+        atomic_fetch_add(&spin_counts[0], 1);
+    task_signal(tester, SIGF_TEST);
+    atomic_fetch_add(&spin_finished, 1);
+}
+
+/* Lowered to the level of a ready peer, a spinning task must start
+ * sharing its CPU (review M8). */
+static void test_lower(void)
+{
+    unsigned k = ncpus > 1 ? 1 : 0;
+    uint64_t end;
+
+    atomic_store(&lower_go, false);
+    atomic_store(&spin_stop, false);
+    atomic_store(&spin_finished, 0);
+    atomic_store(&spin_counts[0], 0);
+    atomic_store(&spin_counts[1], 0);
+    if (!task_create("lowered", 20, cpu_mask(k), lowered, nullptr) ||
+        !task_create("peer", 5, cpu_mask(k), spinner, (void *)1))
+        fail("V1.3 lower", "task_create failed");
+    task_sleep_until(time_now() + time_us(2000));
+    if (atomic_load(&spin_counts[1]))
+        fail("V1.3 lower", "the peer ran under a higher priority");
+    atomic_store(&lower_go, true);
+    for (end = time_now() + time_us(50000); !atomic_load(&spin_counts[1]) && time_now() < end;)
+        task_sleep_until(time_now() + time_us(1000));
+    if (!atomic_load(&spin_counts[1]))
+        fail("V1.3 lower", "a task lowered to a peer's priority never let it run");
+    stop_spinners(2);
+    kprintf("V1.3 lower ok: lowered to a ready peer's priority, a task took turns with it\n");
+}
+
 /* --- migration: a task moves itself to another CPU --- */
 
 static atomic_uint moved_from, moved_to;
@@ -627,6 +716,8 @@ void selftest_tasks(void *)
     test_signals();
     test_preempt();
     test_round_robin();
+    test_strand();
+    test_lower();
     test_migrate();
     test_pingpong();
     kprintf("V1.3 scheduler: %llu switches, %llu steals so far\n",

@@ -141,7 +141,25 @@ static void quantum_update(struct cpu *c)
  * it outranks what runs there, or check its quantum if it's a peer.
  * Returns whether 'c' must be interrupted to notice.
  */
-static bool wake_check(struct cpu *c, struct task *t)
+/*
+ * 't' is ready on 'c' (rq_lock held) but 'c' won't run it now: wake an
+ * idle CPU it may run on, which steals it (review H7). There's no tick,
+ * so an idle CPU nobody interrupts never looks.
+ */
+static void nudge_idle(struct cpu *c, struct task *t)
+{
+    for (unsigned i = 0; i < ncpus; i++) {
+        struct cpu *o = &cpus[i];
+
+        if (o != c && (t->affinity & bit(o)) && atomic_load(&o->online) &&
+            o->current == o->idle && o->nr_ready == 0) {
+            arch_send_ipi(o);
+            return;
+        }
+    }
+}
+
+static bool wake_check_how(struct cpu *c, struct task *t, bool nudge)
 {
     int cur = c->current->pri;
 
@@ -149,11 +167,18 @@ static bool wake_check(struct cpu *c, struct task *t)
         atomic_store(&c->need_resched, true);
         return true;
     }
+    if (nudge)
+        nudge_idle(c, t);
     if (t->pri == cur) {
         atomic_store(&c->quantum_check, true);
         return true;
     }
     return false;
+}
+
+static bool wake_check(struct cpu *c, struct task *t)
+{
+    return wake_check_how(c, t, true);
 }
 
 /*
@@ -270,6 +295,8 @@ void schedule(void)
     next = dequeue_top(c);
     if (!next)
         next = c->idle;
+    else if (next != prev && prev->state == TASK_READY && prev->on_rq)
+        nudge_idle(c, prev);        /* preempted: someone idle may take it */
     next->state = TASK_RUNNING;
     c->current = next;
     quantum_update(c);
@@ -460,9 +487,16 @@ struct task *task_create(const char *name, int pri, uint64_t affinity,
         ;                               /* never resumed */
 }
 
+/* With interrupts held off: preempted between finding this CPU and
+ * reading its current task, a task moved elsewhere would read another
+ * CPU's (review M9). */
 struct task *task_self(void)
 {
-    return this_cpu()->current;
+    unsigned long was = arch_irq_save();
+    struct task *t = this_cpu()->current;
+
+    arch_irq_restore(was);
+    return t;
 }
 
 void task_set_affinity(uint64_t affinity)
@@ -502,10 +536,15 @@ static struct cpu *set_pri(struct task *t, int pri)
     if (t->state == TASK_READY) {
         notify = wake_check(c, t);
     } else if (t->state == TASK_RUNNING) {
-        /* Lowered below something ready there: switch. */
-        notify = top_level(c) > (int)level(t->pri);
-        if (notify)
+        /* Lowered below something ready there: switch. To the level of
+         * a peer: take turns from now on (review M8). */
+        int top = top_level(c);
+
+        notify = top >= (int)level(t->pri);
+        if (top > (int)level(t->pri))
             atomic_store(&c->need_resched, true);
+        else if (notify)
+            atomic_store(&c->quantum_check, true);
     } else {
         notify = false;
     }
@@ -619,10 +658,13 @@ struct cpu *task_post(struct task *t, uint64_t mask, unsigned how)
                     t->pri = me->pri;   /* lent until it next signals or waits */
                 enqueue_head(c, t);
                 atomic_fetch_add_explicit(&handoffs, 1, memory_order_relaxed);
-            } else if (!t->on_rq) {
-                enqueue(c, t);
+                /* No nudge: this CPU is about to be its. */
+                notify = wake_check_how(c, t, false);
+            } else {
+                if (!t->on_rq)
+                    enqueue(c, t);
+                notify = wake_check(c, t);
             }
-            notify = wake_check(c, t);
         }
         spin_unlock(&c->rq_lock);
     }
