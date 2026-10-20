@@ -51,8 +51,11 @@
     console_report();
     if (bootinfo())
         kprintf("planar: booted through UEFI\n");
-    if (hw == HW_FDT)
+    if (hw == HW_FDT) {
         fdt_report();
+        if (bootargs_has("dumpdtb"))
+            fdt_dump_blob();
+    }
     else if (hw == HW_ACPI)
         acpi_report();
     else

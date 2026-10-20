@@ -491,3 +491,24 @@ void fdt_report(void)
             ncpu++;
     kprintf("planar: %u CPUs in the device tree\n", ncpu);
 }
+
+void fdt_dump_blob(void)
+{
+    static const char hex[] = "0123456789abcdef";
+    const uint8_t *b = blob;
+    uint32_t used = get_be32(b + 8) + get_be32(b + 36), strs = get_be32(b + 12) + get_be32(b + 32);
+    uint32_t size = used > strs ? used : strs;
+    char line[64 * 2 + 1];
+
+    for (uint32_t off = 0; off < size; off += 64) {
+        uint32_t n = size - off < 64 ? size - off : 64;
+
+        for (uint32_t i = 0; i < n; i++) {
+            line[2 * i] = hex[b[off + i] >> 4];
+            line[2 * i + 1] = hex[b[off + i] & 15];
+        }
+        line[2 * n] = 0;
+        kprintf("dtb: %s\n", line);
+    }
+    kprintf("dtb: end, %u bytes of %u\n", size, fdt_size());
+}

@@ -61,4 +61,9 @@ void fdt_dump_node(int32_t node, const char *const *only);
 /* Print the model, memory ranges, reservations and CPU count. */
 void fdt_report(void);
 
+/* Print the blob in hex, as "dtb: " lines, for capturing a board's tree
+ * from its console (tools/dtb-from-log.py): up to the end of its
+ * structure or strings, leaving out the padding after them. */
+void fdt_dump_blob(void);
+
 #endif /* KERNEL_FDT_H */
