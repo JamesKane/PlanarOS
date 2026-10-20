@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: draft (2026-10-20).** Scoped, not started. The open decisions are at the end.
+**Status: in progress (2026-10-20).** Step 1 done. The open decisions are at the end.
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -23,26 +23,48 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 
 | Step | Content |
 |---|---|
-| **1. UEFI entry, on QEMU** | The image is also an EFI application. A stub takes the memory map and the configuration tables, exits boot services and enters the kernel. It runs under edk2 on QEMU, at EL1 and at EL2. |
+| **1. UEFI entry, on QEMU** ✅ | The image is also an EFI application. A stub takes the memory map and the configuration tables, exits boot services and enters the kernel. It runs under edk2 on QEMU, at EL1 and at EL2. |
 | **2. ACPI, on QEMU** | `kernel/acpi.c` parses the static tables into the same facts `fdt.c` gives. Both sources are compared on one machine. |
 | **3. The board** | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
 | **4. Big and little** | Core classes from the PPTT and MIDR, and costs per class. |
 | **5. Arm costs** | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
 | **6. VQ3** | The `vq3` workload on the CIX, again on the RV2, and switch and TLB-miss costs per layout. Then the decision. |
 
-## 1. UEFI entry, on QEMU
+## 1. UEFI entry, on QEMU ✅
 
-- **The image is also a PE/COFF EFI application.** The arm64 `Image` header has room for the `MZ` signature and a PE header, as Linux's EFI stub uses. The same file still boots with `booti` and with QEMU's `-kernel`.
-- **The stub** (`arch/aarch64/efi.c`, plus a small portable part) does the following:
-  1. writes through UEFI's console until the kernel's own console is up;
-  2. reads the memory map;
-  3. finds the RSDP, and the DTB if there is one, in the configuration table;
-  4. records the GOP framebuffer, for V4;
-  5. calls `ExitBootServices`, fetching the map again if the map key has changed;
-  6. enters the kernel's normal entry with a boot-information block instead of a bare DTB pointer.
-- **The memory map comes from EFI** when there is one. Conventional memory and boot-services memory are free; everything else is reserved. V3 doesn't call runtime services.
-- **The new platform, `qemu-virt-a64-efi`**, runs the image under `edk2-aarch64-code.fd`, which ships with QEMU, from a FAT directory (`-drive file=fat:…`). It also runs with `QEMU_EL2=1`: the CIX enters at EL2 with VHE, and Planar drops to EL1 (VQ11).
-- **Tests:** everything that passes today passes through the EFI path, still using the FDT.
+**Done (2026-10-20).** `make test-all` runs 9 configurations, two of them through edk2: EL1 with the identity layout, and EL2 with the global one. A 30-boot soak through edk2 at EL2 had no failures. The transcript ends with `V3.1 done`.
+
+- **The image runs wherever it's loaded.** This wasn't in the plan, but one image needs it: the old fixed load address, `0x40200000`, is PCI space on the CIX.
+  - The AArch64 kernel is built position-independent and linked as if loaded at physical 0.
+  - Once the MMU is on, `entry.S` adds the physical load address to each of its 126 relative relocations.
+  - The build refuses any other kind of relocation.
+  - QEMU's `-kernel` path now relocates too, so every boot exercises it.
+- **The image is also a PE/COFF EFI application.**
+  - Its first word is `MZ`, a harmless `ccmp`. The PE header follows the arm64 `Image` header.
+  - It has two sections, code and data, and file offsets equal addresses, so the flat `planar.bin` is the PE file.
+  - It has no base relocations.
+- **The stub** (`arch/aarch64/efi.c`):
+  1. prints through UEFI's console;
+  2. copies the image to a 2 MiB boundary below 512 GiB;
+  3. fills the boot-information block (`kernel/bootinfo.h`): the DTB and RSDP from the configuration table, the GOP framebuffer, and the load options as the command line;
+  4. calls `ExitBootServices`, taking the map again if the key changed;
+  5. cleans the image to memory, turns the MMU off at its EL, and enters through `entry.S` like any loader.
+
+  It runs before relocation, so it uses PC-relative addresses only. The build checks its object for absolute relocations.
+- **The memory map comes from EFI** when there is one (`memmap.c`):
+  - conventional and boot-services memory are free;
+  - loader, runtime, ACPI and persistent memory are RAM but reserved;
+  - adjacent ranges are merged before rounding to 2 MiB.
+- **On QEMU, `EFI=1` instead of a new platform.** It's the same image, so `make PLATFORM=qemu-virt-a64 EFI=1` boots it under `edk2-aarch64-code.fd` with `acpi=off`.
+  - edk2 loads it from `-kernel` through fw_cfg, with `-append` as its load options. This replaces the FAT directory the plan proposed: it's quicker, and it passes arguments.
+  - `QEMU_EL2=1` runs edk2, and so the stub, at EL2.
+- **`V3.1 boot`** checks that every range the EFI map keeps, and the boot block, is reserved. On EFI runs, boot-check also requires the line to say it came through UEFI, with the `layout=` argument intact.
+- **Mutation tests (all caught):**
+  - no relocation;
+  - no boot block;
+  - loader data or runtime data treated as free;
+  - the command line dropped.
+- **Not checked on QEMU:** the cache maintenance (QEMU has no caches to get wrong), and VHE at EL2 (edk2 doesn't enable it). Both are first tested on the CIX, in step 3.
 
 ## 2. ACPI, on QEMU
 

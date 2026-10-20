@@ -2,6 +2,7 @@
 #
 #   make PLATFORM=qemu-virt-rv64   (default) RV64 image for QEMU's virt machine
 #   make PLATFORM=qemu-virt-a64    AArch64 image for QEMU's virt machine
+#                                  (EFI=1 runs it through UEFI, edk2)
 #   make PLATFORM=hosted           host executable
 #   make PLATFORM=... run          build and run where that makes sense
 #   make PLATFORM=... test         build, run, and check the boot transcript
@@ -26,6 +27,7 @@ PORTABLE_SRCS := \
 	kernel/main.c \
 	kernel/area.c \
 	kernel/bootargs.c \
+	kernel/bootinfo.c \
 	kernel/console.c \
 	kernel/fdt.c \
 	kernel/handle.c \
@@ -57,7 +59,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V2.4 done
+EXPECT := V3.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -113,14 +115,16 @@ test: $(IMAGE)
 
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
 
-# Both ISAs in both layouts, AArch64 once more entered at EL2 (as the CIX
-# and RK3588 boards enter it), RV64 with 17 GiB (RAM and the device tree
-# above 16 GiB), and the hosted build.
+# Both ISAs in both layouts; AArch64 once more entered at EL2 (as the CIX
+# and RK3588 boards enter it), and through UEFI at EL1 and EL2; RV64 with
+# 17 GiB (RAM and the device tree above 16 GiB); and the hosted build.
 test-all:
 	@for p in $(TEST_PLATFORMS); do for l in identity global; do \
 	  $(MAKE) --no-print-directory PLATFORM=$$p LAYOUT=$$l test || exit 1; \
 	done; done
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 QEMU_EL2=1 LAYOUT=global test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 LAYOUT=identity test
+	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-a64 EFI=1 QEMU_EL2=1 LAYOUT=global test
 	@$(MAKE) --no-print-directory PLATFORM=qemu-virt-rv64 QEMU_MEM=17G test
 	@$(MAKE) --no-print-directory PLATFORM=hosted test
 

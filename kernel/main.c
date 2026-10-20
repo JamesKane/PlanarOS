@@ -12,6 +12,7 @@
 
 #include "arch.h"
 #include "bootargs.h"
+#include "bootinfo.h"
 #include "console.h"
 #include "cpu.h"
 #include "fdt.h"
@@ -30,11 +31,13 @@
 [[noreturn]] void kmain(uint64_t boot_cpu, uint64_t firmware_data)
 {
     bool have_fdt, have_memory = false;
+    uint64_t dtb;
 
     arch_set_this_cpu(&cpus[0]);
     arch_early_init();
     sched_init_cpu();
-    have_fdt = firmware_data && fdt_init(phys_to_virt(firmware_data));
+    dtb = bootinfo_init(firmware_data);
+    have_fdt = dtb && fdt_init(phys_to_virt(dtb));
     if (have_fdt && (have_memory = memmap_init()))
         arch_memory_init();
     plat_early_init();
@@ -42,6 +45,8 @@
     kprintf("\nplanar: hello from cpu %llx on %s (%s, %s)\n",
             (unsigned long long)boot_cpu, plat_name, arch_name, arch_privilege());
     console_report();
+    if (bootinfo())
+        kprintf("planar: booted through UEFI\n");
     if (have_fdt)
         fdt_report();
     else
@@ -102,6 +107,8 @@
         kprintf("V2.3 done\n");
         kprintf("V2.4 death skipped: no tasks\n");
         kprintf("V2.4 done\n");
+        kprintf("V3.1 boot skipped: no tasks\n");
+        kprintf("V3.1 done\n");
         arch_halt();
     }
     sched_idle();

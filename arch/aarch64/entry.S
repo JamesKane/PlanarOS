@@ -1,16 +1,20 @@
 /*
  * arch/aarch64/entry.S -- boot entry for AArch64
  *
- * The firmware (U-Boot's booti, QEMU's -kernel, and later the EFI stub)
- * starts the boot CPU here with x0 = device tree and the MMU off, at EL2
- * (RK3588, CIX) or EL1 (Q8B under Qualcomm's hypervisor, QEMU by
- * default). The kernel always runs at EL1 (VQ11), so from EL2 it drops
- * down first. The other CPUs wait in PSCI until V1 step 2 starts them.
+ * The firmware (U-Boot's booti, QEMU's -kernel, or the EFI stub in
+ * efi.c) starts the boot CPU here with the MMU off, at EL2 (RK3588, CIX)
+ * or EL1 (Q8B under Qualcomm's hypervisor, QEMU by default), with x0 =
+ * the device tree or, from the EFI stub, a boot-information block
+ * (kernel/bootinfo.h). The kernel always runs at EL1 (VQ11), so from EL2
+ * it drops down first. The other CPUs wait in PSCI until V1 step 2
+ * starts them.
  *
- * The kernel is linked at its direct-map address (ARCH_DIRECT_MAP + load
- * address) but starts at its physical one. The entry code builds one set
- * of boot tables and loads it in both TTBR0 and TTBR1, so it maps the
- * same physical memory at 0 and at the direct map:
+ * The image runs wherever it's loaded. At physical P it runs at the
+ * direct-map address KERNEL_VOFFSET + P. It's linked as if P were 0, so
+ * once the MMU is on, the entry code adds P to every address the image
+ * holds (its R_AARCH64_RELATIVE relocations). The entry code builds one
+ * set of boot tables and loads it in both TTBR0 and TTBR1, so it maps
+ * the same physical memory at 0 and at the direct map:
  *
  *   L0[0]  -> L1: 512 x 1 GiB blocks covering physical 0..512 GiB, all
  *                 Device-nGnRE and execute-never, except
@@ -18,7 +22,7 @@
  *                 kernel image's are normal write-back memory, the rest
  *                 device.
  *
- * Then it turns the MMU on and jumps to the high alias. arch_early_init()
+ * Then it turns the MMU on, relocates, and jumps to the high alias. arch_early_init()
  * turns TTBR0 off; arch_memory_init() makes the rest of RAM normal.
  */
 
@@ -48,17 +52,74 @@
     .section .text.head, "ax"
     .globl  _start
 _start:
-    /* arm64 Linux image header, so U-Boot's booti and QEMU accept it. */
-    b       entry                   /* code0 */
-    .word   0                       /* code1 */
+    /* arm64 Linux image header, so U-Boot's booti and QEMU accept it,
+     * which is also a DOS header, so UEFI does. */
+    .inst   0xfa405a4d              /* code0: "MZ", and a harmless ccmp */
+    b       entry                   /* code1 */
     .quad   0x200000                /* text_offset */
     .quad   _image_size             /* image_size, including .bss and stack */
-    .quad   0                       /* flags: LE, 4K pages unspecified, near DRAM base */
+    .quad   0xa                     /* flags: LE, 4K pages, anywhere in RAM */
     .quad   0                       /* res2 */
     .quad   0                       /* res3 */
     .quad   0                       /* res4 */
     .ascii  "ARM\x64"               /* magic */
-    .word   0                       /* res5 */
+    .long   pe_header - _start      /* res5: the DOS header's PE offset */
+
+/*
+ * The PE/COFF header of an EFI application (PE32+): two sections, code
+ * and data, at the addresses link.ld gives them, and no base relocations
+ * (efi.c needs none; the kernel relocates itself, above). The values are
+ * link.ld's.
+ */
+pe_header:
+    .ascii  "PE\0\0"
+    .short  0xaa64                  /* Machine: arm64 */
+    .short  2                       /* NumberOfSections */
+    .long   0                       /* TimeDateStamp */
+    .long   0                       /* PointerToSymbolTable */
+    .long   0                       /* NumberOfSymbols */
+    .short  section_table - optional_header
+    .short  0x206                   /* executable; no line numbers, no debug info */
+optional_header:
+    .short  0x20b                   /* PE32+ */
+    .byte   0, 0                    /* linker version */
+    .long   __pe_text_size          /* SizeOfCode */
+    .long   __pe_data_size          /* SizeOfInitializedData */
+    .long   __pe_bss_size           /* SizeOfUninitializedData */
+    .long   __pe_entry_rva          /* AddressOfEntryPoint: efi_main */
+    .long   __pe_text_rva           /* BaseOfCode */
+    .quad   0                       /* ImageBase */
+    .long   4096                    /* SectionAlignment */
+    .long   4096                    /* FileAlignment */
+    .short  0, 0, 0, 0, 0, 0        /* OS, image and subsystem versions */
+    .long   0                       /* Win32VersionValue */
+    .long   __pe_image_size         /* SizeOfImage */
+    .long   __pe_text_rva           /* SizeOfHeaders: the first page */
+    .long   0                       /* CheckSum */
+    .short  10                      /* Subsystem: EFI application */
+    .short  0x100                   /* DllCharacteristics: NX-compatible */
+    .quad   0, 0, 0, 0              /* stack and heap sizes: unused */
+    .long   0                       /* LoaderFlags */
+    .long   6                       /* NumberOfRvaAndSizes */
+    .quad   0, 0, 0, 0, 0, 0        /* export .. base relocation: none */
+section_table:
+    .ascii  ".text\0\0\0"
+    .long   __pe_text_size          /* VirtualSize */
+    .long   __pe_text_rva           /* VirtualAddress */
+    .long   __pe_text_size          /* SizeOfRawData */
+    .long   __pe_text_rva           /* PointerToRawData */
+    .long   0, 0                    /* relocations, line numbers */
+    .short  0, 0
+    .long   0x60000020              /* code, execute, read */
+
+    .ascii  ".data\0\0\0"
+    .long   __pe_data_vsize         /* VirtualSize: with .bss */
+    .long   __pe_data_rva
+    .long   __pe_data_size
+    .long   __pe_data_rva
+    .long   0, 0
+    .short  0, 0
+    .long   0xc0000040              /* initialized data, read, write */
 
 /*
  * EL2_TO_EL1 resume: if running at EL2, drop to EL1h at 'resume' with
@@ -99,7 +160,7 @@ in_el1:
     ldr     x9, =SCTLR_EL1_RES1
     msr     sctlr_el1, x9
     isb
-    mov     x19, x0                 /* the device tree, for kmain */
+    mov     x19, x0                 /* the device tree or boot block, for kmain */
 
     /* Clear .bss (physical addresses: the MMU is off). */
     adrp    x9, __bss_start
@@ -154,22 +215,60 @@ in_el1:
     orr     x3, x0, #TABLE
     str     x3, [x6]                /* L0[0] -> L1 */
 
+    /* Everything since the MMU went off was written past the caches.
+     * Drop any lines a loader left for .bss (the boot tables are in it),
+     * so none is read in place of what's in memory once the caches are
+     * on. */
+    mrs     x9, ctr_el0
+    ubfx    x9, x9, #16, #4         /* DminLine: log2 words */
+    mov     x10, #4
+    lsl     x10, x10, x9            /* line size */
+    adrp    x9, __bss_start
+    add     x9, x9, :lo12:__bss_start
+    adrp    x11, __bss_end
+    add     x11, x11, :lo12:__bss_end
+    sub     x12, x10, #1
+    bic     x9, x9, x12
+6:  dc      ivac, x9
+    add     x9, x9, x10
+    cmp     x9, x11
+    b.lo    6b
+    dsb     sy
+
     bl      mmu_enable
 
+    /* Relocate, through the low alias: each place gets its addend plus
+     * P, the physical start of the image (x4). r_offset is a link
+     * address, KERNEL_VOFFSET + offset. link.ld's build check allows
+     * only R_AARCH64_RELATIVE. */
+    adrp    x9, __rela_start
+    add     x9, x9, :lo12:__rela_start
+    adrp    x10, __rela_end
+    add     x10, x10, :lo12:__rela_end
+7:  cmp     x9, x10
+    b.hs    8f
+    ldr     x11, [x9]               /* r_offset */
+    ldr     x13, [x9, #16]          /* r_addend */
+    add     x9, x9, #24
+    and     x11, x11, #0xffffffffffff
+    add     x13, x13, x4
+    str     x13, [x11, x4]
+    b       7b
+8:
     /* Continue at the high alias, with the stack there too. */
     ldr     x9, =high
     br      x9
 high:
     ldr     x9, =boot_stack_top
     mov     sp, x9
-    /* kmain(boot CPU affinity, device tree). The RK3588 numbers its CPUs
+    /* kmain(boot CPU affinity, device tree or boot block). The RK3588 numbers its CPUs
      * in Aff1, so pass all of Aff2..Aff0. */
     mov     x1, x19
     mrs     x0, mpidr_el1
     and     x0, x0, #0xffffff
     bl      kmain
-7:  wfe
-    b       7b
+9:  wfe
+    b       9b
 
 /*
  * Turn the MMU on with the boot tables in both TTBRs (physical
@@ -225,6 +324,49 @@ secondary_high:
     bl      kmain_secondary
 8:  wfe
     b       8b
+
+/*
+ * efi_enter_kernel(info, image, size), from the EFI stub (efi.c) after
+ * ExitBootServices. Write the copied image back to memory and drop it
+ * from the caches, since entry runs with them off. Then turn the MMU off
+ * at this EL and enter the image at its start, x0 = info, as any loader
+ * would. The stub runs in UEFI's 1:1 map, so the instruction after the
+ * MMU goes off is at the same address.
+ */
+    .text
+    .globl  efi_enter_kernel
+efi_enter_kernel:
+    msr     daifset, #0xf
+    mrs     x9, ctr_el0
+    ubfx    x9, x9, #16, #4
+    mov     x10, #4
+    lsl     x10, x10, x9            /* line size */
+    sub     x12, x10, #1
+    bic     x9, x1, x12
+    add     x11, x1, x2
+1:  dc      civac, x9
+    add     x9, x9, x10
+    cmp     x9, x11
+    b.lo    1b
+    dsb     sy
+    ic      iallu
+    dsb     sy
+    isb
+    mrs     x9, CurrentEL
+    cmp     x9, #(2 << 2)
+    b.ne    2f
+    mrs     x9, sctlr_el2
+    bic     x9, x9, #1              /* M */
+    bic     x9, x9, #4              /* C */
+    msr     sctlr_el2, x9
+    isb
+    br      x1
+2:  mrs     x9, sctlr_el1
+    bic     x9, x9, #1
+    bic     x9, x9, #4
+    msr     sctlr_el1, x9
+    isb
+    br      x1
 
     .section .bss.boot_tables, "aw", @nobits
     .balign 4096

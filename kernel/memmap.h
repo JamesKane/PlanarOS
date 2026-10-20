@@ -3,8 +3,8 @@
  *
  * Part of what the kernel reads before any server runs (docs §9.4,
  * layer 0): where RAM is, and which of it the firmware or the boot keeps
- * for itself. Device tree for now; the EFI memory map on ACPI boards once
- * the EFI stub exists.
+ * for itself. From the EFI memory map when the EFI stub passed one, else
+ * from the device tree.
  *
  * RAM ranges are rounded inward to 2 MiB so the direct map can cover them
  * with blocks of one memory type (arch_memory_init); at most 4 MiB per

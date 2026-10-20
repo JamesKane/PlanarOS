@@ -46,4 +46,8 @@ void selftest_domsg(void);
 /* V2 step 4: death notices from both ends, rogue clients, and load. */
 void selftest_death(void);
 
+/* V3 step 1: how the kernel was booted, and the EFI memory map if it
+ * came through UEFI. Called from selftest_tasks. */
+void selftest_boot(void);
+
 #endif /* KERNEL_SELFTEST_H */

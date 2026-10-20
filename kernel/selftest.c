@@ -8,11 +8,14 @@
 #include "cpu.h"
 #include "fdt.h"
 #include "kprintf.h"
+#include "memmap.h"
 #include "ktime.h"
 #include "plat.h"
 #include "pmm.h"
 #include "area.h"
 #include "bootargs.h"
+#include "bootinfo.h"
+#include "efi.h"
 #include "handle.h"
 #include "kmalloc.h"
 #include "layout.h"
@@ -746,6 +749,67 @@ static void test_migrate(void)
     kprintf("V1.3 migrate ok: cpu %u to cpu %u\n", from, to);
 }
 
+
+/* V3 step 1: is [base, base + size) reserved wherever it's RAM? */
+static bool kept(uint64_t base, uint64_t size)
+{
+    uint64_t rb, rs;
+
+    for (uint64_t a = base; a < base + size; ) {
+        bool in_ram = false, moved = false;
+
+        for (unsigned i = 0; memmap_reserved(i, &rb, &rs); i++)
+            if (a >= rb && a < rb + rs) {
+                a = rb + rs;
+                moved = true;
+                break;
+            }
+        if (moved)
+            continue;
+        for (unsigned i = 0; memmap_ram(i, &rb, &rs); i++)
+            in_ram |= a >= rb && a < rb + rs;
+        if (in_ram)
+            return false;
+        a += PAGE_SIZE;
+    }
+    return true;
+}
+
+/*
+ * How the kernel was booted. Through UEFI: every range the EFI memory
+ * map says the firmware or the loader keeps (its runtime services, ACPI,
+ * the kernel, the map itself) is out of the page allocator's reach, and
+ * so is the boot block.
+ */
+void selftest_boot(void)
+{
+    const struct boot_info *bi = bootinfo();
+    unsigned descs = 0, kept_ranges = 0;
+
+    if (!bi) {
+        kprintf("V3.1 boot ok: from a device tree, no UEFI\n");
+        return;
+    }
+    if (!kept(virt_to_phys(bi), sizeof *bi))
+        fail("V3.1 boot", "the boot block is free memory");
+    for (uint64_t off = 0; off + bi->mmap_desc_size <= bi->mmap_size; off += bi->mmap_desc_size) {
+        const struct efi_memory_descriptor *d = phys_to_virt(bi->mmap + off);
+
+        descs++;
+        if (d->type == EFI_CONVENTIONAL_MEMORY || d->type == EFI_BOOT_SERVICES_CODE ||
+            d->type == EFI_BOOT_SERVICES_DATA || !(d->attribute & EFI_MEMORY_WB))
+            continue;
+        kept_ranges++;
+        if (!kept(d->physical_start, d->pages * EFI_PAGE_SIZE)) {
+            kprintf("V3.1 boot: type %u at %p, %llu pages\n", d->type,
+                    (void *)d->physical_start, (unsigned long long)d->pages);
+            fail("V3.1 boot", "a range the firmware keeps is free memory");
+        }
+    }
+    kprintf("V3.1 boot ok: through UEFI; %u memory descriptors, the %u the firmware or "
+            "loader keeps all reserved; arguments \"%s\"\n", descs, kept_ranges, bi->cmdline);
+}
+
 /* --- ping-pong: the cost of Signal + Wait, on one CPU and across two --- */
 
 constexpr unsigned PINGS = 2000;
@@ -820,6 +884,8 @@ void selftest_tasks(void *)
     kprintf("V2.3 done\n");
     selftest_death();
     kprintf("V2.4 done\n");
+    selftest_boot();
+    kprintf("V3.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

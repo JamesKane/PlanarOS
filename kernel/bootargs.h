@@ -1,8 +1,8 @@
 /*
  * kernel/bootargs.h -- the kernel's arguments
  *
- * Space-separated words from /chosen/bootargs (QEMU's -append, U-Boot's
- * bootargs; the EFI stub will pass its command line the same way).
+ * Space-separated words: the EFI stub's command line (its load options),
+ * or else /chosen/bootargs (QEMU's -append, U-Boot's bootargs).
  */
 #ifndef KERNEL_BOOTARGS_H
 #define KERNEL_BOOTARGS_H

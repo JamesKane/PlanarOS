@@ -79,18 +79,19 @@ QEMU:     -kernel planar.bin (riscv64 virt / aarch64 virt)                     [
 ```
 
 Kernel entry contract (`arch_entry`):
-- The CPU is at S-mode or EL1. The EFI stub drops from EL2 to EL1 when it starts at EL2 (**VQ11**).
-- The MMU is off, or identity-mapped by the firmware.
+- The CPU is at S-mode, EL1 or EL2. The AArch64 entry code drops from EL2 to EL1 (**VQ11**).
+- The MMU is off.
 - One boot hart or CPU.
-- A pointer to the boot description, which is an FDT, or an ACPI RSDP plus the EFI memory map.
-- The boot framebuffer, if the firmware left one running.
+- One register holds a pointer to the boot description: an FDT, or a boot-information block (`kernel/bootinfo.h`) that holds the EFI memory map, the DTB and the RSDP if the firmware had them, the GOP framebuffer, and the command line.
+- On AArch64 the image runs wherever it's loaded. It runs at the direct-map address of its physical one, and the entry code applies its relative relocations once the MMU is on.
 
-The EFI stub's job:
-1. Collect the memory map, the ACPI tables and the GOP framebuffer.
-2. `ExitBootServices`.
-3. Jump to the shared entry point.
+**Built (V3 step 1).** The EFI stub (`arch/aarch64/efi.c`) does the following:
+1. Copies the image to a 2 MiB boundary.
+2. Collects the configuration tables, the GOP framebuffer and the load options.
+3. Calls `ExitBootServices` with the final memory map.
+4. Cleans the image from the caches, turns the MMU off, and enters the copy as any loader would.
 
-The stub is a separate compile unit under `arch/aarch64/efi/`.
+The stub is part of the kernel image, not a separate unit. The image header is both an arm64 `Image` header and a PE/COFF header, so one file boots through `booti`, QEMU's `-kernel` and UEFI. The stub runs before relocation, so it may use only PC-relative addresses. The build checks this.
 
 Hardware description: **VQ7. Needs a design session.** ACPI and FDT are both first-class sources:
 - **ACPI** on the newer boards: Q8B, CIX P1, and the SpacemiT K3. Most SBCs from the last year ship ACPI.

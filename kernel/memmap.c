@@ -1,12 +1,15 @@
 /*
- * kernel/memmap.c -- the physical memory map, from the device tree
+ * kernel/memmap.c -- the physical memory map, from the EFI memory map or
+ * the device tree
  */
 #include "arch.h"
+#include "bootinfo.h"
+#include "efi.h"
 #include "fdt.h"
 #include "kprintf.h"
 #include "memmap.h"
 
-constexpr unsigned MAX_RANGES = 32;
+constexpr unsigned MAX_RANGES = 64;
 constexpr uint64_t ROUND = 1ULL << 21;
 
 struct range {
@@ -26,6 +29,16 @@ static void add(struct range *list, unsigned *n, uint64_t base, uint64_t size)
         return;
     }
     list[(*n)++] = (struct range){ base, size };
+}
+
+/* As add(), but extend the last range if this one follows it: the EFI
+ * map splits RAM into many ranges by type. */
+static void add_merged(struct range *list, unsigned *n, uint64_t base, uint64_t size)
+{
+    if (*n && list[*n - 1].base + list[*n - 1].size == base)
+        list[*n - 1].size += size;
+    else
+        add(list, n, base, size);
 }
 
 static uint64_t unmapped;           /* RAM bytes past the direct map, dropped */
@@ -49,12 +62,12 @@ void memmap_clip(uint64_t top)
     clip(top);
 }
 
-bool memmap_init(void)
+/* From the device tree's memory nodes. */
+static void fdt_ram(void)
 {
-    int32_t node = -1, resv;
+    int32_t node = -1;
     uint64_t base, size;
 
-    nram = nreserved = 0;
     while ((node = fdt_find_name(node, "memory")) >= 0) {
         for (uint32_t i = 0; fdt_reg(node, i, &base, &size); i++) {
             uint64_t lo = (base + ROUND - 1) & ~(ROUND - 1);
@@ -64,6 +77,71 @@ bool memmap_init(void)
                 add(ram, &nram, lo, hi - lo);
         }
     }
+}
+
+/*
+ * From the EFI memory map the stub kept. RAM is every write-back range
+ * the firmware or the OS keeps something in; free is conventional and
+ * boot-services memory, now that boot services are gone. The rest of
+ * RAM is reserved: the runtime services' (never called, but not ours),
+ * ACPI's, and the loader's (the kernel, this map, the boot block).
+ */
+static void efi_ram(const struct boot_info *bi)
+{
+    const uint8_t *map = phys_to_virt(bi->mmap);
+
+    if (bi->mmap_desc_size < sizeof(struct efi_memory_descriptor))
+        return;                 /* a broken map */
+    for (uint64_t off = 0; off + sizeof(struct efi_memory_descriptor) <= bi->mmap_size;
+         off += bi->mmap_desc_size) {
+        const struct efi_memory_descriptor *d = (const void *)(map + off);
+        uint64_t size = d->pages * EFI_PAGE_SIZE;
+
+        if (!(d->attribute & EFI_MEMORY_WB))
+            continue;
+        switch (d->type) {
+        case EFI_BOOT_SERVICES_CODE:
+        case EFI_BOOT_SERVICES_DATA:
+        case EFI_CONVENTIONAL_MEMORY:
+            add_merged(ram, &nram, d->physical_start, size);
+            break;
+        case EFI_LOADER_CODE:
+        case EFI_LOADER_DATA:
+        case EFI_RUNTIME_SERVICES_CODE:
+        case EFI_RUNTIME_SERVICES_DATA:
+        case EFI_ACPI_RECLAIM_MEMORY:
+        case EFI_ACPI_MEMORY_NVS:
+        case EFI_PERSISTENT_MEMORY:
+            add_merged(ram, &nram, d->physical_start, size);
+            add_merged(reserved, &nreserved, d->physical_start, size);
+            break;
+        default:
+            break;
+        }
+    }
+    /* Rounded inward once merged, as fdt_ram() rounds each range. */
+    for (unsigned i = 0; i < nram; i++) {
+        uint64_t lo = (ram[i].base + ROUND - 1) & ~(ROUND - 1);
+        uint64_t hi = (ram[i].base + ram[i].size) & ~(ROUND - 1);
+
+        if (hi > lo)
+            ram[i] = (struct range){ lo, hi - lo };
+        else
+            ram[i--] = ram[--nram];
+    }
+}
+
+bool memmap_init(void)
+{
+    const struct boot_info *bi = bootinfo();
+    int32_t resv;
+    uint64_t base, size;
+
+    nram = nreserved = 0;
+    if (bi && bi->mmap_size)
+        efi_ram(bi);
+    else
+        fdt_ram();
 
     /* The kernel reaches RAM only through the direct map (review M13). */
     clip((uint64_t)ARCH_DIRECT_MAP_GIB << 30);
