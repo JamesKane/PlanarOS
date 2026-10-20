@@ -76,6 +76,7 @@
 
     if (ncpus > 1 && pmm_total())
         kprintf("planar: %u of %u CPUs online\n", smp_start(), ncpus);
+    plat_late_init();
     selftest_smp();
     selftest_ipi();
     selftest_cpu_timers();

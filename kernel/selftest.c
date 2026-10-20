@@ -8,6 +8,7 @@
 #include "cpu.h"
 #include "kprintf.h"
 #include "ktime.h"
+#include "plat.h"
 #include "pmm.h"
 #include "area.h"
 #include "bootargs.h"
@@ -627,6 +628,20 @@ void selftest_tasks(void *)
     selftest_areas();
     selftest_vq3();
     kprintf("V1.5 done\n");
+    if (bootargs_has("hang")) {
+        /* For checking a board's watchdog brings it back. */
+        kprintf("planar: hanging, interrupts off\n");
+        task_sleep_until(time_now() + time_us(100000));
+        arch_halt();
+    }
+    if (bootargs_has("reboot")) {
+        /* Let the serial line drain, then start over (a board's loop). */
+        task_sleep_until(time_now() + time_us(200000));
+        kprintf("planar: rebooting\n");
+        task_sleep_until(time_now() + time_us(50000));
+        plat_reboot();
+        arch_reboot();      /* says so if the firmware can't */
+    }
 }
 
 /* ---------------------------------------------------------------------
@@ -896,16 +911,20 @@ static uint64_t soak_random(void)
     return soak_rng;
 }
 
-/* Mostly small, some medium, a few large (4 MiB): heaps, buffers, frames. */
+/* Mostly small, some medium, a few large (4 MiB on a 256 MiB machine),
+ * scaled with memory so a big machine sees the same pressure: heaps,
+ * buffers, frames. */
+static uint64_t soak_scale;
+
 static uint64_t soak_size(void)
 {
     uint64_t r = soak_random() % 100;
 
     if (r < 70)
-        return 1 + soak_random() % 8;
+        return (1 + soak_random() % 8) * soak_scale;
     if (r < 95)
-        return 9 + soak_random() % 120;
-    return 129 + soak_random() % 896;
+        return (9 + soak_random() % 120) * soak_scale;
+    return (129 + soak_random() % 896) * soak_scale;
 }
 
 struct soak_result {
@@ -922,6 +941,7 @@ static void soak(enum layout l, struct soak_result *r)
 
     *r = (struct soak_result){ 0 };
     soak_rng = 0x9e3779b97f4a7c15ULL;       /* the same workload for both */
+    soak_scale = pmm_total() / 65536 ? pmm_total() / 65536 : 1;
     for (unsigned op = 0; op < SOAK_OPS; op++) {
         bool grow = nheld == 0 || (nheld < SOAK_HELD && in_use < target && soak_random() % 3);
 

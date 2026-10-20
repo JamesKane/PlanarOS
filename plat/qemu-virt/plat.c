@@ -20,3 +20,12 @@ void plat_console_putc(char c)
 {
     (void)c;
 }
+
+void plat_late_init(void)
+{
+}
+
+/* The firmware's reset works here (SBI SRST, PSCI). */
+void plat_reboot(void)
+{
+}

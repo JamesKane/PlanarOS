@@ -18,6 +18,14 @@ extern const char plat_name[];
  * platform reads a description but has no hardware to drive. */
 void plat_early_init(void);
 
+/* Once interrupts, timers and the other CPUs are up: anything the board
+ * must keep doing on its own, such as servicing a watchdog. */
+void plat_late_init(void);
+
+/* Reset the board by its own means (a watchdog, a PMIC); returns if it
+ * has none, and the firmware's reset is tried instead (arch_reboot). */
+void plat_reboot(void);
+
 /*
  * Write one byte to the platform's own console, waiting for room. Used
  * only when the firmware description names no console the kernel can

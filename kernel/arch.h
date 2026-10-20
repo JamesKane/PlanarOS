@@ -159,4 +159,9 @@ bool arch_probe_read(uint64_t addr, uint64_t *val);
 /* Stop this CPU for good: interrupts off, wait forever. */
 [[noreturn]] void arch_halt(void);
 
+/* Reset the whole machine through the firmware (SBI SRST, PSCI
+ * SYSTEM_RESET), so a board can run its tests again unattended; halts if
+ * the firmware can't. */
+[[noreturn]] void arch_reboot(void);
+
 #endif /* KERNEL_ARCH_H */

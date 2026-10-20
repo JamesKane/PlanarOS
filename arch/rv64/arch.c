@@ -5,6 +5,7 @@
 #include "cpu.h"
 #include "fdt.h"
 #include "intc.h"
+#include "kprintf.h"
 #include "pmm.h"
 #include "riscv.h"
 #include "sbi.h"
@@ -180,6 +181,19 @@ void arch_irq_restore(unsigned long was)
 void arch_wait_for_interrupt(void)
 {
     __asm__ volatile("wfi" : : : "memory");
+}
+
+[[noreturn]] void arch_reboot(void)
+{
+    struct sbiret r;
+
+    if (!sbi_has(SBI_EXT_SRST)) {
+        kprintf("planar: reboot failed: the firmware has no SBI SRST\n");
+        arch_halt();
+    }
+    r = sbi_call(SBI_EXT_SRST, SBI_SRST_RESET, 1, 0, 0);    /* cold reboot */
+    kprintf("planar: reboot failed: SBI SRST returned %lld\n", (long long)r.error);
+    arch_halt();
 }
 
 [[noreturn]] void arch_halt(void)

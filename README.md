@@ -2,7 +2,7 @@
 
 A lightweight single-user OS for the 64-bit SBCs in the office. All processes share one flat address space. IPC is passing pointers in Amiga Exec style. Coprocessors are driven as "firmware as hardware". The starting point is *Design Specification for a Lightweight, Flat-Memory Operating System* (the "vision paper"). The design leans on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which have already proved a single address space and Exec-style IPC on the Orange Pi RV2.
 
-V0 is complete: one tree boots to a serial console on QEMU for both ISAs, and runs as a host process.
+V1 runs on QEMU (riscv64 and aarch64) and on the Orange Pi RV2. That means a single address space over protection domains, SMP scheduling, user processes, Areas in both memory layouts, and lazy FP and vector state. See [docs/v1-plan.md](docs/v1-plan.md). V2 (IPC) is next.
 
 ## One tree, every platform
 
@@ -16,6 +16,7 @@ The structure follows omega's:
 |---|---|---|
 | `qemu-virt-rv64` (default) | `rv64` | QEMU's riscv64 `virt` machine under OpenSBI, S-mode |
 | `qemu-virt-a64` | `aarch64` | QEMU's aarch64 `virt` machine, EL1. `QEMU_EL2=1` enters at EL2 to test the drop to EL1. |
+| `ky-x1` | `rv64` | Orange Pi RV2 (SpacemiT K1), booted over its serial console through U-Boot (`tools/serial-boot.py`) |
 | `hosted` | `host` | A host executable. It can be given a `.dtb` to parse. |
 
 Both QEMU platforms share `plat/qemu-virt/`. Everything V0 needs, including the console, comes from the device tree.

@@ -88,8 +88,12 @@ $(BUILD)/%.S.o: %.S
 
 -include $(OBJS:.o=.d)
 
+# Seconds a boot may take to reach EXPECT; a board over the serial
+# console needs minutes (mk/ky-x1.mk).
+BOOT_TIMEOUT ?= 20
+
 test: $(IMAGE)
-	python3 -I tools/boot-check.py --expect '$(EXPECT)' -- $(RUN_CMD)
+	python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' -- $(RUN_CMD)
 
 
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64

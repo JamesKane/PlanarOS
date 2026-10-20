@@ -1,6 +1,6 @@
 # VQ3 measurements: identity vs. global layout
 
-**Status: first data, from QEMU only. VQ3 stays open** until the same measurement has run on the RV2 and an Arm board (docs/v1-plan.md; the decision is due at V3).
+**Status: data from QEMU and the Orange Pi RV2. VQ3 stays open** until an Arm board has run it too (docs/v1-plan.md; the decision is due at V3).
 
 ## How it's measured
 
@@ -32,21 +32,36 @@ What it reports:
 | 1 GiB | aarch64 | identity | 0 of 3,511 | 170 µs | 236 MiB | 742 MiB | 19 |
 | 1 GiB | aarch64 | global | 0 of 3,511 | 154 µs | 236 MiB | 272 MiB | 21 |
 
-At 1 GiB the 1,024-Area cap stops the workload near 236 MiB (about 25% occupancy), so the 90% target isn't reached.
+At 1 GiB the 1,024-Area cap stops the workload near 236 MiB (about 25% occupancy), so the 90% target isn't reached. Since then, Area sizes scale with installed memory (one unit is `pmm_total / 65536` pages), so larger machines see the same pressure. QEMU at 256 MiB is unchanged by this, since its scale is 1.
+
+### Orange Pi RV2 (2026-10-19, 8 GiB in two ranges, 8 × X60 at 1.6 GHz, sizes × 32)
+
+| Run | Layout | Failed (memory free) | Time per alloc | Peak held | Largest free run after | Tables per process |
+|---|---|---|---|---|---|---|
+| 1 | identity | 6 of 3,514 (6) | 12.3 ms | 7,123 MiB | 211 MiB | 113 |
+| 1 | global | 0 of 3,511 | 12.6 ms | 7,418 MiB | 117 MiB | 122 |
+| 2 | identity | 6 of 3,514 (6) | 12.3 ms | 7,070 MiB | 180 MiB | 112 |
+| 2 | global | 0 of 3,511 | 12.6 ms | 7,418 MiB | 117 MiB | 122 |
+
+The board agrees with QEMU:
+- Identity fails about 0.17% of allocations needlessly near 90% occupancy, and reaches a lower peak.
+- Global leaves physical memory more fragmented (117 vs. 180–211 MiB largest free run).
+- Identity used about 8% *fewer* page-table pages, even with the K1's two RAM ranges. That's the opposite of what §3 below expected.
+- Allocation time is still mostly zero-filling. The kernel's `memset` works a byte at a time, so this number can't compare the allocators until the zero-fill is fixed.
 
 ## Reading
 
 1. **Identity fails needlessly under pressure.** At 90% occupancy, about 0.2% of allocations fail even though enough memory is free. Large Areas are the ones that fail, because each needs one run of free pages as long as itself. With low pressure (1 GiB), nothing fails.
 2. **Global fragments physical memory.** At 25% occupancy the global layout leaves the longest free run about 2.8× shorter than identity does (≈270 vs. ≈745 MiB). Its scattered pages break up exactly what later contiguous allocations need: DMA buffers, scanout, `AREAF_CONTIG`, kernel stacks. A buddy-style allocator that hands out contiguous pages when it can would reduce this. That's untested.
-3. **Page tables cost about the same.** Identity uses 15% fewer table pages here, because QEMU's RAM is one small contiguous range. On boards whose RAM spans several GiB (the K1: 2 GiB at 0 and 6 GiB at 4 GiB), identity Areas spread over more of the address space, and that will cost more tables. Measure on the board.
+3. **Page tables cost about the same.** Identity uses 8–15% fewer table pages, on QEMU and on the RV2 alike. I expected the K1's two RAM ranges (2 GiB at 0, 6 GiB at 4 GiB) to cost identity more tables; they didn't, at least with this workload.
 4. **Allocation time can't be compared yet.** Zero-filling dominates it under TCG, and both layouts zero the same pages. The board will show the allocators' own costs.
 5. **Not measured yet:**
    - TLB miss rates, and context-switch cost per layout (QEMU doesn't model TLBs).
    - The DMA savings of identity, where pointers need no translation. That has to wait for drivers.
    - Real programs. The workload is synthetic.
 
-## What the board runs need to add
+## Still to measure
 
-- The same `make vq3` workload on the RV2 (8 GiB, two RAM ranges) and on an Arm board.
+- The same workload on an Arm board (V3).
 - TLB-miss counters around a process touching its Areas, in each layout (omega's M4 instruments did this on the RV2).
-- The page-table count on hardware with RAM spread across ranges.
+- Allocation time without byte-wise zero-filling.

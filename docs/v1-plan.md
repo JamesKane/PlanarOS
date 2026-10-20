@@ -7,7 +7,24 @@
 - Context-switch and `Signal` costs are measured.
 - The VQ3 soak and cost data has been collected.
 
-Each step ends with `make test-all` green and a `V1.n done` line in the transcript. `make test-all` also boots AArch64 entered at EL2. The RV2 run comes at the end.
+Each step ends with `make test-all` green and a `V1.n done` line in the transcript. `make test-all` also boots AArch64 entered at EL2.
+
+**On the Orange Pi RV2 (2026-10-19): the whole V1 suite passes in both layouts.** That covers 8 harts, PLIC contexts from U-Boot's tree, the 24 MHz timebase, user mode, lazy vector state at VLEN 256, Areas, and VQ3 scaled to 8 GiB.
+
+The board runs unattended: `make PLATFORM=ky-x1 test LAYOUT=… BOOTARGS='reboot [vq3]'`.
+- The kernel takes over the SoC watchdog that U-Boot leaves running (`plat/ky-x1/wdt.c`, from the vendor driver's sequences).
+- A finished run resets the board through the watchdog. OpenSBI 1.3's SBI SRST hangs on this board.
+- A hung kernel is reset within a minute. `BOOTARGS=hang` checks that.
+
+First numbers on the board, X60 at 1.6 GHz:
+
+| Measurement | Result |
+|---|---|
+| Signal/Wait round trip, same CPU (two switches) | 1.46 µs, about 2,340 cycles (omega's `DoMsg`: 3,361) |
+| The same across CPUs | 6.6 µs |
+| Bare IPI round trip | 2.0 µs |
+| Higher-priority task preempting a busy CPU | 36 µs |
+| Killing 3 spinning tasks | gone in 73 µs |
 
 `make PLATFORM=... soak` boots a platform repeatedly and counts failures. Step 3 found a race that hung about one boot in 75: a self-test checked a flag and then executed `wfi` with interrupts on, so an interrupt landing in between left the CPU asleep. Waits now check with interrupts masked. After that, 300 RV64 boots and 400 AArch64 boots (EL1 and EL2) all passed.
 

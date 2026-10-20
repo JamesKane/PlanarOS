@@ -202,6 +202,11 @@ bool arch_probe_read(uint64_t, uint64_t *)
     return false;
 }
 
+[[noreturn]] void arch_reboot(void)
+{
+    arch_halt();
+}
+
 /* A halted host "CPU" is a finished process. */
 [[noreturn]] void arch_halt(void)
 {

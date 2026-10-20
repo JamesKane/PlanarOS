@@ -105,7 +105,7 @@ constexpr uint64_t PSCI_CPU_ON = 0xc4000003;    /* SMC64 */
  * the entry code has dropped from it), and smc to a firmware that may
  * not be there.
  */
-bool arch_cpu_start(struct cpu *c)
+static bool psci_ready(void)
 {
     static bool conduit_known;
 
@@ -122,6 +122,13 @@ bool arch_cpu_start(struct cpu *c)
         psci_smc = method[0] == 's';
         conduit_known = true;
     }
+    return true;
+}
+
+bool arch_cpu_start(struct cpu *c)
+{
+    if (!psci_ready())
+        return false;
     return psci_call(PSCI_CPU_ON, c->hwid, virt_to_phys(secondary_entry),
                      (uint64_t)(uintptr_t)c) == 0;
 }
@@ -291,6 +298,16 @@ void arch_irq_restore(unsigned long was)
 void arch_wait_for_interrupt(void)
 {
     __asm__ volatile("dsb sy\n\twfi" : : : "memory");
+}
+
+[[noreturn]] void arch_reboot(void)
+{
+    constexpr uint64_t PSCI_SYSTEM_RESET = 0x84000009;
+
+    if (psci_ready())
+        psci_call(PSCI_SYSTEM_RESET, 0, 0, 0);
+    kprintf("planar: reboot failed: PSCI SYSTEM_RESET returned\n");
+    arch_halt();
 }
 
 [[noreturn]] void arch_halt(void)
