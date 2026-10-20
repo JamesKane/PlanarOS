@@ -57,7 +57,7 @@ struct process {
     struct task *watcher;           /* signalled with watch_sig when dead */
     uint64_t watch_sig;
     uint64_t stack_base;            /* the first task's stack, for the overrun test */
-    atomic_uint_fast64_t calls;     /* kernel calls its tasks made */
+    atomic_uint_fast64_t calls_done;    /* kernel calls made by tasks that have left */
 };
 
 /* Load built-in program 'name' into a new process and start it at 'pri'
@@ -72,6 +72,9 @@ void process_kill(struct process *p);
 
 /* Free the record of a dead process. */
 void process_free(struct process *p);
+
+/* Kernel calls the process's tasks have made, for the self-tests. */
+uint64_t process_calls(struct process *p);
 
 /* Processes not yet freed, for leak checks. */
 unsigned process_count(void);

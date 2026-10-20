@@ -16,7 +16,7 @@
 constexpr unsigned ROUNDS = 2000;
 constexpr uint32_t SLOTS = 64;
 
-static void report(const char *what, uint64_t count, uint64_t cycles, uint64_t bad)
+static void report(const char *what, uint64_t count, const struct CycleSum *c, uint64_t bad)
 {
     struct logbuf b = { 0 };
 
@@ -24,8 +24,10 @@ static void report(const char *what, uint64_t count, uint64_t cycles, uint64_t b
     log_str(&b, ": ");
     log_num(&b, count);
     log_str(&b, ", ");
-    log_num(&b, count ? cycles / count : 0);
-    log_str(&b, " cycles each, ");
+    log_num(&b, CycleMean(c));
+    log_str(&b, " cycles each (");
+    log_num(&b, c->dropped);
+    log_str(&b, " moved CPU), ");
     log_num(&b, bad);
     log_str(&b, " bad");
     KLog(b.text);
@@ -34,22 +36,28 @@ static void report(const char *what, uint64_t count, uint64_t cycles, uint64_t b
 static uint64_t round_trips(struct MsgPort *mp)
 {
     struct EchoMsg *m = AllocMsg(mp, sizeof *m);
+    struct CycleSum put = { 0 }, domsg = { 0 };
     uint64_t c0, bad = 0;
 
     m->em_Msg.mn_Length = sizeof *m;
     m->em_Value = 0;
-    c0 = ReadCycles();
     for (unsigned i = 0; i < ROUNDS; i++) {
+        c0 = ReadCycles();
         PutMsg(mp, &m->em_Msg);
-        bad += WaitPort(mp) != &m->em_Msg || m->em_Value != i + 1;
+        bad += WaitPort(mp) != &m->em_Msg;
+        CycleAdd(&put, c0, ReadCycles());
+        bad += m->em_Value != i + 1;
     }
-    report("client: PutMsg/WaitPort round trips", ROUNDS, ReadCycles() - c0, bad);
+    report("client: PutMsg/WaitPort round trips", ROUNDS, &put, bad);
 
     m->em_Value = 0;
-    c0 = ReadCycles();
-    for (unsigned i = 0; i < ROUNDS; i++)
-        bad += DoMsg(mp, &m->em_Msg) != 0 || m->em_Value != i + 1;
-    report("client: DoMsg round trips", ROUNDS, ReadCycles() - c0, bad);
+    for (unsigned i = 0; i < ROUNDS; i++) {
+        c0 = ReadCycles();
+        bad += DoMsg(mp, &m->em_Msg) != 0;
+        CycleAdd(&domsg, c0, ReadCycles());
+        bad += m->em_Value != i + 1;
+    }
+    report("client: DoMsg round trips", ROUNDS, &domsg, bad);
     return bad;
 }
 
@@ -57,6 +65,7 @@ static uint64_t stream(struct MsgPort *mp, uint64_t total)
 {
     struct EchoMsg *m[SLOTS];
     uint64_t want[SLOTS], c0, sent = 0, done = 0, bad = 0;
+    struct CycleSum each = { 0 };
 
     for (unsigned i = 0; i < SLOTS; i++) {
         m[i] = AllocMsg(mp, sizeof *m[i]);
@@ -65,12 +74,15 @@ static uint64_t stream(struct MsgPort *mp, uint64_t total)
         m[i]->em_Value = (uint64_t)i << 32;
         want[i] = m[i]->em_Value + 1;
     }
-    c0 = ReadCycles();
     for (unsigned i = 0; i < SLOTS && sent < total; i++, sent++)
         PutMsg(mp, &m[i]->em_Msg);
+    c0 = ReadCycles();
     while (done < total) {
         struct EchoMsg *r = (struct EchoMsg *)WaitPort(mp);
-        uint64_t seq;
+        uint64_t seq, c1 = ReadCycles();
+
+        CycleAdd(&each, c0, c1);
+        c0 = c1;
 
         if (!r)
             return bad + total - done;
@@ -85,7 +97,7 @@ static uint64_t stream(struct MsgPort *mp, uint64_t total)
         if (sent < total && PutMsg(mp, &r->em_Msg) == 0)
             sent++;
     }
-    report("client: streamed", total, ReadCycles() - c0, bad);
+    report("client: streamed", total, &each, bad);
     return bad;
 }
 

@@ -5,6 +5,7 @@
 
 #include "arch.h"
 #include "area.h"
+#include "cpu.h"
 #include "handle.h"
 #include "kprintf.h"
 #include "port.h"
@@ -16,8 +17,6 @@ constexpr unsigned KLOG_MAX = 200;
 
 /* Signals a user task may not wait for, send or change: the kernel's. */
 constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL;
-
-static atomic_uint_fast64_t calls;
 
 bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
 {
@@ -76,9 +75,8 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
 {
     struct task *self = task_self();
 
-    atomic_fetch_add(&calls, 1);
-    if (self->process)
-        atomic_fetch_add_explicit(&self->process->calls, 1, memory_order_relaxed);
+    cpu_count(&this_cpu()->syscalls);
+    cpu_count(&self->calls);
     switch (nr) {
     case SYS_KLOG:
         return sys_klog(self, a[0]);
@@ -135,5 +133,9 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
 
 uint64_t syscall_count(void)
 {
-    return atomic_load(&calls);
+    uint64_t n = 0;
+
+    for (unsigned i = 0; i < ncpus; i++)
+        n += atomic_load_explicit(&cpus[i].syscalls, memory_order_relaxed);
+    return n;
 }

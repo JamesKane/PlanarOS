@@ -1155,10 +1155,10 @@ static void with_echo(const char *prog, uint64_t arg, uint64_t calls[2])
     if (!(echo = process_create("echo", 5, 0, task_self(), SIGF_DEAD)))
         fail("V2.2 echo", "process_create failed");
     task_sleep_until(time_now() + time_us(2000));       /* let it make its port */
-    before = atomic_load(&echo->calls);
+    before = process_calls(echo);
     client = run(prog, arg, 10000000);
-    calls[0] = atomic_load(&echo->calls) - before;
-    calls[1] = atomic_load(&client->calls);
+    calls[0] = process_calls(echo) - before;
+    calls[1] = process_calls(client);
     if (!atomic_load(&client->dead) || client->fault != FAULT_NONE || client->exit_code != 0) {
         kprintf("V2.2 echo: client exit %lld\n", (long long)client->exit_code);
         fail("V2.2 echo", "the client failed");
@@ -1241,7 +1241,7 @@ static bool wait_reply(uint64_t us)
 /* Wake 't' with a handoff and wait for its answer, as SignalWaitConn does. */
 static bool post_and_wait(struct task *t, uint64_t us)
 {
-    struct cpu *c = task_post(t, SIGF_TEST, true);
+    struct cpu *c = task_post(t, SIGF_TEST, POST_HANDOFF | POST_LEND);
     bool ok;
 
     if (c && c != this_cpu())
@@ -1303,7 +1303,7 @@ static void test_handoff(void)
     unsigned long was = arch_irq_save();
     uint64_t before = atomic_load(&spin_counts[1]);
     atomic_store(&server_pri, 0);
-    task_post(server, SIGF_TEST, true);
+    task_post(server, SIGF_TEST, POST_HANDOFF | POST_LEND);
     task_wait(SIGF_REPLY);
     arch_irq_restore(was);
     bool first = atomic_load(&server_saw) == before;
@@ -1315,6 +1315,47 @@ static void test_handoff(void)
             "it ran past a hog at 5 and ahead of a peer at 10, and went back to 1\n");
 }
 
+/* What the kernel's own building blocks cost on this CPU, to read the
+ * round trip's cost against. */
+static void pieces(void)
+{
+    constexpr unsigned N = 10000;
+    static spinlock_t l;
+    static atomic_uint_fast64_t a;
+    _Atomic uint64_t n = 0;
+    uint64_t c0, lock, amo, irq, store, yield;
+    unsigned long was = arch_irq_save();
+
+    c0 = arch_read_cycles();
+    for (unsigned i = 0; i < N; i++) {
+        unsigned long w = spin_lock_irqsave(&l);
+        spin_unlock_irqrestore(&l, w);
+    }
+    lock = arch_read_cycles() - c0;
+    c0 = arch_read_cycles();
+    for (unsigned i = 0; i < N; i++)
+        atomic_fetch_add(&a, 1);
+    amo = arch_read_cycles() - c0;
+    c0 = arch_read_cycles();
+    for (unsigned i = 0; i < N; i++)
+        arch_irq_restore(arch_irq_save());
+    irq = arch_read_cycles() - c0;
+    c0 = arch_read_cycles();
+    for (unsigned i = 0; i < N; i++)
+        cpu_count(&n);
+    store = arch_read_cycles() - c0;
+    arch_irq_restore(was);
+    c0 = arch_read_cycles();
+    for (unsigned i = 0; i < N; i++)
+        task_yield();       /* nothing else ready here: picks itself */
+    yield = arch_read_cycles() - c0;
+    kprintf("V2.3 pieces: cycles for a lock and unlock %llu, an atomic add %llu, "
+            "interrupts off and on %llu, a per-CPU count %llu, schedule() to itself %llu\n",
+            (unsigned long long)(lock / N), (unsigned long long)(amo / N),
+            (unsigned long long)(irq / N), (unsigned long long)(store / N),
+            (unsigned long long)(yield / N));
+}
+
 void selftest_domsg(void)
 {
     uint64_t calls[2], before, start, ns;
@@ -1324,6 +1365,8 @@ void selftest_domsg(void)
         kprintf("V2.3 domsg skipped: no user programs\n");
         return;
     }
+    pieces();
+    expect_exit("bench", 0);
     before = sched_handoffs();
     start = time_now();
     with_echo("pingpong", 0, calls);

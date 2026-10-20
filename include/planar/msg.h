@@ -36,6 +36,7 @@ struct MsgPort {
     uint64_t mp_HeapLo, mp_HeapHi;  /* where messages may lie */
     uint64_t mp_HeapNext;           /* AllocMsg's next byte */
     bool mp_Broken;
+    bool mp_Owed;                   /* ReplyMsgLater held back a signal */
     struct Message *mp_Stash;       /* replies DoMsg set aside, oldest first */
 };
 
@@ -59,6 +60,12 @@ void *AllocMsg(struct MsgPort *mp, uint64_t size);
 int64_t PutMsg(struct MsgPort *mp, struct Message *m);
 int64_t ReplyMsg(struct MsgPort *mp, struct Message *m);
 
+/* ReplyMsg, except that a signal the reply owes the peer waits for
+ * FlushPort or WaitPorts: a server that answers a batch and then sleeps
+ * makes one kernel call for both. */
+int64_t ReplyMsgLater(struct MsgPort *mp, struct Message *m);
+void FlushPort(struct MsgPort *mp);
+
 /* The next message or reply, or nullptr if there's none (yet). */
 struct Message *GetMsg(struct MsgPort *mp);
 
@@ -70,6 +77,15 @@ struct Message *WaitPort(struct MsgPort *mp);
  * sleep. True if it's empty and the task may Wait; false if something
  * came in meanwhile (or the peer went), and it should look again. */
 bool ArmPort(struct MsgPort *mp);
+
+/*
+ * For a server: sleep until any of the 'n' ports has something or a
+ * signal in 'mask' comes, first sending the signals ReplyMsgLater held
+ * back (the last of them in the same kernel call as the sleep, which
+ * hands the CPU to that client). Returns the signals that woke it, or 0
+ * if something came in before it could sleep: look again.
+ */
+uint64_t WaitPorts(struct MsgPort *ports, unsigned n, uint64_t mask);
 
 /* The peer has gone, or the connection broke. */
 bool PortGone(const struct MsgPort *mp);

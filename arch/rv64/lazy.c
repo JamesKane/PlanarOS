@@ -35,7 +35,6 @@ void riscv_vec_save(uint64_t *area);
 void riscv_vec_load(const uint64_t *area);
 
 static uint64_t vlenb;                          /* 0 without V */
-static atomic_uint_fast64_t first_uses, loads, saves, reuses;
 
 /* The vector area holds 4 CSR words and 32 registers; it must fit the page. */
 void riscv_lazy_init(uint64_t hart_vlenb)
@@ -124,7 +123,7 @@ bool riscv_lazy_first_use(uint64_t *sstatus, uint32_t insn, struct arch_context 
         if (!page)
             return false;
         ctx->lazy = phys_to_virt(page);
-        atomic_fetch_add(&first_uses, 1);
+        cpu_count(&this_cpu()->arch.first_uses);
     }
     if (kind == EXT_FP) {
         if (*sstatus & SSTATUS_FS)
@@ -146,7 +145,7 @@ bool riscv_lazy_first_use(uint64_t *sstatus, uint32_t insn, struct arch_context 
         *sstatus |= SSTATUS_VS_CLEAN;
     }
     ctx->lazy_cpu = (int)c->index;
-    atomic_fetch_add(&loads, 1);
+    cpu_count(&this_cpu()->arch.loads);
     return true;
 }
 
@@ -159,14 +158,14 @@ void arch_switch_out(struct arch_context *ctx)
         riscv_fp_save(ctx->lazy);
         __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_FS) : "memory");
         a->fp_dirty = false;
-        atomic_fetch_add(&saves, 1);
+        cpu_count(&this_cpu()->arch.saves);
     }
     if (a->vec_owner == ctx && a->vec_dirty) {
         __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_VS_CLEAN) : "memory");
         riscv_vec_save(ctx->lazy + VEC_OFFSET);
         __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_VS_MASK) : "memory");
         a->vec_dirty = false;
-        atomic_fetch_add(&saves, 1);
+        cpu_count(&this_cpu()->arch.saves);
     }
 }
 
@@ -174,7 +173,7 @@ void arch_switch_out(struct arch_context *ctx)
 void riscv_lazy_note_reuse(uint64_t sstatus)
 {
     if (sstatus & (SSTATUS_FS | SSTATUS_VS_MASK))
-        atomic_fetch_add(&reuses, 1);
+        cpu_count(&this_cpu()->arch.reuses);
 }
 
 /* Another hart's owner pointer may still name 'ctx', but lazy_cpu is
@@ -194,8 +193,11 @@ void arch_context_free(struct arch_context *ctx)
 
 void arch_lazy_counts(struct arch_lazy_counts *c)
 {
-    *c = (struct arch_lazy_counts){
-        .first_uses = atomic_load(&first_uses), .loads = atomic_load(&loads),
-        .saves = atomic_load(&saves), .reuses = atomic_load(&reuses),
-    };
+    *c = (struct arch_lazy_counts){ 0 };
+    for (unsigned i = 0; i < ncpus; i++) {
+        c->first_uses += atomic_load_explicit(&cpus[i].arch.first_uses, memory_order_relaxed);
+        c->loads += atomic_load_explicit(&cpus[i].arch.loads, memory_order_relaxed);
+        c->saves += atomic_load_explicit(&cpus[i].arch.saves, memory_order_relaxed);
+        c->reuses += atomic_load_explicit(&cpus[i].arch.reuses, memory_order_relaxed);
+    }
 }

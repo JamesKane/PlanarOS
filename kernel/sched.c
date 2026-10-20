@@ -103,27 +103,36 @@ static struct task *dequeue_top(struct cpu *c)
     return t;
 }
 
-/* --- The quantum: on only while a peer of the running task waits. --- */
+/*
+ * --- The quantum: started when a peer of the running task waits. ---
+ * It isn't stopped when the peers go: it lapses, and its end is ignored
+ * if nobody is waiting by then. Starting and stopping a timer on every
+ * switch cost more than a DoMsg round trip can spare, and a server and
+ * its client are peers half the time.
+ */
+
+static bool peers_waiting(struct cpu *c)
+{
+    return c->current != c->idle && top_level(c) >= (int)level(c->current->pri);
+}
 
 static void quantum_fire(void *)
 {
     struct cpu *c = this_cpu();
 
+    spin_lock(&c->rq_lock);
     c->quantum_on = false;
-    atomic_store(&c->need_resched, true);
+    if (peers_waiting(c))
+        atomic_store(&c->need_resched, true);
+    spin_unlock(&c->rq_lock);
 }
 
-/* rq_lock held. Starts or stops this CPU's quantum timer. */
+/* rq_lock held. Starts this CPU's quantum if a peer waits. */
 static void quantum_update(struct cpu *c)
 {
-    bool peers = c->current != c->idle && top_level(c) >= (int)level(c->current->pri);
-
-    if (peers && !c->quantum_on) {
+    if (!c->quantum_on && peers_waiting(c)) {
         c->quantum_on = true;
         ktimer_start(&c->quantum, time_now() + time_us(TASK_QUANTUM_US));
-    } else if (!peers && c->quantum_on) {
-        c->quantum_on = false;
-        ktimer_stop(&c->quantum);
     }
 }
 
@@ -556,7 +565,7 @@ uint64_t task_wait(uint64_t mask)
     }
 }
 
-struct cpu *task_post(struct task *t, uint64_t mask, bool handoff)
+struct cpu *task_post(struct task *t, uint64_t mask, unsigned how)
 {
     unsigned long was = spin_lock_irqsave(&t->lock);
     struct cpu *self = this_cpu(), *c = nullptr;
@@ -570,7 +579,8 @@ struct cpu *task_post(struct task *t, uint64_t mask, bool handoff)
         if (t->state == TASK_WAITING) {
             t->sig_waiting = 0;
             t->state = TASK_READY;
-            if (handoff && !t->on_rq && (t->affinity & bit(self)) && me != self->idle) {
+            if ((how & POST_HANDOFF) && !t->on_rq && (t->affinity & bit(self)) &&
+                me != self->idle) {
                 /* Here, next: the caller is about to wait for it. Its
                  * state keeps everyone else off while it moves (they
                  * take t->lock first anyway). */
@@ -579,7 +589,7 @@ struct cpu *task_post(struct task *t, uint64_t mask, bool handoff)
                     c = self;
                     spin_lock(&c->rq_lock);
                 }
-                if (t->pri < me->pri)
+                if ((how & POST_LEND) && t->pri < me->pri)
                     t->pri = me->pri;   /* lent until it next signals or waits */
                 enqueue_head(c, t);
                 atomic_fetch_add_explicit(&handoffs, 1, memory_order_relaxed);
@@ -596,7 +606,7 @@ struct cpu *task_post(struct task *t, uint64_t mask, bool handoff)
 
 void task_signal(struct task *t, uint64_t mask)
 {
-    struct cpu *c = task_post(t, mask, false);
+    struct cpu *c = task_post(t, mask, 0);
 
     if (c)
         sched_kick(c);

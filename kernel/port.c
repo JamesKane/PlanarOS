@@ -67,7 +67,7 @@ unsigned ipc_count(void)
 
 static void post(struct task *t, uint64_t sig, uint64_t *kicks)
 {
-    struct cpu *c = task_post(t, sig, false);
+    struct cpu *c = task_post(t, sig, 0);
 
     if (c)
         *kicks |= 1ULL << c->index;
@@ -410,8 +410,11 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
     was = spin_lock_irqsave(&lock);
     if ((e = end_of(h))) {
         peer = &e->conn->end[e == &e->conn->end[CLIENT] ? SERVER : CLIENT];
+        /* A client waiting on its server lends it priority; a server
+         * waking its client on the way to sleep only hands over. */
         if (peer->open)
-            c = task_post(peer->task, peer->sig, true);
+            c = task_post(peer->task, peer->sig,
+                          POST_HANDOFF | (e == &e->conn->end[CLIENT] ? POST_LEND : 0));
         else if (!e->conn->port)
             peer = nullptr;         /* gone: don't wait for it */
     }

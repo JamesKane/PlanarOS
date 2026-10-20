@@ -189,6 +189,49 @@ int64_t ReplyMsg(struct MsgPort *mp, struct Message *m)
     return PutMsg(mp, m);
 }
 
+int64_t ReplyMsgLater(struct MsgPort *mp, struct Message *m)
+{
+    bool asleep;
+    int64_t err = put(mp, m, &asleep);
+
+    mp->mp_Owed |= asleep;
+    return err;
+}
+
+void FlushPort(struct MsgPort *mp)
+{
+    if (mp->mp_Owed) {
+        mp->mp_Owed = false;
+        SignalConn(mp->mp_Conn);
+    }
+}
+
+uint64_t WaitPorts(struct MsgPort *ports, unsigned n, uint64_t mask)
+{
+    struct MsgPort *last = nullptr;
+    bool sleep = true;
+
+    for (unsigned i = 0; i < n && sleep; i++)
+        sleep = ArmPort(&ports[i]);
+    for (unsigned i = 0; i < n; i++) {
+        if (!ports[i].mp_Owed)
+            continue;
+        if (last)
+            FlushPort(last);
+        last = &ports[i];
+    }
+    if (!sleep) {
+        if (last)
+            FlushPort(last);
+        return 0;
+    }
+    if (last) {
+        last->mp_Owed = false;
+        return SignalWaitConn(last->mp_Conn, mask);
+    }
+    return Wait(mask);
+}
+
 struct Message *GetMsg(struct MsgPort *mp)
 {
     struct Message *m = mp->mp_Stash;

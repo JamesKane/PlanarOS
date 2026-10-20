@@ -21,6 +21,14 @@ constexpr unsigned MAX_CPUS = 16;
 struct cpu_call;
 struct task;
 
+/* One more in a statistic only one CPU (or task) writes and others may
+ * read: no atomic read-modify-write, which costs on every CPU. */
+static inline void cpu_count(_Atomic uint64_t *n)
+{
+    atomic_store_explicit(n, atomic_load_explicit(n, memory_order_relaxed) + 1,
+                          memory_order_relaxed);
+}
+
 struct cpu {
     uintptr_t stack_top;        /* first: the secondary entry code loads it */
     unsigned index;
@@ -34,6 +42,7 @@ struct cpu {
     spinlock_t call_lock;       /* cross-CPU calls waiting to run here */
     struct cpu_call *calls;
     atomic_uint_fast64_t ipis;  /* IPIs taken */
+    _Atomic uint64_t syscalls;  /* kernel calls made here (cpu_count) */
 
     /* The run queue (kernel/sched.c): one FIFO per priority, and a bit
      * per non-empty one. */

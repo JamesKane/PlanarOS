@@ -18,7 +18,8 @@ int main(void)
     struct EchoMsg *m;
     struct logbuf b = { 0 };
     int64_t sig = AllocSignal(-1), err;
-    uint64_t c0, cycles, bad = 0;
+    struct CycleSum each = { 0 };
+    uint64_t c0, bad = 0;
 
     while ((err = ConnectPort(&mp, "echo", sig, 0, 0)) == ERR_NOTFOUND)
         ;
@@ -28,15 +29,19 @@ int main(void)
     m->em_Value = 0;
     DoMsg(&mp, &m->em_Msg);         /* the server accepts, and settles */
     m->em_Value = 0;
-    c0 = ReadCycles();
-    for (unsigned i = 0; i < ROUNDS; i++)
-        bad += DoMsg(&mp, &m->em_Msg) != 0 || m->em_Value != i + 1;
-    cycles = ReadCycles() - c0;
+    for (unsigned i = 0; i < ROUNDS; i++) {
+        c0 = ReadCycles();
+        bad += DoMsg(&mp, &m->em_Msg) != 0;
+        CycleAdd(&each, c0, ReadCycles());
+        bad += m->em_Value != i + 1;
+    }
     log_str(&b, "pingpong: ");
     log_num(&b, ROUNDS);
     log_str(&b, " DoMsg round trips, ");
-    log_num(&b, cycles / ROUNDS);
-    log_str(&b, " cycles each");
+    log_num(&b, CycleMean(&each));
+    log_str(&b, " cycles each (");
+    log_num(&b, each.dropped);
+    log_str(&b, " moved CPU)");
     KLog(b.text);
     return (int)bad;
 }

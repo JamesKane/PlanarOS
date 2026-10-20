@@ -194,6 +194,7 @@ static void kill_tasks(struct process *p, struct task *except)
     for (pp = &p->tasks; *pp != self; pp = &(*pp)->next_in_proc)
         ;
     *pp = self->next_in_proc;
+    atomic_fetch_add(&p->calls_done, atomic_load(&self->calls));
     spin_unlock_irqrestore(&p->lock, was);
     handle_free(self->handle);
     /* Its stack goes now, unless it's the last task: then the whole
@@ -299,6 +300,17 @@ void process_free(struct process *p)
 {
     pmm_free(virt_to_phys(p));
     atomic_fetch_sub(&live_records, 1);
+}
+
+uint64_t process_calls(struct process *p)
+{
+    unsigned long was = spin_lock_irqsave(&p->lock);
+    uint64_t n = atomic_load(&p->calls_done);
+
+    for (struct task *t = p->tasks; t; t = t->next_in_proc)
+        n += atomic_load_explicit(&t->calls, memory_order_relaxed);
+    spin_unlock_irqrestore(&p->lock, was);
+    return n;
 }
 
 unsigned process_count(void)

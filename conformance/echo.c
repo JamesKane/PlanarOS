@@ -3,8 +3,9 @@
  *
  * Serves the port "echo", up to MAX_CLIENTS connections at once, until
  * it's killed. It sleeps only when every connection is empty, so a busy
- * stream of messages costs it no kernel calls; and it looks for new
- * connections only when the port's signal says one has come. From
+ * stream of messages costs it no kernel calls; it wakes the clients it
+ * answered as it goes to sleep, in the same kernel call; and it looks
+ * for new connections only when the port's signal says one has come. From
  * omega's conformance/echo.c, over connections.
  */
 #include "echo.h"
@@ -24,8 +25,6 @@ int main(void)
         return 1;
     }
     for (;;) {
-        bool sleep = true;
-
         if (got & (1ULL << psig))
             while (n < MAX_CLIENTS && AcceptPort(&clients[n], (Handle)port, csig) == 0)
                 n++;
@@ -35,7 +34,7 @@ int main(void)
 
             while ((m = GetMsg(mp))) {
                 ((struct EchoMsg *)m)->em_Value++;
-                if (ReplyMsg(mp, m) < 0)
+                if (ReplyMsgLater(mp, m) < 0)
                     break;      /* gone, or a client overfilling its replies */
             }
             if (PortGone(mp) || m) {
@@ -43,8 +42,6 @@ int main(void)
                 clients[i--] = clients[--n];
             }
         }
-        for (unsigned i = 0; i < n && sleep; i++)
-            sleep = ArmPort(&clients[i]);
-        got = sleep ? Wait(1ULL << psig | 1ULL << csig) : 0;
+        got = WaitPorts(clients, n, 1ULL << psig | 1ULL << csig);
     }
 }

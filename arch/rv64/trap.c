@@ -105,7 +105,7 @@ static void kernel_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
 void trap_handler(struct trap_frame *f)
 {
     uint64_t scause = csr_read_scause();
-    uint64_t stval = csr_read_stval();
+    uint64_t stval = scause == CAUSE_ECALL_U ? 0 : csr_read_stval();     /* CSRs cost */
     bool from_user = !(f->sstatus & SSTATUS_SPP);
 
     if (from_user)

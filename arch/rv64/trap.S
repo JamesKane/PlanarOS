@@ -33,18 +33,17 @@ trap_entry:
     .endr
     addi    t0, sp, FRAME_SIZE      /* the kernel sp at the time of the trap */
     sd      t0, 2*8(sp)
-    j       saved
+    j       saved                   /* sscratch is 0 again already */
 from_user:
     addi    sp, sp, -FRAME_SIZE
     sd      x1, 1*8(sp)
     .irp    n, 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
     sd      x\n, \n*8(sp)
     .endr
-    csrr    t0, sscratch
-    sd      t0, 2*8(sp)             /* the user sp */
+    csrrw   t0, sscratch, zero      /* the user sp; the kernel runs with 0 there */
+    sd      t0, 2*8(sp)
     ld      tp, FRAME_SIZE(sp)      /* this CPU, from the slot */
 saved:
-    csrw    sscratch, zero
     csrr    t0, sepc
     sd      t0, 32*8(sp)
     csrr    t0, sstatus

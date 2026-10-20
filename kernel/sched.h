@@ -84,6 +84,7 @@ struct task {
     atomic_bool killed;             /* stop at the next return to user mode */
     uint64_t user_pc, user_sp, user_arg[2];
     uint64_t sig_alloc;             /* AllocSignal's bits */
+    _Atomic uint64_t calls;         /* kernel calls it made (cpu_count) */
 };
 
 /* Make the code running on this CPU its idle task. Each CPU, once,
@@ -125,12 +126,16 @@ void task_signal(struct task *t, uint64_t mask);
  * task_signal() for a caller that holds a lock: signals 't' and returns
  * the CPU to pass to sched_kick() once the lock is let go, or nullptr.
  * (task_signal() inside a lock works too, but a switch it calls for on
- * this CPU waits for an IPI to itself.) With 'handoff', a task this
+ * this CPU waits for an IPI to itself.) With POST_HANDOFF, a task this
  * wakes that may run on this CPU goes to the front of this CPU's queue,
- * at the caller's priority if that's higher, so the caller's next wait
- * switches straight to it (docs/v2-plan.md).
+ * so the caller's next wait switches straight to it; with POST_LEND as
+ * well, it runs at the caller's priority if that's higher, until it next
+ * signals or waits (docs/v2-plan.md).
  */
-struct cpu *task_post(struct task *t, uint64_t mask, bool handoff);
+constexpr unsigned POST_HANDOFF = 1u << 0;
+constexpr unsigned POST_LEND = 1u << 1;
+
+struct cpu *task_post(struct task *t, uint64_t mask, unsigned how);
 void sched_kick(struct cpu *c);
 
 /* Exec's SetSignal: set the bits of 'mask' to those of 'bits'; returns

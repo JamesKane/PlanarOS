@@ -41,6 +41,7 @@ struct arch_context {
 struct arch_cpu {
     struct arch_context *fp_owner;
     bool fp_dirty;
+    _Atomic uint64_t first_uses, loads, saves, reuses;  /* this CPU's alone writes */
 };
 
 /* A protection domain: a TTBR0 table (4 levels, 48 bits) and its ASID. */

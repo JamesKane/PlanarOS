@@ -24,7 +24,6 @@ constexpr uint64_t CPACR_FPEN = 3ULL << 20;
 void aarch64_fp_save(uint64_t *area);
 void aarch64_fp_load(const uint64_t *area);
 
-static atomic_uint_fast64_t first_uses, loads, saves, reuses;
 
 static void fp_access(bool on)
 {
@@ -49,7 +48,7 @@ void aarch64_lazy_return(struct arch_context *ctx)
     fp_access(ours);
     if (ours) {
         this_cpu()->arch.fp_dirty = true;   /* no dirty bit: assume a write */
-        atomic_fetch_add(&reuses, 1);
+        cpu_count(&this_cpu()->arch.reuses);
     }
 }
 
@@ -64,14 +63,14 @@ bool aarch64_lazy_first_use(struct arch_context *ctx)
         if (!page)
             return false;
         ctx->lazy = phys_to_virt(page);
-        atomic_fetch_add(&first_uses, 1);
+        cpu_count(&this_cpu()->arch.first_uses);
     }
     fp_access(true);
     aarch64_fp_load(ctx->lazy);
     c->arch.fp_owner = ctx;
     c->arch.fp_dirty = true;
     ctx->lazy_cpu = (int)c->index;
-    atomic_fetch_add(&loads, 1);
+    cpu_count(&this_cpu()->arch.loads);
     return true;
 }
 
@@ -83,7 +82,7 @@ void arch_switch_out(struct arch_context *ctx)
         fp_access(true);
         aarch64_fp_save(ctx->lazy);
         a->fp_dirty = false;
-        atomic_fetch_add(&saves, 1);
+        cpu_count(&this_cpu()->arch.saves);
     }
     fp_access(false);
 }
@@ -101,8 +100,11 @@ void arch_context_free(struct arch_context *ctx)
 
 void arch_lazy_counts(struct arch_lazy_counts *c)
 {
-    *c = (struct arch_lazy_counts){
-        .first_uses = atomic_load(&first_uses), .loads = atomic_load(&loads),
-        .saves = atomic_load(&saves), .reuses = atomic_load(&reuses),
-    };
+    *c = (struct arch_lazy_counts){ 0 };
+    for (unsigned i = 0; i < ncpus; i++) {
+        c->first_uses += atomic_load_explicit(&cpus[i].arch.first_uses, memory_order_relaxed);
+        c->loads += atomic_load_explicit(&cpus[i].arch.loads, memory_order_relaxed);
+        c->saves += atomic_load_explicit(&cpus[i].arch.saves, memory_order_relaxed);
+        c->reuses += atomic_load_explicit(&cpus[i].arch.reuses, memory_order_relaxed);
+    }
 }

@@ -44,6 +44,7 @@ struct arch_context {
 struct arch_cpu {
     struct arch_context *fp_owner, *vec_owner;
     bool fp_dirty, vec_dirty;
+    _Atomic uint64_t first_uses, loads, saves, reuses;  /* this CPU's alone writes */
 };
 
 /* A protection domain: an Sv39 root table and its ASID. */
