@@ -83,7 +83,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 14. [OpenType and TrueType font engine](docs/14-font-engine.md): clean-room `font.library` from the spec for English layouts, stubbed non-English/colour features, and host-side FreeType/HarfBuzz test oracle (proposed).
 15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
-17. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes).
+17. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers; proposed).
 18. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
 19. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
 20. [Open questions](docs/questions.md): the question register.
@@ -108,4 +108,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V4, the hardware model, drivers and servers ([roadmap](docs/08-roadmap.md)): boot from storage to a shell on the framebuffer, on the RV2 and the CIX.
+Next: V4, the hardware model, drivers and servers ([plan](docs/v4-plan.md), proposed): boot from storage to a shell on the framebuffer, on the RV2 and the CIX.
