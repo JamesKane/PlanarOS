@@ -11,4 +11,9 @@ static inline struct cpu *this_cpu(void)
     return &cpus[0];
 }
 
+static inline struct task *arch_current(void)
+{
+    return cpus[0].current;
+}
+
 #endif /* PLANAR_ARCH_CPU_H */

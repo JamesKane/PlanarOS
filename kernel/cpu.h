@@ -31,6 +31,7 @@ static inline void cpu_count(_Atomic uint64_t *n)
 
 struct cpu {
     uintptr_t stack_top;        /* first: the secondary entry code loads it */
+    struct task *current, *idle;    /* near the start: arch_current() loads it in one go */
     unsigned index;
     uint64_t hwid;              /* hart ID, or MPIDR Aff2.Aff1.Aff0 */
     int32_t node;               /* its /cpus node */
@@ -50,7 +51,6 @@ struct cpu {
     uint64_t rq_bits[4];
     struct task *rq_head[256], *rq_tail[256];
     unsigned nr_ready;
-    struct task *current, *idle;
     struct task *switched_from; /* for finish_switch, across arch_switch */
     unsigned irq_depth;
     atomic_bool need_resched;   /* set by a wakeup or the quantum */
@@ -63,6 +63,7 @@ struct cpu {
 };
 
 static_assert(offsetof(struct cpu, stack_top) == 0, "entry code reads stack_top at 0");
+static_assert(offsetof(struct cpu, current) < 2048, "arch_current() needs a short offset");
 
 extern struct cpu cpus[MAX_CPUS];
 extern unsigned ncpus;

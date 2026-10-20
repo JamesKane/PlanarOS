@@ -142,9 +142,9 @@ static void quantum_update(struct cpu *c)
  * Returns whether 'c' must be interrupted to notice.
  */
 /*
- * 't' is ready on 'c' (rq_lock held) but 'c' won't run it now: wake an
- * idle CPU it may run on, which steals it (review H7). There's no tick,
- * so an idle CPU nobody interrupts never looks.
+ * 't' is ready on 'c' (rq_lock held) behind something of higher
+ * priority: wake an idle CPU it may run on, which steals it (review H7).
+ * There's no tick, so an idle CPU nobody interrupts never looks.
  */
 static void nudge_idle(struct cpu *c, struct task *t)
 {
@@ -167,7 +167,10 @@ static bool wake_check_how(struct cpu *c, struct task *t, bool nudge)
         atomic_store(&c->need_resched, true);
         return true;
     }
-    if (nudge)
+    /* Below what runs there it might wait for ever: an idle CPU takes
+     * it. A peer gets its turn within a quantum, and moving it would
+     * cost more than the wait. */
+    if (nudge && t->pri < cur)
         nudge_idle(c, t);
     if (t->pri == cur) {
         atomic_store(&c->quantum_check, true);
@@ -295,8 +298,8 @@ void schedule(void)
     next = dequeue_top(c);
     if (!next)
         next = c->idle;
-    else if (next != prev && prev->state == TASK_READY && prev->on_rq)
-        nudge_idle(c, prev);        /* preempted: someone idle may take it */
+    else if (next != prev && prev->state == TASK_READY && prev->on_rq && next->pri > prev->pri)
+        nudge_idle(c, prev);        /* preempted by a higher one: someone idle may take it */
     next->state = TASK_RUNNING;
     c->current = next;
     quantum_update(c);
@@ -487,16 +490,12 @@ struct task *task_create(const char *name, int pri, uint64_t affinity,
         ;                               /* never resumed */
 }
 
-/* With interrupts held off: preempted between finding this CPU and
+/* Never this_cpu()->current: preempted between finding this CPU and
  * reading its current task, a task moved elsewhere would read another
- * CPU's (review M9). */
+ * CPU's (review M9). arch_current() reads it in one go. */
 struct task *task_self(void)
 {
-    unsigned long was = arch_irq_save();
-    struct task *t = this_cpu()->current;
-
-    arch_irq_restore(was);
-    return t;
+    return arch_current();
 }
 
 void task_set_affinity(uint64_t affinity)
