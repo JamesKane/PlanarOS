@@ -225,6 +225,7 @@ static void kill_tasks(struct process *p, struct task *except)
     struct task **pp;
 
     ipc_task_gone(self);        /* its ports and connections close */
+    ktimer_stop(&self->alarm);
     was = spin_lock_irqsave(&p->lock);
     for (pp = &p->tasks; *pp != self; pp = &(*pp)->next_in_proc)
         ;

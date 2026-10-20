@@ -100,4 +100,13 @@ int64_t KillProcess(Handle process);
 int64_t QueryProcess(Handle process, struct ProcessInfo *info);
 int64_t CloseHandle(Handle handle);
 
+/*
+ * Time. CurrentTime is nanoseconds since boot. ArmTimer is the calling
+ * task's one alarm: signal 'sigbit' once CurrentTime reaches
+ * 'deadline' (at once if it has), replacing any alarm armed before; a
+ * deadline of 0 disarms it.
+ */
+uint64_t CurrentTime(void);
+int64_t ArmTimer(uint64_t deadline, int64_t sigbit);
+
 #endif /* PLANAR_EXEC_H */

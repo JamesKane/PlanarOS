@@ -36,6 +36,8 @@
 #define SYS_KILL_PROCESS    26
 #define SYS_QUERY_PROCESS   27
 #define SYS_CLOSE_HANDLE    28
+#define SYS_CURRENT_TIME    29
+#define SYS_ARM_TIMER       30
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

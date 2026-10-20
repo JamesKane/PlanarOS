@@ -136,6 +136,28 @@ static int64_t sys_alloc_signal(struct task *t, int64_t bit)
     return bit;
 }
 
+static void alarm_fire(void *data)
+{
+    struct task *t = data;
+
+    task_signal(t, t->alarm_sig);
+}
+
+static int64_t sys_arm_timer(struct task *self, uint64_t deadline, int64_t sigbit)
+{
+    if (!time_have_timers())
+        return ERR_NOSYS;
+    ktimer_stop(&self->alarm);
+    if (deadline == 0)
+        return 0;
+    if (!syscall_sigbit(sigbit))
+        return ERR_BADARG;
+    self->alarm = (struct ktimer){ .fn = alarm_fire, .data = self };
+    self->alarm_sig = 1ULL << sigbit;
+    ktimer_start(&self->alarm, time_from_ns(deadline));
+    return 0;
+}
+
 /* CloseHandle: for the handles that have no call of their own. Tasks,
  * Areas, ports and connections are let go by ExitTask, FreeArea,
  * DeletePort and CloseConn. */
@@ -215,6 +237,10 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return process_query_call((uint32_t)a[0], a[1]);
     case SYS_CLOSE_HANDLE:
         return sys_close_handle(self, (Handle)a[0]);
+    case SYS_CURRENT_TIME:
+        return (int64_t)time_ns(time_now());
+    case SYS_ARM_TIMER:
+        return sys_arm_timer(self, a[0], (int64_t)a[1]);
     default:
         return ERR_NOSYS;
     }

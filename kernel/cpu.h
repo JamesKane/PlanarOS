@@ -41,6 +41,7 @@ struct cpu {
 
     spinlock_t timer_lock;      /* kernel timers armed on this CPU */
     struct ktimer *timers;
+    struct ktimer *_Atomic timer_running;  /* whose handler runs now */
 
     spinlock_t call_lock;       /* cross-CPU calls waiting to run here */
     struct cpu_call *calls;

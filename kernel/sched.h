@@ -73,6 +73,8 @@ struct task {
     void *data;
     uint64_t stack;                 /* physical base of stack + struct; 0 for idle */
     struct ktimer sleep;
+    struct ktimer alarm;            /* ArmTimer's (kernel/syscall.c) */
+    uint64_t alarm_sig;
     uint64_t runs;                  /* times switched to */
 
     /* User tasks (kernel/process.c); all zero for a kernel task. */

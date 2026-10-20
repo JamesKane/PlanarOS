@@ -40,8 +40,13 @@ struct ktimer {
     bool pending;
 };
 
+/* Stopping waits for its handler if that's running on another CPU. */
 void ktimer_start(struct ktimer *t, uint64_t deadline);
 void ktimer_stop(struct ktimer *t);
+
+/* Ticks to and from nanoseconds, without overflow. */
+uint64_t time_ns(uint64_t ticks);
+uint64_t time_from_ns(uint64_t ns);
 
 /* Timer interrupts taken so far. */
 uint64_t time_interrupts(void);

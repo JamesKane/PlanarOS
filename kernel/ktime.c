@@ -60,6 +60,26 @@ uint64_t time_to_us(uint64_t ticks)
     return hz ? ticks * 1000000 / hz : 0;
 }
 
+/* Whole seconds and the rest apart: the rest times 10^9 fits in 64
+ * bits for any timebase below 18 GHz. */
+uint64_t time_ns(uint64_t ticks)
+{
+    uint64_t rate = time_hz();
+
+    if (!rate)
+        return 0;
+    return ticks / rate * 1000000000 + ticks % rate * 1000000000 / rate;
+}
+
+uint64_t time_from_ns(uint64_t ns)
+{
+    uint64_t rate = time_hz(), s = ns / 1000000000;
+
+    if (rate && s > ~(uint64_t)0 / rate - 1)
+        return ~(uint64_t)0;
+    return s * rate + ns % 1000000000 * rate / 1000000000;
+}
+
 /* Arm this CPU's hardware for the head of its list. Lock held. */
 static void rearm(struct cpu *c)
 {
@@ -101,6 +121,8 @@ void ktimer_start(struct ktimer *t, uint64_t deadline)
 /*
  * A timer stopped from another CPU leaves that CPU's hardware armed for
  * it; the interrupt then finds nothing due and re-arms for what's left.
+ * If its handler is running there, wait for it to finish, so the caller
+ * may free what it uses as soon as this returns.
  */
 void ktimer_stop(struct ktimer *t)
 {
@@ -115,6 +137,9 @@ void ktimer_stop(struct ktimer *t)
             rearm(c);
     }
     spin_unlock_irqrestore(&c->timer_lock, was);
+    if (c != this_cpu())
+        while (atomic_load(&c->timer_running) == t)
+            arch_cpu_relax();
 }
 
 uint64_t time_interrupts(void)
@@ -134,8 +159,10 @@ void time_expired(void)
 
         unlink(t);
         /* The handler may start timers, so it runs unlocked. */
+        atomic_store(&c->timer_running, t);
         spin_unlock_irqrestore(&c->timer_lock, was);
         t->fn(t->data);
+        atomic_store(&c->timer_running, nullptr);
         was = spin_lock_irqsave(&c->timer_lock);
         now = time_now();
     }

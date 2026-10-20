@@ -1332,6 +1332,7 @@ void selftest_tasks(void *)
     selftest_tlb();
     kprintf("V3.6 done\n");
     selftest_processes();
+    selftest_time();
     kprintf("V4.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
@@ -2546,4 +2547,16 @@ void selftest_processes(void)
         fail("V4.1 processes", "pages leaked");
     kprintf("V4.1 processes ok: created, held and started, exited, faulted, killed, closed; "
             "none outlived its handle or its owner\n");
+}
+
+/* CurrentTime and ArmTimer (conformance/timer.c). */
+void selftest_time(void)
+{
+    if (!user_images[0].name) {
+        kprintf("V4.1 time skipped: no user programs\n");
+        return;
+    }
+    expect_exit("timer", 0);
+    kprintf("V4.1 time ok: alarms on time, at once when past, replaced, disarmed; "
+            "%u tasks left with one firing\n", 200u);
 }
