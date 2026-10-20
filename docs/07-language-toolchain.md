@@ -20,7 +20,7 @@ Source for the Odin rows: `OS/VectraOS-Odin/spikes/RESULTS.md`, `docs/adr/0001`,
 **Decided (VQ12, 2026-10-19).**
 
 1. **The whole system is C23 plus `.S` assembly:** kernel, `arch/`, `plat/`, boot stubs, servers and libraries. Odin isn't part of the plan. §7.1 records why.
-2. **The system ABI is a C ABI**, described once in `include/vectra/`. Any other language binds to it later.
+2. **The system ABI is a C ABI**, described once in `include/planar/`. Any other language binds to it later.
 3. **SIMD is expected in user code**: apps, servers and libraries. **The kernel is built without SIMD** and is kept small.
 4. **Namespacing in C.**
    - Public libraries are reached through *interface tables*, in AmigaOS 4 style: `IExec->PutMsg()`. This gives namespacing without name mangling, per-interface versioning, and the jump table §1.6 wants.
@@ -60,9 +60,9 @@ How state is saved follows from this:
 **Decided: Omega's layout and Make.** PlanOmega Q16 was resolved on 2026-10-19 for Omega, and the same choice is adopted here.
 
 ```
-vectra/
+planar/
   Makefile            mk/<platform>.mk  mk/arch-<isa>.mk
-  include/vectra/     public C ABI (types.h, exec.h, syscalls.h, …)
+  include/planar/     public C ABI (types.h, exec.h, syscalls.h, …)
   kernel/             portable kernel + arch.h + plat.h
   arch/rv64/  arch/aarch64/{,efi/}  arch/host/
   plat/qemu-virt/  plat/ky-x1/  plat/rk3588/  plat/cix-p1/  plat/sc8280xp/  plat/hosted/

@@ -1,24 +1,30 @@
 /*
  * arch/rv64/link.ld -- kernel image layout
  *
- * LOAD_ADDR comes from mk/<platform>.mk through --defsym. V0 runs at its
- * physical load address with the MMU off (entry.S).
+ * LOAD_ADDR comes from mk/<platform>.mk through --defsym. The kernel is
+ * loaded there (physical) and runs at the same address in the direct map
+ * (KERNEL_VOFFSET + LOAD_ADDR); see entry.S.
  */
+KERNEL_VOFFSET = 0xffffffc000000000;
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
 SECTIONS
 {
-    . = LOAD_ADDR;
+    . = KERNEL_VOFFSET + LOAD_ADDR;
     _kernel_start = .;
 
-    .text : {
+    .text : AT(LOAD_ADDR) {
         KEEP(*(.text.head))
         *(.text .text.*)
     }
 
     .rodata : ALIGN(16) {
         *(.rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(8);
+        __fixup_start = .;
+        KEEP(*(.fixup_table))
+        __fixup_end = .;
     }
 
     .data : ALIGN(16) {

@@ -1,4 +1,4 @@
-# VectraOS (new line)
+# Planar
 
 A lightweight single-user OS for the 64-bit SBCs in the office. All processes share one flat address space. IPC is passing pointers in Amiga Exec style. Coprocessors are driven as "firmware as hardware". The starting point is *Design Specification for a Lightweight, Flat-Memory Operating System* (the "vision paper"). The design leans on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which have already proved a single address space and Exec-style IPC on the Orange Pi RV2.
 
@@ -7,7 +7,7 @@ V0 is complete: one tree boots to a serial console on QEMU for both ISAs, and ru
 ## One tree, every platform
 
 The structure follows omega's:
-- **Portable code** lives in `kernel/`, `lib/`, `servers/`, `drivers/` and `include/vectra/`, and exists once.
+- **Portable code** lives in `kernel/`, `lib/`, `servers/`, `drivers/` and `include/planar/`, and exists once.
 - **Architecture code** lives in `arch/<isa>/` and implements `kernel/arch.h`.
 - **SoC code** lives in `plat/<soc>/` and implements `kernel/plat.h`.
 - **No `#ifdef`s on architecture or platform in portable code.** `make check` enforces this. A port that's missing an `arch_*` or `plat_*` function fails to link.
@@ -25,10 +25,10 @@ Both QEMU platforms share `plat/qemu-virt/`. Everything V0 needs, including the 
 Needs `make`, Python 3, QEMU, and Homebrew's `llvm@22` and `lld@22`. The toolchain is pinned by absolute path in `mk/toolchain.mk`, so a Swiftly or Xcode clang earlier on `PATH` doesn't matter.
 
 ```sh
-make                          # PLATFORM=qemu-virt-rv64: build/qemu-virt-rv64/vectra.bin
+make                          # PLATFORM=qemu-virt-rv64: build/qemu-virt-rv64/planar.bin
 make run                      # boot it in QEMU (Ctrl-A X quits)
 make PLATFORM=qemu-virt-a64 run
-make PLATFORM=hosted run      # or: build/hosted/vectra some.dtb
+make PLATFORM=hosted run      # or: build/hosted/planar some.dtb
 make PLATFORM=... test        # boot and check the transcript (tools/boot-check.py)
 make test-all                 # all three platforms
 make check                    # portable code must not test arch or platform
@@ -45,7 +45,7 @@ make check                    # portable code must not test arch or platform
 
 Each design decision is marked **decided**, **proposed** or **open**, as in PlanOmega. Open questions are numbered **VQ*n*** and collected in [questions.md](docs/questions.md).
 
-1. [Vision and principles](docs/00-vision.md): what Vectra is and isn't, and how it relates to Omega, HellFire and the earlier VectraOS corpus.
+1. [Vision and principles](docs/00-vision.md): what Planar is and isn't, and how it relates to Omega, HellFire and the earlier VectraOS corpus.
 2. [Review of the vision paper](docs/01-spec-review.md): each claim checked against the hardware. Says what survives, what has to change, and what the paper leaves out.
 3. [Architecture overview](docs/02-architecture.md): layers, kernel and server split, boot, the arch/plat contract.
 4. [Memory and protection](docs/03-memory.md): single address space (identity vs. global-VA pending measurement), protection domains, and the PMP and MPU back ends.
@@ -55,13 +55,14 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 8. [Language, toolchain and tree](docs/07-language-toolchain.md): C23 (decided), SIMD policy, build, naming.
 9. [Roadmap](docs/08-roadmap.md): phased plan and board order.
 10. [Hardware description](docs/09-hardware-description.md): ACPI and FDT, the hwdb device graph, AML isolation (VQ7, decided).
-11. [Open questions](docs/questions.md): the question register.
+11. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
+12. [Open questions](docs/questions.md): the question register.
 
 ## Status
 
 Decided on 2026-10-19:
 - Copy what we can from omega (VQ1).
-- "vectra" is the working name (VQ2).
+- The project is named Planar (VQ2).
 - SMP from V1 (VQ8).
 - C23 plus assembly, with no SIMD in the kernel (VQ12).
 - FAT32 plus a modern native filesystem (VQ14).

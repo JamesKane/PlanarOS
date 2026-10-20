@@ -1,0 +1,7 @@
+--target=aarch64-unknown-none-elf
+-march=armv8.2-a
+-std=c23
+-I../../include
+-I../../kernel
+-I../../drivers
+-Iinclude

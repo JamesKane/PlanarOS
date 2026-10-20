@@ -36,13 +36,13 @@ Hardware facts come from `PlanOmega/docs/alpha/target.md` (RV2, measured) and `O
 **Replacement (proposed, §3):** an identity-mapped single address space. Each protection domain gets its own ASID-tagged translation table, and every table maps **VA = PA** for the regions that domain may touch. Pointers stay universal and physical, and translation exists only for protection and memory attributes. Shared library code and the system page live in one subtree that all domains point to. Large blocks are used where a whole region has the same rights, such as the kernel direct map and big DMA pools.
 
 **Adapt: PMP (§3.2).**
-- PMP CSRs exist only in **M-mode**. On the RV2, OpenSBI owns M-mode, and an S-mode kernel can't touch PMP. Using PMP means replacing OpenSBI with a Vectra M-mode monitor, or running the kernel in M-mode (**VQ5**).
+- PMP CSRs exist only in **M-mode**. On the RV2, OpenSBI owns M-mode, and an S-mode kernel can't touch PMP. Using PMP means replacing OpenSBI with a Planar M-mode monitor, or running the kernel in M-mode (**VQ5**).
 - The entry count is small: 16 or 64 by spec, and the X60's count hasn't been measured *(verify; M-mode probe)*. Firmware keeps several entries for itself. TOR uses two entries per region, and NAPOT needs power-of-two alignment.
 - That leaves about 6–12 regions per domain. Code, data, stack, heap, the system region and every shared message arena all need one. One task with five shared arenas runs out.
 
 PMP still matters, though. It is the right back end for a hobby CPU without an MMU, and for a small high-assurance "minimal" profile. §3.5 defines protection as a pluggable back end with two implementations: page tables (default) and region registers (PMP/MPU).
 
-**Adapt: ePMP/W⊕X.** `mseccfg.MML` is about M-mode confining *itself*. Vectra gets W^X from page-table permission bits on every target. ePMP is only relevant to the PMP back end.
+**Adapt: ePMP/W⊕X.** `mseccfg.MML` is about M-mode confining *itself*. Planar gets W^X from page-table permission bits on every target. ePMP is only relevant to the PMP back end.
 
 **Keep: MAIR attribute table (§3.1).** The four attribute classes are right. On RISC-V, Svpbmt gives PMA, NC and IO (RV2 V13: present, no write-through, so `WRITETHROUGH` falls back to NC).
 
@@ -68,7 +68,7 @@ See §3.3–3.4 and **VQ3**.
 - IPI cost
 - DVFS (clocks and regulators via SCMI or the PMIC)
 
-Omega v1 is single-core. Vectra will be SMP from V1 (**VQ8**, decided).
+Omega v1 is single-core. Planar will be SMP from V1 (**VQ8**, decided).
 
 ## 1.4 IPC (paper §5)
 
@@ -79,26 +79,26 @@ Omega v1 is single-core. Vectra will be SMP from V1 (**VQ8**, decided).
 - The receiver dereferences `mn_Payload`, so it needs read access to the *sender's* memory. With protection on, someone has to grant that access, and nobody does.
 - `mn_ReplyPort` is a raw physical address, so a reply can be forged or aimed at any memory.
 
-Vectra uses Omega's answer: **connections with shared arenas**. A connection is created by `FindPort` or `OpenPort`. It sets up an arena that only the client and the server map, plus a pair of SPSC rings inside that arena. Messages and payloads must be in arenas that both sides can map. Reply ports are handles. Details in §4.
+Planar uses Omega's answer: **connections with shared arenas**. A connection is created by `FindPort` or `OpenPort`. It sets up an arena that only the client and the server map, plus a pair of SPSC rings inside that arena. Messages and payloads must be in arenas that both sides can map. Reply ports are handles. Details in §4.
 
 **Replace: "PutMsg writes the hardware doorbell" (§5.2).**
 - User mode can't raise an IPI on either ISA. On AArch64, the `ICC_SGI1R_EL1` register belongs to EL1. On RISC-V, `MSIP` belongs to M-mode, and S-mode reaches it only through an SBI `ecall`.
 - Waking a *blocked* task is a scheduler action, so the kernel has to be involved anyway.
 
-Vectra's fast path is futex-style. The sender enqueues into the shared ring in user mode. If the receiver's "waiting" flag is clear, nothing else happens. If it is set, one `Signal` call lets the kernel wake the receiver and send the IPI. Hardware mailboxes (Qualcomm APCS, CIX's SCMI mailboxes) are for **coprocessor** doorbells (§5), not for CPU-to-CPU IPC.
+Planar's fast path is futex-style. The sender enqueues into the shared ring in user mode. If the receiver's "waiting" flag is clear, nothing else happens. If it is set, one `Signal` call lets the kernel wake the receiver and send the IPI. Hardware mailboxes (Qualcomm APCS, CIX's SCMI mailboxes) are for **coprocessor** doorbells (§5), not for CPU-to-CPU IPC.
 
 **Adapt: MPMC CAS ring.**
 - Rings are per connection and SPSC: one client and one server per ring. That avoids CAS on the fast path and the ABA problems that come with MPMC rings.
 - Fan-in to a server is handled by the server waiting on many rings with one signal mask.
-- The paper doesn't say what happens when a ring is full. Vectra's answer is backpressure: the sender blocks or gets `ERR_FULL` (**VQ10**).
+- The paper doesn't say what happens when a ring is full. Planar's answer is backpressure: the sender blocks or gets `ERR_FULL` (**VQ10**).
 
 ## 1.5 Firmware as hardware (paper §6)
 
 **Keep:** user-mode queues with doorbells and memory-resident sync objects, wherever the hardware supports them.
 
 **Adapt: per device.** Command Stream Frontend (CSF) is an **Arm Mali** design.
-- **RK3588 (G610) and CIX (G720):** CSF, so the model applies. The kernel side doesn't go away: someone still loads `mali_csffw.bin`, schedules CSGs when there are more groups than slots, programs the GPU MMU address spaces, and handles faults and resets. In Vectra a **GPU server** does this, not the kernel.
-- **Adreno 690:** not CSF. It has a privileged CP ringbuffer, GMU firmware, and a zap shader that TrustZone authenticates. User IBs are submitted through a privileged ring, so Vectra puts that ring in a GPU server.
+- **RK3588 (G610) and CIX (G720):** CSF, so the model applies. The kernel side doesn't go away: someone still loads `mali_csffw.bin`, schedules CSGs when there are more groups than slots, programs the GPU MMU address spaces, and handles faults and resets. In Planar a **GPU server** does this, not the kernel.
+- **Adreno 690:** not CSF. It has a privileged CP ringbuffer, GMU firmware, and a zap shader that TrustZone authenticates. User IBs are submitted through a privileged ring, so Planar puts that ring in a GPU server.
 - **Hexagon CDSP (Q8B):** reached through FastRPC/GLINK. Firmware is signed and loaded through PAS. A PAS shutdown of a running DSP wedges the SoC. QNN on Linux only runs on the Q8B if the SoC claims to be a QCS6490.
 - **CIX Zhouyi X2:** no firmware; jobs are register-driven.
 - **RKNN:** register-driven, with an IOMMU per core.
@@ -106,7 +106,7 @@ Vectra's fast path is futex-style. The sender enqueues into the shared ring in u
 
 `drm_panthor_sync_op` is the ioctl's descriptor for sync operations. The object in memory is the CSF sync object, a 64-bit sequence number with a status. The idea is right; only the name is wrong.
 
-Vectra generalises this as the **queue lease** (§5): one API for a ring, a doorbell and sync memory. It runs on hardware user queues where they exist and on a driver server's software queue everywhere else.
+Planar generalises this as the **queue lease** (§5): one API for a ring, a doorbell and sync memory. It runs on hardware user queues where they exist and on a driver server's software queue everywhere else.
 
 **Gap: IOMMU ownership.** "The OS programs the firmware's IOMMU" assumes the OS owns the IOMMU. That holds on CIX (SMMUv3) and RK3588 (an IOMMU per block). It doesn't hold on the Q8B, where the hypervisor polices the SMMU and UEFI's bypass banks must be left alone. The K1 has no IOMMU in front of the DPU *(verify)*. On those boards, any driver holding a DMA-capable lease is trusted (**VQ9**).
 
@@ -118,7 +118,7 @@ Vectra generalises this as the **queue lease** (§5): one API for a ring, a door
 
 **Replace: "IORequests go to FilesystemPort with no trap".** This has the same problems as §1.4: writable foreign rings, and no way to wake a sleeping server. I/O uses connections and the futex-style fast path.
 
-**Adapt: "SVC/ECALL flush pipelines and are costly".** The paper overstates the cost of a trap. A modern core takes one in tens to low hundreds of cycles, and Omega's whole `DoMsg` round trip (two traps plus two switches) is about 3.4k cycles on a 1.6 GHz in-order X60. The goal is to **keep traps cheap and few**, not to eliminate them. The three privileged categories the paper lists (protection changes, IRQ binding, coprocessor slot setup) match the shape of Omega's ~40-call kernel. To them Vectra adds: block/wake, task and process life cycle, timers, and leases.
+**Adapt: "SVC/ECALL flush pipelines and are costly".** The paper overstates the cost of a trap. A modern core takes one in tens to low hundreds of cycles, and Omega's whole `DoMsg` round trip (two traps plus two switches) is about 3.4k cycles on a 1.6 GHz in-order X60. The goal is to **keep traps cheap and few**, not to eliminate them. The three privileged categories the paper lists (protection changes, IRQ binding, coprocessor slot setup) match the shape of Omega's ~40-call kernel. To them Planar adds: block/wake, task and process life cycle, timers, and leases.
 
 ## 1.7 What the paper leaves out entirely
 

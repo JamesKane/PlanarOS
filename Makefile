@@ -1,4 +1,4 @@
-# Vectra -- one tree, every platform.
+# Planar -- one tree, every platform.
 #
 #   make PLATFORM=qemu-virt-rv64   (default) RV64 image for QEMU's virt machine
 #   make PLATFORM=qemu-virt-a64    AArch64 image for QEMU's virt machine
@@ -25,13 +25,20 @@ PORTABLE_SRCS := \
 	kernel/main.c \
 	kernel/console.c \
 	kernel/fdt.c \
+	kernel/intc.c \
+	kernel/irq.c \
 	kernel/kprintf.c \
 	kernel/kstring.c \
+	kernel/ktime.c \
+	kernel/memmap.c \
+	kernel/pmm.c \
+	kernel/selftest.c \
 	drivers/pl011.c \
+	drivers/plic.c \
 	drivers/uart8250.c
 
 # What every boot transcript must end with (tools/boot-check.py).
-EXPECT := V0 done
+EXPECT := V1.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 CPPFLAGS := -Iinclude -Ikernel -Idrivers
@@ -43,6 +50,8 @@ include mk/toolchain.mk
 .SECONDEXPANSION:
 
 include mk/$(PLATFORM).mk
+
+CPPFLAGS += -Iarch/$(ARCH)/include
 
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS))

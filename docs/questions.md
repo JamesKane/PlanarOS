@@ -7,9 +7,10 @@ Each entry gives the question, where it came up, and the current leaning or deci
 | # | Decision | Date |
 |---|---|---|
 | VQ1 | **Copy what we can from omega**: the build, the arch/plat contract, handles, signals, ports, lazy FP/vector state and the reclamation order. Staying compatible with omega afterwards isn't a goal. | 2026-10-19 |
-| VQ2 | **"vectra" is the working name** for this tree. A rename may come later. | 2026-10-19 |
+| VQ2 | **The project is named Planar.** It started under the working name "vectra"; the earlier VectraOS corpus keeps that name. The VQ numbers stay as they are. | 2026-10-19 |
 | VQ8 | **SMP from V1.** The scheduler and messaging run on all harts or cores from the first kernel milestone, with per-CPU run queues and placement by core class. | 2026-10-19 |
 | VQ12 | **C23 plus assembly.** SIMD is expected in user code (apps, servers and libraries), and the kernel is built without it. The kernel stays small. Odin isn't part of the plan. | 2026-10-19 |
+| VQ4 | **The kernel stays in the upper half in both layouts**, with its direct map mapped global. Only user Areas move between VA = PA and the global VA window. See [v1-plan.md](v1-plan.md). | 2026-10-19 |
 | VQ7 | **ACPI and FDT are both native sources.** The kernel parses static tables only. A user-mode `hwdb` builds one device graph. ACPICA runs unmodified in an isolated user-mode `acpid`. The Q8B merges ACPI with its firmware DTB. Board quirks are kept as data. Details in [09-hardware-description.md](09-hardware-description.md). | 2026-10-19 |
 | VQ19 | **Board order: RV2, then CIX (Orange Pi 6 Plus), then RK3588, then Q8B.** The ACPI path gets proven on the second board. | 2026-10-19 |
 | VQ14 | **FAT32 is required** for the EFI system partition and firmware interchange. The **native filesystem is a modern design**: journaling or copy-on-write metadata, extents and checksums are candidates. Snapshots and encryption are out of scope. The specific design is still open (VQ14a). | 2026-10-19 |
@@ -28,16 +29,6 @@ V1 measures:
 - How much code each layout needs in the loader and the allocator.
 
 Raised in §3.1 and §8.
-
-**VQ4 Kernel mapping.**
-
-- Option A: put supervisor-only kernel entries in every domain.
-- Option B: switch to a kernel-only domain on every trap.
-- *Leaning:* option A, with PAN, UXN and PXN.
-- The identity layout leaves TTBR1 unused; the global-VA layout uses it for an upper-half kernel.
-- Follows from VQ3.
-
-Raised in §3.2.
 
 **VQ5 PMP and M-mode on RISC-V.**
 

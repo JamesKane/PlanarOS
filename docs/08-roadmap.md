@@ -12,7 +12,7 @@
 | **V5. Queue leases** | `gpu-panthor`: CSF firmware boot, CSG slots, user doorbells. Then the Zhouyi NPU server | CIX (G720) | An app submits a CSF job and waits on a sync object with no kernel or server in the data path |
 | **V6. RK3588** | `booti` path, RK806/CRU power providers, VOP2, RKNN | **RK3588** | V5 demo running unchanged on the G610 through the FDT path |
 | **V7. Q8B** | EFI stub at EL1 under the hypervisor; ACPI plus DTB merge; RPMh power; Adreno server; FastRPC (VQ16) | **Q8B** | Boots to a shell; GPU queue lease through the server provider |
-| **V8. PMP profile** | Vectra M-mode monitor or an OpenSBI fork; `pmp` back end | RV2 | Paper's PMP model demonstrated with its region budget measured |
+| **V8. PMP profile** | Planar M-mode monitor or an OpenSBI fork; `pmp` back end | RV2 | Paper's PMP model demonstrated with its region budget measured |
 
 Board order (**VQ19**, decided): RV2 → CIX → RK3588 → Q8B.
 - **RV2** reuses Omega's facts.

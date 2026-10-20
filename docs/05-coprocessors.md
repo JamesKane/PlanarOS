@@ -115,7 +115,7 @@ Firmware-scheduled through kernel CCBs. Provider: a server queue. Needs vendor d
 
 Not queue leases. The `display` server owns them (K1 DPU, VOP2, Linlon/komeda, Qualcomm MDSS), and apps get planes or screens.
 
-Omega's virtual-chipset idea (a dedicated hart running the Copper and blitter) is out of scope for Vectra v1. A hart could later act as a software provider for a "blitter" queue lease using the same API.
+Omega's virtual-chipset idea (a dedicated hart running the Copper and blitter) is out of scope for Planar v1. A hart could later act as a software provider for a "blitter" queue lease using the same API.
 
 ## 5.4 Reclamation and faults
 

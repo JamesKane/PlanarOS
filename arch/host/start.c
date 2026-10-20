@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-[[noreturn]] void kmain(uint64_t boot_cpu, const void *firmware_data);
+[[noreturn]] void kmain(uint64_t boot_cpu, uint64_t firmware_data);
 
 static void *read_file(const char *path)
 {
@@ -35,8 +35,8 @@ int main(int argc, char **argv)
     const void *fdt = nullptr;
 
     if (argc > 1 && !(fdt = read_file(argv[1]))) {
-        fprintf(stderr, "vectra: can't read %s\n", argv[1]);
+        fprintf(stderr, "planar: can't read %s\n", argv[1]);
         return 1;
     }
-    kmain(0, fdt);
+    kmain(0, (uint64_t)(uintptr_t)fdt);
 }

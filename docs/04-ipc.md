@@ -59,7 +59,7 @@ Rules:
 
 `DoMsg` is send, then wait for this message's reply.
 - If the server is blocked on the connection, the kernel hands the CPU straight to it (handoff scheduling, as in L4 and QNX) with priority inheritance.
-- Omega measured a 3,361-cycle round trip on the X60. Vectra's target is to stay at or below that on the RV2, and to measure the same thing on each Arm board.
+- Omega measured a 3,361-cycle round trip on the X60. Planar's target is to stay at or below that on the RV2, and to measure the same thing on each Arm board.
 
 ## 4.5 Cross-core notification
 

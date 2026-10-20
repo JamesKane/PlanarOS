@@ -4,7 +4,7 @@
  * The blob is big-endian on every target, so every field goes through
  * get_be32.
  */
-#include <vectra/endian.h>
+#include <planar/endian.h>
 
 #include "fdt.h"
 #include "kprintf.h"
@@ -290,6 +290,23 @@ static int32_t parent_of(int32_t target)
     return node >= 0 && depth > 0 && depth <= MAX_DEPTH ? stack[depth - 1] : -1;
 }
 
+int32_t fdt_parent(int32_t node)
+{
+    return blob && node >= 0 ? parent_of(node) : -1;
+}
+
+int32_t fdt_find_phandle(uint32_t phandle)
+{
+    int depth = 0;
+    int32_t node = blob && phandle ? next_node(-1, &depth) : -1;
+
+    for (; node >= 0; node = next_node(node, &depth))
+        if (fdt_getprop_u32(node, "phandle", 0) == phandle ||
+            fdt_getprop_u32(node, "linux,phandle", 0) == phandle)
+            return node;
+    return -1;
+}
+
 static uint64_t read_cells(const uint8_t *p, uint32_t n)
 {
     uint64_t v = 0;
@@ -393,17 +410,17 @@ void fdt_report(void)
     uint64_t addr, size;
     unsigned ncpu = 0;
 
-    kprintf("vectra: device tree at %p, %u bytes, model \"%s\"\n",
+    kprintf("planar: device tree at %p, %u bytes, model \"%s\"\n",
             (const void *)blob, fdt_size(), model ? model : "?");
     while ((node = fdt_find_name(node, "memory")) >= 0)
         for (uint32_t i = 0; fdt_reg(node, i, &addr, &size); i++)
-            kprintf("vectra: memory %p, %llu MiB\n", (void *)(uintptr_t)addr,
+            kprintf("planar: memory %p, %llu MiB\n", (void *)(uintptr_t)addr,
                     (unsigned long long)(size >> 20));
     for (uint32_t i = 0; fdt_memreserve(i, &addr, &size); i++)
-        kprintf("vectra: reserved %p, %llu KiB\n", (void *)(uintptr_t)addr,
+        kprintf("planar: reserved %p, %llu KiB\n", (void *)(uintptr_t)addr,
                 (unsigned long long)(size >> 10));
     for (node = fdt_child(cpus, -1); node >= 0; node = fdt_child(cpus, node))
         if (name_matches(fdt_node_name(node), "cpu", 3))
             ncpu++;
-    kprintf("vectra: %u CPUs in the device tree\n", ncpu);
+    kprintf("planar: %u CPUs in the device tree\n", ncpu);
 }

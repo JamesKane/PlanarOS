@@ -7,6 +7,8 @@
  */
 #include <stdint.h>
 
+#include "arch.h"
+
 #include "console.h"
 #include "fdt.h"
 #include "kprintf.h"
@@ -36,7 +38,7 @@ static bool try_node(int32_t node)
     if (node < 0 || !fdt_reg(node, 0, &base, &size))
         return false;
     if (fdt_is_compatible(node, "arm,pl011")) {
-        pl011 = (struct pl011){ .base = (uintptr_t)base };
+        pl011 = (struct pl011){ .base = (uintptr_t)phys_to_virt(base) };
         kind = CONSOLE_PL011;
         console_node = node;
         return true;
@@ -44,7 +46,7 @@ static bool try_node(int32_t node)
     for (const char *const *c = compat_8250; *c; c++) {
         if (fdt_is_compatible(node, *c)) {
             u8250 = (struct uart8250){
-                .base = (uintptr_t)base,
+                .base = (uintptr_t)phys_to_virt(base),
                 .reg_shift = (uint8_t)fdt_getprop_u32(node, "reg-shift", 0),
                 .reg_width = (uint8_t)fdt_getprop_u32(node, "reg-io-width", 1),
             };
@@ -80,16 +82,16 @@ void console_report(void)
 {
     switch (kind) {
     case CONSOLE_8250:
-        kprintf("vectra: console %s, 8250 at %p, reg-shift %u, width %u\n",
+        kprintf("planar: console %s, 8250 at %p, reg-shift %u, width %u\n",
                 fdt_node_name(console_node), (void *)u8250.base,
                 (unsigned)u8250.reg_shift, (unsigned)u8250.reg_width);
         break;
     case CONSOLE_PL011:
-        kprintf("vectra: console %s, PL011 at %p\n",
+        kprintf("planar: console %s, PL011 at %p\n",
                 fdt_node_name(console_node), (void *)pl011.base);
         break;
     case CONSOLE_PLAT:
-        kprintf("vectra: console from the platform (%s)\n", plat_name);
+        kprintf("planar: console from the platform (%s)\n", plat_name);
         break;
     }
 }

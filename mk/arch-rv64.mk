@@ -16,10 +16,13 @@ LDFLAGS := $(TARGET_FLAGS) $(FREESTANDING_LDFLAGS) \
 
 ARCH_SRCS := \
 	arch/rv64/entry.S \
-	arch/rv64/arch.c
+	arch/rv64/arch.c \
+	arch/rv64/sbi.c \
+	arch/rv64/trap.S \
+	arch/rv64/trap.c
 
-ELF   := $(BUILD)/vectra.elf
-IMAGE := $(BUILD)/vectra.bin
+ELF   := $(BUILD)/planar.elf
+IMAGE := $(BUILD)/planar.bin
 
 $(ELF): $$(OBJS) arch/rv64/link.ld
 	$(CC) $(LDFLAGS) $(OBJS) -o $@

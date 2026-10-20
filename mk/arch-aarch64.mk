@@ -4,10 +4,9 @@
 ARCH := aarch64
 CC   := $(CROSS_CC)
 
-# No FP/SIMD in the kernel (docs §7.4). The MMU is off until the memory
-# layout is chosen (VQ3), so every access is Device memory and must be
-# aligned: -mstrict-align keeps the compiler from merging unaligned loads.
-TARGET_FLAGS := --target=aarch64-unknown-none-elf -mgeneral-regs-only -mstrict-align
+# No FP/SIMD in the kernel (docs §7.4). Armv8.2-A is the oldest core on
+# any target board (A55/A76, A78C/X1C), so LSE atomics are available.
+TARGET_FLAGS := --target=aarch64-unknown-none-elf -march=armv8.2-a -mgeneral-regs-only
 
 CFLAGS  += $(TARGET_FLAGS) $(FREESTANDING_CFLAGS)
 ASFLAGS := $(TARGET_FLAGS)
@@ -16,10 +15,13 @@ LDFLAGS := $(TARGET_FLAGS) $(FREESTANDING_LDFLAGS) \
 
 ARCH_SRCS := \
 	arch/aarch64/entry.S \
-	arch/aarch64/arch.c
+	arch/aarch64/arch.c \
+	arch/aarch64/gicv3.c \
+	arch/aarch64/trap.c \
+	arch/aarch64/vectors.S
 
-ELF   := $(BUILD)/vectra.elf
-IMAGE := $(BUILD)/vectra.bin
+ELF   := $(BUILD)/planar.elf
+IMAGE := $(BUILD)/planar.bin
 
 $(ELF): $$(OBJS) arch/aarch64/link.ld
 	$(CC) $(LDFLAGS) $(OBJS) -o $@

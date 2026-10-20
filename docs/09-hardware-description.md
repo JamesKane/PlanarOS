@@ -4,13 +4,13 @@
 
 ## 9.1 Problem
 
-Boards from the last year ship ACPI (the Q8B, the Orange Pi 6 Plus with the CIX P1, and the SpacemiT K3). The older boards ship FDT (the RV2 and the RK3588). Vectra has to run on both, and nobody wants every driver written twice.
+Boards from the last year ship ACPI (the Q8B, the Orange Pi 6 Plus with the CIX P1, and the SpacemiT K3). The older boards ship FDT (the RV2 and the RK3588). Planar has to run on both, and nobody wants every driver written twice.
 
 ## 9.2 What the firmware actually provides
 
 **Q8B**
 - **ACPI:** tables FACP (hardware-reduced), APIC, GTDT, IORT, PPTT, MCFG, SPCR, DBG2, CSRT, TPM2. The DSDT is 132 KB, with 163 devices and 514 methods.
-- **What the AML does:** very little Vectra could use. The 14 power resources are empty stubs. 103 devices `_DEP` on Windows PEP (`QCOM0617`), which is a pile of static clock, regulator and bus packages that only the Windows PEP driver understands. There are no `_CPC`, `_PSS` or `_TMP` methods, and the 32 thermal zones have no `_TMP`.
+- **What the AML does:** very little Planar could use. The 14 power resources are empty stubs. 103 devices `_DEP` on Windows PEP (`QCOM0617`), which is a pile of static clock, regulator and bus packages that only the Windows PEP driver understands. There are no `_CPC`, `_PSS` or `_TMP` methods, and the 32 thermal zones have no `_TMP`.
 - **Firmware DTB:** also provided, and AbyssBSD took its PEP-hidden addresses from it.
 - **Quirks:**
   - SPCR has a bad access width and the wrong IRQ.

@@ -1,13 +1,13 @@
 /*
- * vectra/endian.h -- explicit-endian loads
+ * planar/endian.h -- explicit-endian loads
  *
  * Firmware formats fix their byte order (FDT is big-endian, ACPI little-
  * endian) whatever the CPU's. Byte loads keep these portable and safe on
  * unaligned or Device memory; the compiler folds them into one load (and a
  * byte swap) where it can.
  */
-#ifndef VECTRA_ENDIAN_H
-#define VECTRA_ENDIAN_H
+#ifndef PLANAR_ENDIAN_H
+#define PLANAR_ENDIAN_H
 
 #include <stdint.h>
 
@@ -39,4 +39,4 @@ static inline uint64_t get_le64(const void *p)
     return (uint64_t)get_le32(b + 4) << 32 | get_le32(b);
 }
 
-#endif /* VECTRA_ENDIAN_H */
+#endif /* PLANAR_ENDIAN_H */

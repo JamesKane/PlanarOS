@@ -10,9 +10,9 @@
 
 How this differs from Omega:
 - Omega keeps a **global VA allocator** that is separate from physical memory. Its layout is Areas at `0x1_0000`–`0x1F_FFFF_FFFF`, then the shared region, then lease windows.
-- Vectra drops that layer, so the "where does this Area live" allocator is the physical page allocator.
+- Planar drops that layer, so the "where does this Area live" allocator is the physical page allocator.
 
-| | Identity SAS (Vectra, proposed) | Global-VA SAS (Omega) |
+| | Identity SAS (Planar, proposed) | Global-VA SAS (Omega) |
 |---|---|---|
 | Pointer = DMA address | Yes, when there is no IOMMU or it is identity-mapped | No; translation needed |
 | Area larger than the biggest free physical run | Impossible | Possible |
@@ -20,7 +20,7 @@ How this differs from Omega:
 | Null guard | Free on the RV2: PA 0–512 KiB belongs to OpenSBI and is never user-mapped. Elsewhere it's free if RAM doesn't start at 0. | Low 64 KiB unmapped |
 | Fixed "known address" | No; ExecBase pointer is handed in at start (**VQ6**) | Possible |
 | Fit with a PMP/MPU back end | Natural: PMP is physical | Needs a different design |
-| Kernel view | The direct map is the address space | Separate upper-half map |
+| Kernel view | Upper-half direct map (§3.2) | Upper-half direct map (§3.2) |
 
 **Open (VQ3). Decided by measurement, not ahead of time.**
 
@@ -30,12 +30,17 @@ V1 builds both layouts behind `arch_domain_*`, with omega providing the global-V
 
 ## 3.2 Kernel mapping
 
-- The kernel runs with its own domain, which is the **whole of RAM identity-mapped** with large blocks (1 GiB and 2 MiB) plus device windows. In VA = PA, the kernel's view and the users' views share one numbering, so the kernel can use user pointers directly once it has checked them against the caller's grants.
-- The kernel image is RX/RO/RW with W^X. It is mapped only in the kernel domain.
-- On entry from user mode the kernel switches to its own domain. Alternatively, every domain's table carries supervisor-only kernel entries, as in Omega where kernel root entries are copied into every root. **VQ4** asks which.
-  - Leaning: supervisor-only entries in every domain, since that avoids a TTBR write on each trap.
-  - On AArch64, kernel data is mapped through TTBR0 with VA = PA, so PAN and UXN/PXN are needed to keep user code away from it.
-  - With VA = PA there is no separate upper half, so the TTBR1 range is unused (**VQ4**).
+**Decided (VQ4, 2026-10-19). See [v1-plan.md](v1-plan.md).**
+
+The kernel lives in the **upper half** in both layouts:
+- **Sv39:** at `0xffff_ffc0_0000_0000`.
+- **AArch64:** at `0xffff_0000_0000_0000`, through TTBR1.
+
+It has a direct map of physical memory there, mapped global. User domains own the lower half, through `satp`'s lower half on RISC-V and TTBR0 on AArch64. A switch changes only that.
+
+The kernel image is RX/RO/RW with W^X. It reaches user memory only through checked copy routines, using SUM on RISC-V and PAN on AArch64.
+
+"VA = PA" in the identity layout therefore applies to **user** addresses, which is what processes and devices see. The kernel reaches the same pages through its direct map.
 
 ## 3.3 Areas
 
@@ -117,7 +122,7 @@ With the `pmp` back end, the system must fit within its region budget. In practi
 
 ## 3.7 IOMMUs and DMA
 
-| SoC | IOMMU | Vectra stance |
+| SoC | IOMMU | Planar stance |
 |---|---|---|
 | RK3588 | Rockchip IOMMU per block (VOP, NPU, codecs); SMMUv3 instances off by default | Program identity mappings for the lease holder's grants. Device DMA is confined. |
 | CIX P1 | SMMUv3 for PCIe and display/NPU; IORT RMRs; translating by default. GPU and VPU are not behind it. | Same identity approach. GPU confinement is through Mali's own MMU address spaces. |

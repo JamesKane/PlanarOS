@@ -2,9 +2,8 @@
  * kernel/kstring.c -- the memory and string functions the kernel uses
  *
  * Even freestanding, the compiler turns struct copies and zero
- * initialisers into calls to the first four. Byte at a time on purpose:
- * until the memory layout is chosen (VQ3) the AArch64 kernel runs with the
- * MMU off, where every access is Device memory and must be aligned.
+ * initialisers into calls to the first four. Byte at a time for now; the
+ * kernel uses them little.
  */
 #include <stddef.h>
 #include <stdint.h>

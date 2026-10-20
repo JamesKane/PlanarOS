@@ -71,11 +71,11 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 **Proposed.** All boot paths converge on one kernel entry contract.
 
 ```
-RV2:      BROM → U-Boot SPL → OpenSBI (M) → U-Boot (S) → booti vectra.bin      [FDT]
-RK3588:   BROM → TPL/SPL → TF-A (EL3) → U-Boot → booti vectra.bin              [FDT]
-CIX P1:   UEFI (EL2, VHE) → vectra.efi stub                                    [ACPI only]
-Q8B:      Qualcomm XBL/UEFI → vectra.efi stub at EL1 under hypervisor          [ACPI + DTB]
-QEMU:     -kernel vectra.bin (riscv64 virt / aarch64 virt)                     [FDT]
+RV2:      BROM → U-Boot SPL → OpenSBI (M) → U-Boot (S) → booti planar.bin      [FDT]
+RK3588:   BROM → TPL/SPL → TF-A (EL3) → U-Boot → booti planar.bin              [FDT]
+CIX P1:   UEFI (EL2, VHE) → planar.efi stub                                    [ACPI only]
+Q8B:      Qualcomm XBL/UEFI → planar.efi stub at EL1 under hypervisor          [ACPI + DTB]
+QEMU:     -kernel planar.bin (riscv64 virt / aarch64 virt)                     [FDT]
 ```
 
 Kernel entry contract (`arch_entry`):
@@ -113,9 +113,9 @@ The session must still decide:
 ## 2.6 arch and plat contract
 
 **Decided: Omega's model.**
-- Portable code lives in `kernel/`, `lib/`, `servers/`, `drivers/` and `include/vectra/`, and is never compiled per platform with `#ifdef`.
+- Portable code lives in `kernel/`, `lib/`, `servers/`, `drivers/` and `include/planar/`, and is never compiled per platform with `#ifdef`.
 - `arch/<isa>/` implements `kernel/arch.h`. `plat/<board>/` implements `kernel/plat.h`.
-- Inline hot paths go in `arch/<isa>/include/vectra/arch_inline.h`.
+- Inline hot paths go in `arch/<isa>/include/planar/arch_inline.h`.
 - A missing function is a link error.
 - `make check` enforces the no-`#ifdef` rule.
 

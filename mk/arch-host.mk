@@ -8,7 +8,7 @@ ARCH_SRCS := \
 	arch/host/start.c \
 	arch/host/arch.c
 
-IMAGE := $(BUILD)/vectra
+IMAGE := $(BUILD)/planar
 
 $(IMAGE): $$(OBJS)
 	$(CC) $(OBJS) -o $@

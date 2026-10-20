@@ -32,6 +32,10 @@ int32_t fdt_find_name(int32_t after, const char *name);
 /* The next direct child of 'parent' after 'after' (-1: the first one). */
 int32_t fdt_child(int32_t parent, int32_t after);
 
+/* The node whose phandle property is 'phandle', and a node's parent. */
+int32_t fdt_find_phandle(uint32_t phandle);
+int32_t fdt_parent(int32_t node);
+
 /* Does the node's compatible list contain 'compat'? */
 bool fdt_is_compatible(int32_t node, const char *compat);
 
