@@ -50,6 +50,9 @@ What it does, in the present tense.
 **RESULT**
 What it returns, every error it can return, and when.
 
+**EXAMPLE**
+Optional: a few lines of use, taken from a conformance program where possible.
+
 **NOTES**
 Anything a caller needs that isn't obvious. Differences from Exec go here.
 

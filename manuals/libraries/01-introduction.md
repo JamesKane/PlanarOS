@@ -53,6 +53,7 @@ Errors are small negative numbers, the `ERR_*` constants in `planar/syscalls.h`:
 | `ERR_FULL` | -9 | A ring is full, or a port's queue of waiting connections |
 | `ERR_PORT_DIED` | -10 | The other end of a connection has gone |
 | `ERR_LIMIT` | -11 | A per-process limit: handles, tasks or connections (below) |
+| `ERR_BUSY` | -12 | In use: a lease that is granted, or stopping |
 
 Most calls return `int64_t`: 0 or a handle on success, a negative error on failure. A call that makes a handle returns it as a positive `int64_t`, so keep the result in an `int64_t`, test it with `< 0`, and cast it to `Handle` once it's known to be one:
 

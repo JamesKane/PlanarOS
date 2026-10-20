@@ -77,7 +77,7 @@ uint64_t time_from_ns(uint64_t ns)
 
     if (rate && s > ~(uint64_t)0 / rate - 1)
         return ~(uint64_t)0;
-    return s * rate + ns % 1000000000 * rate / 1000000000;
+    return s * rate + (ns % 1000000000 * rate + 999999999) / 1000000000;     /* never early */
 }
 
 /* Arm this CPU's hardware for the head of its list. Lock held. */

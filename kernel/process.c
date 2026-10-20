@@ -382,6 +382,7 @@ int64_t process_create_call(uint64_t user_name, uint64_t arg, int64_t sigbit, ui
     if (!(h = handle_new(HANDLE_PROCESS, p, parent))) {
         int64_t err = handle_error(parent);
 
+        p->watch_task = 0;      /* never handed out: a failure signals nobody */
         process_release(p);
         return err;
     }

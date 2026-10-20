@@ -264,8 +264,14 @@ bool lease_dma_gone(struct lease *l, struct area *a, uint64_t pages, bool freed)
             *q = (struct quarantined){ .area = a, .pages = pages, .next = l->quarantine };
             l->quarantine = q;
         } else {
+            /* Nowhere to keep it: leak it, and let the lease go free of it. */
             kprintf("planar: lease %p: an Area of %llu pages leaked, not quarantined\n",
                     (void *)l->base, (unsigned long long)pages);
+            last = put(l);
+            spin_unlock_irqrestore(&lock, was);
+            if (last)
+                kfree(l);
+            return true;
         }
         l->quarantined_pages += pages;
         atomic_fetch_add(&quarantined_total, pages);
@@ -335,8 +341,6 @@ int64_t lease_create_call(uint32_t root_h, uint64_t base, uint64_t size, uint64_
         for (unsigned j = 0; j < i; j++)
             if (src[j] == src[i])
                 return ERR_BADARG;
-        if (irq_attached(src[i]))
-            return ERR_RIGHTS;      /* the kernel's own */
     }
     if (overlaps_memory(base, size) || devmem_kernel(base, size))
         return ERR_RIGHTS;
@@ -356,6 +360,10 @@ int64_t lease_create_call(uint32_t root_h, uint64_t base, uint64_t size, uint64_
                 if (o->line[i].source == src[j])
                     err = ERR_EXISTS;
     }
+    /* Another lease's line is ERR_EXISTS, bound or not; then the kernel's. */
+    for (unsigned j = 0; j < nirqs && !err; j++)
+        if (irq_attached(src[j]))
+            err = ERR_RIGHTS;
     if (!err) {
         l->next = leases;
         leases = l;
@@ -473,16 +481,19 @@ int64_t lease_close_call(uint32_t h)
     struct lease *l;
     int64_t err = 0;
 
+    /* Checked and taken under the lock, so no GrantLease gets between. */
     unsigned long was = spin_lock_irqsave(&lock);
     if (!(l = find(h)) || l->owner != p)
         err = ERR_BADHANDLE;
     else if (l->state != LEASES_IDLE)
         err = ERR_BUSY;
+    else if (handle_take(h, HANDLE_LEASE, p) != l)
+        err = ERR_BADHANDLE;
+    else
+        l->handle = 0;              /* found no more */
     spin_unlock_irqrestore(&lock, was);
     if (err)
         return err;
-    if (handle_take(h, HANDLE_LEASE, p) != l)
-        return ERR_BADHANDLE;       /* another task closed it first */
     lease_release(l);
     return 0;
 }
@@ -508,18 +519,30 @@ int64_t lease_map_call(uint32_t h, uint64_t addr_out)
     spin_unlock_irqrestore(&lock, was);
     if (err)
         return err;
-    return arch_copy_to_user(addr_out, &base, sizeof base) ? 0 : ERR_BADADDR;
+    if (arch_copy_to_user(addr_out, &base, sizeof base))
+        return 0;
+    was = spin_lock_irqsave(&lock);
+    if (find(h) == l && l->mapped_in == p)
+        unmap_from(l);              /* so a retry can map it */
+    spin_unlock_irqrestore(&lock, was);
+    return ERR_BADADDR;
 }
 
-/* The line 'line' of the lease 'h', if granted to the calling process.
- * Lock held. */
-static struct line *grantees_line(Handle h, uint32_t line)
+/* The line 'line' of the lease 'h', if granted to the calling process;
+ * else nullptr, and why in 'err'. Lock held. */
+static struct line *grantees_line(Handle h, uint32_t line, int64_t *err)
 {
     struct process *p = task_self()->process;
     struct lease *l = find(h);
 
-    if (!l || l->state != LEASES_GRANTED || l->grantee != p || line >= l->nlines)
+    if (!l || l->state != LEASES_GRANTED || l->grantee != p) {
+        *err = ERR_BADHANDLE;
         return nullptr;
+    }
+    if (line >= l->nlines) {
+        *err = ERR_BADARG;
+        return nullptr;
+    }
     return &l->line[line];
 }
 
@@ -531,8 +554,8 @@ int64_t lease_bind_call(uint32_t h, uint32_t line, int64_t sigbit)
     if (!syscall_sigbit(sigbit))
         return ERR_BADARG;
     unsigned long was = spin_lock_irqsave(&lock);
-    if (!(ln = grantees_line(h, line)))
-        err = ERR_BADHANDLE;
+    if (!(ln = grantees_line(h, line, &err)))
+        ;
     else if (ln->bound)
         err = ERR_EXISTS;
     if (!err) {
@@ -554,10 +577,11 @@ uint64_t lease_ack_wait_call(uint32_t h, uint32_t line, uint64_t mask)
 {
     struct task *self = task_self();
     struct line *ln;
+    int64_t err = ERR_BADHANDLE;
     bool ok;
 
     unsigned long was = spin_lock_irqsave(&lock);
-    ok = (ln = grantees_line(h, line)) && ln->bound && ln->task == self &&
+    ok = (ln = grantees_line(h, line, &err)) && ln->bound && ln->task == self &&
          !atomic_load(&self->process->dying);
     if (ok && ln->masked) {
         ln->masked = false;
@@ -565,7 +589,7 @@ uint64_t lease_ack_wait_call(uint32_t h, uint32_t line, uint64_t mask)
     }
     spin_unlock_irqrestore(&lock, was);
     if (!ok)
-        return mask ? 0 : (uint64_t)ERR_BADHANDLE;
+        return mask ? 0 : (uint64_t)err;
     return mask ? task_wait(mask) : 0;
 }
 

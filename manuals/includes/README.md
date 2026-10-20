@@ -6,10 +6,11 @@
 
 | Header | Contents | Used by |
 |---|---|---|
-| `planar/exec.h` | `Handle`; task, signal and Area calls; `AREAF_*`, `AREAR_*`; `struct AreaInfo`; `SIGBREAKF_CTRL_C` | Every program |
+| `planar/exec.h` | `Handle`; task, signal, Area, process and time calls; `AREAF_*`, `AREAR_*`; `struct AreaInfo`; `PROCF_*`, `PROCS_*`, `PFAULT_*`; `struct ProcessInfo`; `SIGBREAKF_CTRL_C` | Every program |
 | `planar/ipc.h` | Ports and connections: the kernel calls, `struct ConnArena`, `struct ConnRing`, `struct Message`, `struct MinNode`, `CONN_*`, `CONNF_*` | `lib/exec`; servers that manage rings themselves |
+| `planar/lease.h` | Device leases: the lease, interrupt, DMA Area and firmware calls; `LEASE_IRQS`, `LEASES_*`; `struct LeaseInfo`, `struct FirmwareInfo` | Drivers, `hwdb` |
 | `planar/msg.h` | `struct MsgPort`, `MSGPORT_STASH` and Exec's message calls | Every program that sends or serves messages |
-| `planar/syscalls.h` | Kernel call numbers (`SYS_*`) and errors (`ERR_NOSYS` to `ERR_LIMIT`) | Stubs; any program that tests an error |
+| `planar/syscalls.h` | Kernel call numbers (`SYS_*`) and errors (`ERR_NOSYS` to `ERR_BUSY`) | Stubs; any program that tests an error |
 | `planar/endian.h` | `get_be32`, `get_le64` and friends, for firmware formats | Drivers, `hwdb` |
 
 ## What the headers promise

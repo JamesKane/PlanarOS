@@ -2,7 +2,7 @@
 
 *Checked against V3.*
 
-The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas) and `planar/ipc.h` (ports and connections). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
+The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
 Most programs use connections through the [msg library](msg.md) rather than the connection calls here.
 
@@ -131,6 +131,54 @@ None known.
 
 ---
 
+## exec/ArmTimer
+
+**NAME**
+ArmTimer -- set or clear the calling task's alarm
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t ArmTimer(uint64_t deadline, int64_t sigbit);
+```
+
+**FUNCTION**
+Arms the calling task's one alarm: signal bit `sigbit` is set in the task once `CurrentTime` reaches `deadline`. A deadline already past sets it at once. Arming replaces any alarm armed before. A `deadline` of 0 disarms the alarm, and `sigbit` is then ignored.
+
+A kernel call.
+
+**INPUTS**
+- `deadline` -- when to signal, in nanoseconds on `CurrentTime`'s clock; 0 to disarm.
+- `sigbit` -- the signal bit, 16–63.
+
+**RESULT**
+0, or:
+- `ERR_BADARG` -- `sigbit` is out of range and `deadline` isn't 0. The alarm armed before stays armed.
+- `ERR_NOSYS` -- the kernel found no timer interrupt, so alarms can't fire. Disarming still succeeds.
+
+**EXAMPLE**
+A sleep, from `conformance/leaser.c`:
+```c
+ArmTimer(CurrentTime() + ms * 1000000, 30);
+Wait(1ULL << 30);
+```
+
+**NOTES**
+- The deadline is absolute. For a timeout, add to `CurrentTime()`.
+- There is one alarm per task, not one per call. A library that arms it takes it from its caller.
+- The alarm sets its bit and nothing clears it but the task. A bit set by an alarm that fired before it was replaced stays set. Clear it with `SetSignal(0, 1ULL << sigbit)` before waiting if that matters.
+- The kernel doesn't check that `sigbit` was allocated with `AllocSignal`.
+- The alarm is stopped when the task ends, so a task may end with one about to fire (`kernel/process.c`).
+- How late an alarm comes depends on the machine. On QEMU's TCG a 2 ms alarm comes 450–600 µs late; `conformance/timer.c` logs it.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CurrentTime](#execcurrenttime), [Wait](#execwait), [AllocSignal](#execallocsignal)
+
+---
+
 ## exec/CloseConn
 
 **NAME**
@@ -168,6 +216,48 @@ None known.
 
 **SEE ALSO**
 [ClosePort](msg.md#execcloseport), [OpenPort](#execopenport), [AcceptConn](#execacceptconn)
+
+---
+
+## exec/CloseHandle
+
+**NAME**
+CloseHandle -- give up a process or lease handle
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t CloseHandle(Handle handle);
+```
+
+**FUNCTION**
+Frees a handle of a kind that has no call of its own to free it:
+- **A process handle** from `CreateProcess`. If the process is running or held, it is killed, as by `KillProcess`. Its record goes once it is dead.
+- **A lease handle** from `CreateLease`, if the lease is idle. The owner's mapping of the registers is removed. The lease goes once none of its DMA Areas is left.
+
+Tasks, Areas, ports and connections are let go by `ExitTask`, `FreeArea`, `DeletePort` and `CloseConn`. `CloseHandle` refuses them.
+
+A kernel call.
+
+**INPUTS**
+- `handle` -- a process or lease handle owned by the calling process.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `handle` isn't a process or lease handle the calling process owns, or another task of the process closed it first.
+- `ERR_BUSY` -- a lease that is granted or stopping. End the grantee and call `RevokeLease` first.
+
+**NOTES**
+- Closing a process handle doesn't wait for the process to die. The task that created the process is still signalled when it does.
+- After the call the handle is stale and calls on it fail with `ERR_BADHANDLE`. The caller's copy of the value doesn't change, so don't keep using it.
+- When a process dies, its handles go without this call: the processes it created are killed, and its leases are let go whatever their state. The DMA Areas of a lease that was stopping then stay quarantined for good, and the kernel log says so (`lease_release` in `kernel/lease.c`).
+- The device root handle can't be closed. It goes with its process.
+
+**BUGS**
+The device root can't be closed: it lasts as long as its process.
+
+**SEE ALSO**
+[CreateProcess](#execcreateprocess), [KillProcess](#execkillprocess), [CreateLease](lease.md#leasecreatelease), [RevokeLease](lease.md#leaserevokelease)
 
 ---
 
@@ -210,6 +300,72 @@ An over-long name gives `ERR_BADADDR`, where `ERR_BADARG` would be clearer.
 
 ---
 
+## exec/CreateProcess
+
+**NAME**
+CreateProcess -- start a program in a new process
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t CreateProcess(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);
+```
+
+**FUNCTION**
+Loads the built-in program `name` into a new process and returns a handle to it, owned by the calling process. The program's `main` gets `arg` as its first argument and 0 as its second. The process runs at the priority of the caller's process, on the same CPUs.
+
+Without `PROCF_HELD` the process starts at once. With it, the process is made but doesn't run until `StartProcess`, so the caller can grant it a lease first.
+
+When the process is dead, by exiting, faulting or being killed, signal bit `sigbit` is set in the calling task. `QueryProcess` then says how it ended.
+
+A process never outlives its handle: `CloseHandle` on it kills it, and so does the death of the process that owns the handle.
+
+A kernel call.
+
+**INPUTS**
+- `name` -- the program's name, at most 31 characters. Today the built-in programs are the `conformance/` images linked into the kernel.
+- `arg` -- passed to the program's `main` as its first argument.
+- `sigbit` -- the signal bit, 16–63, set in the calling task when the process is dead.
+- `flags` -- 0 or `PROCF_HELD`.
+
+**RESULT**
+The process's handle (positive), or:
+- `ERR_BADADDR` -- `name` isn't readable, or is longer than 31 characters.
+- `ERR_BADARG` -- `sigbit` is out of range, or `flags` has an unknown bit.
+- `ERR_NOTFOUND` -- no built-in program has that name.
+- `ERR_NOMEM` -- out of memory, the program's image is malformed, or the system's handle table is full.
+- `ERR_LIMIT` -- the calling process already holds 256 handles.
+
+**EXAMPLE**
+A driver started held, from `conformance/leaser.c`:
+```c
+int64_t d = CreateProcess("virtiorng", lease, 20, PROCF_HELD);
+
+if (d < 0)
+    return d;
+GrantLease(lease, (Handle)d);
+StartProcess((Handle)d);
+Wait(1ULL << 20);                   /* it's dead */
+QueryProcess((Handle)d, &info);
+CloseHandle((Handle)d);
+```
+
+**NOTES**
+- The death signal goes to the creating task. Any task of the process may use the handle, but if the creating task has ended, nobody is signalled.
+- The signal comes even after the handle has been closed.
+- The kernel doesn't check that `sigbit` was allocated with `AllocSignal`.
+- The processes a process creates die with it (`handle_free_owner` in `kernel/handle.c`). A supervisor's children can't outlive it.
+- **Differs from Exec**: AmigaDOS's `CreateNewProc` runs code already in memory, in the one address space. `CreateProcess` loads a program by name into a new protection domain.
+
+**BUGS**
+- An over-long name gives `ERR_BADADDR`, as with `CreatePort`, where `ERR_BADARG` would be clearer.
+- A malformed built-in image gives `ERR_NOMEM`.
+
+**SEE ALSO**
+[StartProcess](#execstartprocess), [KillProcess](#execkillprocess), [QueryProcess](#execqueryprocess), [CloseHandle](#execclosehandle), [GrantLease](lease.md#leasegrantlease)
+
+---
+
 ## exec/CreateTask
 
 **NAME**
@@ -246,6 +402,38 @@ The new task's handle (positive), or:
 
 **SEE ALSO**
 [ExitTask](#execexittask), [FindTask](#execfindtask), [Libraries ch. 2](../libraries/02-tasks-and-signals.md)
+
+---
+
+## exec/CurrentTime
+
+**NAME**
+CurrentTime -- read the clock
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+uint64_t CurrentTime(void);
+```
+
+**FUNCTION**
+Returns the time, in nanoseconds, on the system's monotonic clock. It never goes backwards.
+
+A kernel call.
+
+**RESULT**
+The time in nanoseconds. Can't fail.
+
+**NOTES**
+- It moves in steps of the timebase's period, not of 1 ns.
+- `planar/exec.h` says "since boot". It counts from the timebase's zero, which is at or before boot (`time_now` in `kernel/ktime.h`). Use differences, not the value.
+- Every call traps. There is no clock read in user mode yet.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[ArmTimer](#execarmtimer)
 
 ---
 
@@ -291,18 +479,18 @@ ExitProcess -- end the process
 ```
 
 **FUNCTION**
-Ends every task in the calling process, then the process. Its handles, Areas, ports and connections go, and the other end of each connection is told. Returning from `main()` calls this with `main`'s result.
+Ends every task in the calling process, then the process. Its handles, Areas, ports and connections go, and the other end of each connection is told. The processes it created are killed, and leases granted to it become stopping. Returning from `main()` calls this with `main`'s result.
 
 A kernel call. Doesn't return.
 
 **INPUTS**
-- `code` -- the exit code, reported to whatever started the process (today, the kernel's test harness).
+- `code` -- the exit code. A process's creator reads it as `pi_ExitCode` with `QueryProcess`. For a process the kernel started, the kernel's test harness reports it.
 
 **BUGS**
 None known.
 
 **SEE ALSO**
-[ExitTask](#execexittask)
+[ExitTask](#execexittask), [QueryProcess](#execqueryprocess)
 
 ---
 
@@ -421,6 +609,43 @@ None known.
 
 **SEE ALSO**
 [AllocSignal](#execallocsignal)
+
+---
+
+## exec/KillProcess
+
+**NAME**
+KillProcess -- kill a process this process created
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t KillProcess(Handle process);
+```
+
+**FUNCTION**
+Kills the process. Its tasks are told to stop, and it dies once each has left the kernel. A held process is discarded without running. Either way, the creating task's signal is set once the process is dead. The call doesn't wait for that.
+
+The masking of interrupt lines comes first: a lease granted to the process has its lines masked before the call returns.
+
+A kernel call.
+
+**INPUTS**
+- `process` -- a process handle owned by the calling process.
+
+**RESULT**
+0, or `ERR_BADHANDLE` if `process` isn't a process handle the calling process owns. A process that is already dead, or already ending, gets 0 and nothing happens.
+
+**NOTES**
+- `QueryProcess` then reports `PROCS_KILLED`, unless the process had already begun to exit or fault: its own ending stands.
+- The handle stays valid. Close it with `CloseHandle` when done.
+- The processes it created die with it, and leases granted to it become stopping.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CreateProcess](#execcreateprocess), [QueryProcess](#execqueryprocess), [CloseHandle](#execclosehandle)
 
 ---
 
@@ -585,6 +810,62 @@ None known.
 
 **SEE ALSO**
 [AllocArea](#execallocarea)
+
+---
+
+## exec/QueryProcess
+
+**NAME**
+QueryProcess -- say how a process is, or how it ended
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t QueryProcess(Handle process, struct ProcessInfo *info);
+```
+
+**FUNCTION**
+Fills in `info` for a process the calling process created. `pi_State` is one of:
+
+| `pi_State` | |
+|---|---|
+| `PROCS_HELD` | Made with `PROCF_HELD` and not started |
+| `PROCS_RUNNING` | Running, or ending but not yet dead |
+| `PROCS_EXITED` | Dead after `ExitProcess`, a return from `main`, or its last task's `ExitTask` |
+| `PROCS_FAULTED` | Dead after a fault |
+| `PROCS_KILLED` | Dead after `KillProcess` or `CloseHandle` |
+
+Once it is dead, the other fields say how:
+
+| Field | |
+|---|---|
+| `pi_ExitCode` | The code given to `ExitProcess`, or `main`'s result. -1 after a fault. 0 if killed, or if its last task ended with `ExitTask` |
+| `pi_Fault` | `PFAULT_NONE`, or which fault ended it |
+| `pi_FaultAddress` | The address the fault was about: for an access fault, the one touched |
+| `pi_FaultPC` | Where it faulted |
+
+While the process is held or running, they are 0.
+
+A kernel call.
+
+**INPUTS**
+- `process` -- a process handle owned by the calling process.
+- `info` -- where to store the description.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `process` isn't a process handle the calling process owns.
+- `ERR_BADADDR` -- `info` isn't writable.
+
+**NOTES**
+- A process is dead when the creating task's signal is set. Query it after that, not after `KillProcess` returns.
+- The kernel log also prints a fault, with its kind, address and PC.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CreateProcess](#execcreateprocess), [KillProcess](#execkillprocess), [ExitProcess](#execexitprocess)
 
 ---
 
@@ -767,6 +1048,42 @@ A bad handle and a closed peer both return 0 at once, which is also `WaitPorts`'
 
 **SEE ALSO**
 [DoMsg](msg.md#execdomsg), [WaitPorts](msg.md#execwaitports), [Wait](#execwait)
+
+---
+
+## exec/StartProcess
+
+**NAME**
+StartProcess -- start a held process
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t StartProcess(Handle process);
+```
+
+**FUNCTION**
+Starts a process made with `PROCF_HELD`: its first task runs the program's `main`.
+
+A kernel call.
+
+**INPUTS**
+- `process` -- a process handle owned by the calling process.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `process` isn't a process handle the calling process owns.
+- `ERR_EXISTS` -- the process isn't held: it was started already, or was killed while held.
+
+**NOTES**
+- Holding a process is for granting it what it needs, a lease, before it runs.
+- If another task kills the process while this call starts it, the call still returns 0, and the process dies without running (`process_start_call` in `kernel/process.c`).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CreateProcess](#execcreateprocess), [GrantLease](lease.md#leasegrantlease)
 
 ---
 

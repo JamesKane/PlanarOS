@@ -146,13 +146,13 @@ static void alarm_fire(void *data)
 
 static int64_t sys_arm_timer(struct task *self, uint64_t deadline, int64_t sigbit)
 {
-    if (!time_have_timers())
+    if (deadline && !syscall_sigbit(sigbit))
+        return ERR_BADARG;          /* and the alarm stays as it was */
+    if (deadline && !time_have_timers())
         return ERR_NOSYS;
     ktimer_stop(&self->alarm);
     if (deadline == 0)
         return 0;
-    if (!syscall_sigbit(sigbit))
-        return ERR_BADARG;
     self->alarm = (struct ktimer){ .fn = alarm_fire, .data = self };
     self->alarm_sig = 1ULL << sigbit;
     ktimer_start(&self->alarm, time_from_ns(deadline));

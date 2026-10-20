@@ -134,7 +134,8 @@ int main(uint64_t arg)
 
     CHECK(BindIrq(lease, 0, 20) == 0);
     CHECK(BindIrq(lease, 0, 20) == ERR_EXISTS);
-    CHECK(BindIrq(lease, 1, 20) == ERR_BADHANDLE);     /* it has one line */
+    CHECK(BindIrq(lease, 1, 20) == ERR_BADARG);        /* it has one line */
+    CHECK(AckWaitIrq(lease, 1, 0) == (uint64_t)ERR_BADARG);
 
     /* Ask for WANT bytes. */
     q->desc[0] = (struct desc){ .addr = (uint64_t)buf, .len = WANT, .flags = DESC_WRITE };

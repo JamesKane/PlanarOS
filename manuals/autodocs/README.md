@@ -6,6 +6,7 @@
 |---|---|
 | [exec.md](exec.md) | The kernel calls (`planar/exec.h`, `planar/ipc.h`) |
 | [msg.md](msg.md) | Exec's messages over connections (`planar/msg.h`, `lib/exec`) |
+| [lease.md](lease.md) | Device leases: registers, interrupt lines, DMA Areas and the firmware's tables (`planar/lease.h`) |
 
 ## All calls
 
@@ -13,15 +14,23 @@
 |---|---|---|
 | AcceptConn | [exec](exec.md#execacceptconn) | kernel |
 | AcceptPort | [msg](msg.md#execacceptport) | library |
+| AckWaitIrq | [lease](lease.md#leaseackwaitirq) | kernel |
 | AllocArea | [exec](exec.md#execallocarea) | kernel |
+| AllocDmaArea | [lease](lease.md#leaseallocdmaarea) | kernel |
 | AllocMsg | [msg](msg.md#execallocmsg) | library |
 | AllocSignal | [exec](exec.md#execallocsignal) | kernel |
 | ArmPort | [msg](msg.md#execarmport) | library |
+| ArmTimer | [exec](exec.md#execarmtimer) | kernel |
+| BindIrq | [lease](lease.md#leasebindirq) | kernel |
 | CloseConn | [exec](exec.md#execcloseconn) | kernel |
+| CloseHandle | [exec](exec.md#execclosehandle) | kernel |
 | ClosePort | [msg](msg.md#execcloseport) | library |
 | ConnectPort | [msg](msg.md#execconnectport) | library |
+| CreateLease | [lease](lease.md#leasecreatelease) | kernel |
 | CreatePort | [exec](exec.md#execcreateport) | kernel |
+| CreateProcess | [exec](exec.md#execcreateprocess) | kernel |
 | CreateTask | [exec](exec.md#execcreatetask) | kernel |
+| CurrentTime | [exec](exec.md#execcurrenttime) | kernel |
 | DeletePort | [exec](exec.md#execdeleteport) | kernel |
 | DoMsg | [msg](msg.md#execdomsg) | library |
 | ExitProcess | [exec](exec.md#execexitprocess) | kernel |
@@ -32,19 +41,27 @@
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
+| GrantLease | [lease](lease.md#leasegrantlease) | kernel |
+| KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
+| MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
+| MapLease | [lease](lease.md#leasemaplease) | kernel |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
 | PortGone | [msg](msg.md#execportgone) | library |
 | ProtectArea | [exec](exec.md#execprotectarea) | kernel |
 | PutMsg | [msg](msg.md#execputmsg) | library |
 | QueryArea | [exec](exec.md#execqueryarea) | kernel |
+| QueryLease | [lease](lease.md#leasequerylease) | kernel |
+| QueryProcess | [exec](exec.md#execqueryprocess) | kernel |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |
+| RevokeLease | [lease](lease.md#leaserevokelease) | kernel |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
 | Signal | [exec](exec.md#execsignal) | kernel |
 | SignalConn | [exec](exec.md#execsignalconn) | kernel |
 | SignalWaitConn | [exec](exec.md#execsignalwaitconn) | kernel |
+| StartProcess | [exec](exec.md#execstartprocess) | kernel |
 | UnshareArea | [exec](exec.md#execunsharearea) | kernel |
 | Wait | [exec](exec.md#execwait) | kernel |
 | WaitPort | [msg](msg.md#execwaitport) | library |
@@ -56,6 +73,8 @@ Each is under BUGS in its entry.
 - `FindTask` still returns `Handle`, so its error comes back as a large unsigned value. (`AllocArea` and `CreateTask` now return `int64_t`.)
 - `ExitTask`'s code goes nowhere.
 - `SignalWaitConn` returns 0 at once for a bad handle, the same as for a closed peer.
-- An over-long port name gives `ERR_BADADDR` rather than `ERR_BADARG`.
+- An over-long port or program name (`CreatePort`, `CreateProcess`) gives `ERR_BADADDR` rather than `ERR_BADARG`.
 - If `OpenPort`'s or `AcceptConn`'s `arena` pointer stops being writable mid-call, the connection is made but its handle is lost.
 - `KLog` drops lines over its rate limit and still returns 0, and the console is still polled.
+- `AckWaitIrq` reports errors only when its mask is 0. With a nonzero mask a refused call returns 0 at once.
+- `MapFirmware` leaves what it mapped in place when it fails part way.
