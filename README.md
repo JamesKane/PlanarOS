@@ -1,8 +1,17 @@
 # Planar
 
-A lightweight single-user OS for the 64-bit SBCs in the office. All processes share one flat address space. IPC is passing pointers in Amiga Exec style. Coprocessors are driven as "firmware as hardware". The starting point is *Design Specification for a Lightweight, Flat-Memory Operating System* (the "vision paper"). The design leans on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which have already proved a single address space and Exec-style IPC on the Orange Pi RV2.
+Planar is an operating system for one person and one machine. It turns a modern 64-bit single-board computer into something that feels as direct as an Amiga: small, fast and fully understood, without the protection holes that came with that.
 
-V1 runs on QEMU (riscv64 and aarch64) and on the Orange Pi RV2. That means a single address space over protection domains, SMP scheduling, user processes, Areas in both memory layouts, and lazy FP and vector state. See [docs/v1-plan.md](docs/v1-plan.md). V2 (IPC) is next.
+- **One address space.** Every program sees the same memory map, so a pointer means the same thing in every process and to every device. Data is shared by passing its address, not by copying or serialising it.
+- **Messages without copies.** Programs talk through Exec-style ports and messages that travel by reference. When the other side is already running, a message never enters the kernel.
+- **Crashes stay contained.** Each process runs in its own protection domain. A bad pointer or a dead driver takes down that process and nothing else, and the kernel reclaims everything it owned.
+- **The GPU and NPU belong to the app.** Applications put work straight into the coprocessors' firmware queues and ring the doorbell. Neither the kernel nor a server sits in the data path.
+- **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
+- **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
+
+Today Planar boots on QEMU (riscv64 and aarch64) and on the Orange Pi RV2. It has SMP scheduling, user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md)).
+
+The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
 ## One tree, every platform
 
