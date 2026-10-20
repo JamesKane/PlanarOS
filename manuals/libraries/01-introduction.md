@@ -10,11 +10,9 @@ Every process sees memory at the same addresses. If two processes can both see a
 
 What differs between processes is *which* memory they can see, and with what rights. Memory comes in **Areas** (chapter 3): page-rounded blocks that the kernel maps into one process or several.
 
-Two layouts of the address space are built, and which one Planar keeps is still being measured (VQ3, [docs §3.1](../../docs/03-memory.md)):
-- **identity**: an address is the physical address;
-- **global-VA**: addresses come from a system-wide allocator, as in omega.
+Planar's layout of the address space is **identity**: an address is the physical address (VQ3, decided 2026-10-20, [docs §3.1](../../docs/03-memory.md)). Until it is removed after V3, a second layout, **global-VA**, can still be chosen at boot with `layout=global`; its addresses come from a system-wide allocator, as in omega.
 
-**A program must not assume either.** In particular, don't assume an Area's address is its physical address, or that two Areas allocated one after the other are next to each other.
+**Don't assume where an Area will be.** Two Areas allocated one after the other needn't be next to each other, and a large Area can fail to allocate when memory is fragmented even though enough is free in total.
 
 ## Processes and tasks
 

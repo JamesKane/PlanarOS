@@ -215,3 +215,106 @@ void arch_wait_for_interrupt(void)
     for (;;)
         __asm__ volatile("wfi");
 }
+
+/*
+ * TLB counters, through the SBI PMU: the firmware owns the event
+ * selectors (M-mode CSRs), so the kernel asks it for counters of the
+ * standard cache events, then reads them as hpmcounters. Which of the
+ * hart's own events those are is the firmware's business. Leaving out
+ * S- and M-mode needs Sscofpmf; without it they count too.
+ */
+#define CACHE_EVENT(id, op, miss)   (1u << 16 | (id) << 3 | (op) << 1 | (miss))
+
+static const struct {
+    uint32_t event;
+    const char *name;
+} tlb_events[] = {
+    { CACHE_EVENT(3, 0, 1), "DTLB read misses" },
+    { CACHE_EVENT(3, 1, 1), "DTLB write misses" },
+    { CACHE_EVENT(4, 0, 1), "ITLB misses" },
+};
+
+constexpr uint64_t PMU_CLEAR_VALUE = 1u << 1, PMU_SINH = 1u << 4, PMU_MINH = 1u << 6;
+constexpr uint64_t PMU_START_SET_INIT = 1u << 0;
+
+/* Per CPU: the counters configured, and their CSRs (0: none). */
+static struct {
+    uint32_t idx[ARCH_TLB_EVENTS], csr[ARCH_TLB_EVENTS];
+    const char *name[ARCH_TLB_EVENTS];
+    unsigned n;
+    bool tried;
+} tlb[MAX_CPUS];
+
+/* Read hpmcounter 'csr' (0xc03-0xc1f); csrr needs the number fixed. */
+static uint64_t read_hpm(uint32_t csr)
+{
+    uint64_t v = 0;
+
+#define CASE(n) case 0xc00 + n: __asm__ volatile("csrr %0, %1" : "=r"(v) : "i"(0xc00 + n)); break;
+    switch (csr) {
+    CASE(3) CASE(4) CASE(5) CASE(6) CASE(7) CASE(8) CASE(9) CASE(10)
+    CASE(11) CASE(12) CASE(13) CASE(14) CASE(15) CASE(16) CASE(17) CASE(18)
+    CASE(19) CASE(20) CASE(21) CASE(22) CASE(23) CASE(24) CASE(25) CASE(26)
+    CASE(27) CASE(28) CASE(29) CASE(30) CASE(31)
+    default: break;
+    }
+#undef CASE
+    return v;
+}
+
+/* The first time on a CPU: find a counter for each event the firmware
+ * can count, and keep it. */
+static void tlb_configure(unsigned cpu)
+{
+    struct sbiret n, r, info;
+    uint64_t mask;
+
+    tlb[cpu].tried = true;
+    if (!sbi_has(SBI_EXT_PMU))
+        return;
+    n = sbi_call(SBI_EXT_PMU, SBI_PMU_NUM_COUNTERS, 0, 0, 0);
+    mask = n.value >= 64 ? ~0ULL : (1ULL << n.value) - 1;
+    for (unsigned e = 0; e < sizeof tlb_events / sizeof tlb_events[0]; e++) {
+        unsigned k = tlb[cpu].n;
+
+        if (k == ARCH_TLB_EVENTS)
+            break;
+        r = sbi_call5(SBI_EXT_PMU, SBI_PMU_COUNTER_CFG_MATCH, 0, mask,
+                      PMU_CLEAR_VALUE | PMU_SINH | PMU_MINH, tlb_events[e].event, 0);
+        if (r.error)
+            continue;
+        info = sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_GET_INFO, r.value, 0, 0);
+        /* Firmware counters (the top bit) aren't CSRs. */
+        if (info.error || info.value >> 63 || (info.value & 0xfff) < 0xc03 ||
+            (info.value & 0xfff) > 0xc1f)
+            continue;
+        mask &= ~(1ULL << r.value);         /* not again for the next event */
+        tlb[cpu].idx[k] = (uint32_t)r.value;
+        tlb[cpu].csr[k] = (uint32_t)(info.value & 0xfff);
+        tlb[cpu].name[k] = tlb_events[e].name;
+        tlb[cpu].n++;
+    }
+}
+
+unsigned arch_tlb_count_start(const char *names[ARCH_TLB_EVENTS])
+{
+    unsigned cpu = this_cpu()->index;
+
+    if (!tlb[cpu].tried)
+        tlb_configure(cpu);
+    for (unsigned k = 0; k < tlb[cpu].n; k++) {
+        sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, tlb[cpu].idx[k], 1, 0);
+        sbi_call5(SBI_EXT_PMU, SBI_PMU_COUNTER_START, tlb[cpu].idx[k], 1, PMU_START_SET_INIT,
+                  0, 0);
+        names[k] = tlb[cpu].name[k];
+    }
+    return tlb[cpu].n;
+}
+
+void arch_tlb_count_read(unsigned n, uint64_t counts[ARCH_TLB_EVENTS])
+{
+    unsigned cpu = this_cpu()->index;
+
+    for (unsigned k = 0; k < n && k < tlb[cpu].n; k++)
+        counts[k] = read_hpm(tlb[cpu].csr[k]);
+}

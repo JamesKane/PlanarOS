@@ -121,6 +121,16 @@ struct arch_lazy_counts {
 void arch_lazy_counts(struct arch_lazy_counts *c);
 
 /*
+ * TLB counters (VQ3, V3 step 6): user mode's TLB refills and table walks
+ * on this CPU, from the PMU. arch_tlb_count_start zeroes and starts up
+ * to ARCH_TLB_EVENTS of them, names them, and returns how many (0: this
+ * CPU can't count any); arch_tlb_count_read reads the first 'n'.
+ */
+constexpr unsigned ARCH_TLB_EVENTS = 4;
+unsigned arch_tlb_count_start(const char *names[ARCH_TLB_EVENTS]);
+void arch_tlb_count_read(unsigned n, uint64_t counts[ARCH_TLB_EVENTS]);
+
+/*
  * Protection domains and user mode (V1 step 4; docs §3.5 is where the
  * contract is going). A domain maps user pages in the lower half; the
  * kernel half is the same in all of them. struct arch_domain comes from

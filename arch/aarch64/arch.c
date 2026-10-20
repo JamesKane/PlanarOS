@@ -362,3 +362,55 @@ void arch_wait_for_interrupt(void)
     for (;;)
         __asm__ volatile("wfi");
 }
+
+/* PMUv3's common TLB events, in the order they're wanted. */
+static const struct {
+    unsigned event;
+    const char *name;
+} tlb_events[] = {
+    { 0x05, "L1D refills" },        /* L1D_TLB_REFILL */
+    { 0x2d, "L2D refills" },        /* L2D_TLB_REFILL */
+    { 0x34, "data walks" },         /* DTLB_WALK */
+    { 0x35, "instruction walks" },  /* ITLB_WALK */
+};
+
+/* EL0 alone: P and NSK leave out EL1, M EL3; NSH clear leaves out EL2. */
+constexpr uint64_t PMEVTYPER_EL0_ONLY = 1ULL << 31 | 1ULL << 29 | 1ULL << 26;
+
+static bool pmu_has_event(unsigned e)
+{
+    uint64_t id = e < 0x20 ? sysreg_read(pmceid0_el0) : sysreg_read(pmceid1_el0);
+
+    return id >> (e % 32) & 1;
+}
+
+unsigned arch_tlb_count_start(const char *names[ARCH_TLB_EVENTS])
+{
+    unsigned n = 0, counters = have_pmu ? (sysreg_read(pmcr_el0) >> 11) & 0x1f : 0;
+    uint64_t on = 0;
+
+    for (unsigned i = 0; i < sizeof tlb_events / sizeof tlb_events[0]; i++) {
+        if (n == counters || n == ARCH_TLB_EVENTS)
+            break;
+        if (!pmu_has_event(tlb_events[i].event))
+            continue;
+        sysreg_write(pmselr_el0, n);
+        isb();
+        sysreg_write(pmxevtyper_el0, PMEVTYPER_EL0_ONLY | tlb_events[i].event);
+        sysreg_write(pmxevcntr_el0, 0);
+        names[n] = tlb_events[i].name;
+        on |= 1ULL << n++;
+    }
+    sysreg_write(pmcntenset_el0, on);
+    isb();
+    return n;
+}
+
+void arch_tlb_count_read(unsigned n, uint64_t counts[ARCH_TLB_EVENTS])
+{
+    for (unsigned i = 0; i < n; i++) {
+        sysreg_write(pmselr_el0, i);
+        isb();
+        counts[i] = sysreg_read(pmxevcntr_el0);
+    }
+}

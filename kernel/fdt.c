@@ -298,12 +298,18 @@ bool fdt_is_compatible(int32_t node, const char *compat)
     return false;
 }
 
+/*
+ * The searches walk from the root every time and skip to past 'after'.
+ * next_node ends the tree at an END_NODE with the depth at 0, so the
+ * depth has to count from the root: counted from 'after', the end of
+ * 'after' itself would end the search.
+ */
 int32_t fdt_find_compatible(int32_t after, const char *compat)
 {
     int depth = 0;
-    int32_t node = blob ? next_node(after, &depth) : -1;
+    int32_t node = blob ? next_node(-1, &depth) : -1;
 
-    while (node >= 0 && !fdt_is_compatible(node, compat))
+    while (node >= 0 && (node <= after || !fdt_is_compatible(node, compat)))
         node = next_node(node, &depth);
     return node;
 }
@@ -311,9 +317,9 @@ int32_t fdt_find_compatible(int32_t after, const char *compat)
 int32_t fdt_find_name(int32_t after, const char *name)
 {
     int depth = 0;
-    int32_t node = blob ? next_node(after, &depth) : -1;
+    int32_t node = blob ? next_node(-1, &depth) : -1;
 
-    while (node >= 0 && !name_matches(fdt_node_name(node), name, kstrlen(name)))
+    while (node >= 0 && (node <= after || !name_matches(fdt_node_name(node), name, kstrlen(name))))
         node = next_node(node, &depth);
     return node;
 }

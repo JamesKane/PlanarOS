@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: in progress (2026-10-20).** Steps 1 to 5 done. All three decisions are made (end of this plan).
+**Status: done (2026-10-20).** All six steps, and the exit below, are met. VQ3 is decided: the identity layout. All three decisions are made (end of this plan).
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -28,7 +28,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 | **3. The board** ✅ | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
 | **4. Big and little** ✅ | Core classes from the PPTT and MIDR, and costs per class. |
 | **5. Arm costs** ✅ | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
-| **6. VQ3** | The `vq3` workload on the CIX, again on the RV2, and switch and TLB-miss costs per layout. Then the decision. |
+| **6. VQ3** ✅ | The `vq3` workload on the CIX, again on the RV2, and switch and TLB-miss costs per layout. Then the decision. |
 
 ## 1. UEFI entry, on QEMU ✅
 
@@ -224,7 +224,7 @@ While the cable is on the CIX, the RV2 has no console and no serial boot. Step 6
 |---|---|---|---|---|
 | Cortex-A720 at 1.9 GHz | 258 | 63 | 882 | 1,533 (806 ns) |
 | Cortex-A520 at 1.8 GHz | 586 | 66 | 1,666 | 3,366 (1.87 µs) |
-| RV2, X60 at 1.6 GHz (V2) | 469 | 118 | 1,554 | 3,209 (2.0 µs) |
+| RV2, X60 at 1.6 GHz | 472 | 118 | 1,572 | 3,201 (2.0 µs) |
 
 Both layouts pass on the board (a soak of 10 boots, 5 in each layout, had no failures). The global layout gives the same numbers to within 1%: `DoMsg` 1,529 on the A720 and 3,380 on the A520. The transcript ends with `V3.5 done`.
 
@@ -241,7 +241,8 @@ Both layouts pass on the board (a soak of 10 boots, 5 in each layout, had no fai
 
   The profiler found the second: the edge from the end of a call to the return to EL0 was 148 cycles, and is 104 now.
 - **The profiler** (`make PROFILE=1`) marks the AArch64 trap path as it does RV64's, and `PMCCFILTR_EL0` is set to count EL0 and EL1 whatever the firmware left.
-- **Later:** the parked lock-pair work (docs/v2-plan.md, last section), measured on both ISAs. The A720's lock pair is 27 cycles and the X60's about 55. The RV2 also needs the step 5 build run again. Its numbers above are from V2, because the serial cable is on the CIX.
+- **The RV2's row** was measured with the step 6 build, by `V3.5 costs` like the others. It matches V2's numbers (469, 118, 1,554, 3,209) to within 1%.
+- **Later:** the parked lock-pair work (docs/v2-plan.md, last section), measured on both ISAs. The A720's lock pair is 27 cycles and the X60's about 55.
 
 ### The plan, as written before the step
 
@@ -256,7 +257,20 @@ Both layouts pass on the board (a soak of 10 boots, 5 in each layout, had no fai
   The results go in a table next to the RV2's.
 - **The parked lock-pair work** (docs/v2-plan.md, last section) is measured on both ISAs once this step is done.
 
-## 6. VQ3
+## 6. VQ3 ✅
+
+**Done (2026-10-20). VQ3 is decided: the identity layout.** The data and the reasons are in [vq3-results.md](vq3-results.md); questions.md and docs §3.1 record the decision. Both boards ran the VQ3 soak twice, and `V3.5 costs` and `V3.6 tlb` in both layouts. The transcript ends with `V3.6 done`.
+
+- **The VQ3 soak** (`BOOTARGS=vq3`): on the CIX, 32 GB with sizes × 127; on the RV2, 8 GiB again. Identity fails 5–6 of about 3,500 allocations with memory free, and global none. Global leaves free runs 27–37% shorter and takes 9–11% more page tables. Without byte-wise zero-filling, global's allocation is 38% slower on the CIX and 10% faster on the RV2. Each board's two runs agree to within 0.2%.
+- **Context switches** cost the same in both layouts: the domain switch is one register write with a 16-bit ASID on all three cores, and `DoMsg` between two processes differs by 2–5%, in no consistent direction.
+- **`V3.6 tlb`** (`selftest_tlb`, `conformance/tlbwalk.c`): on the first CPU of each class, a user program writes one word in each page of 16 or 48 MiB of Areas, in a random order. It times 8 rounds itself with the cycle counter, after a warm-up round. The kernel counts user mode's TLB events around it, and subtracts a run of 1 round from a run of 9 so first touches don't count.
+  - **The counters** are a new arch call, `arch_tlb_count_start` and `arch_tlb_count_read`. On AArch64 they are PMUv3 event counters filtered to EL0: L1D and L2D TLB refills, and data and instruction walks, where PMCEID says the core has them. On RISC-V they are the SBI PMU's standard DTLB and ITLB miss events, read as hpmcounters. QEMU has no TLB events, so it runs the program and says so.
+  - **The result:** global costs 7–10% more per touch on the A720 and up to 45–65% more on the A520; on the X60 it is 2–3% cheaper. Identity takes 3–6× fewer L2 TLB refills on Arm.
+  - **Why:** the global layout's pages are contiguous too in a fresh boot (99%), but only 6% have VA and PA aligned alike below 64 KiB. The test prints both shares, and the Arm cores appear to combine aligned contiguous entries.
+- **A parser bug, found on the way.** The RV2's VQ3 runs showed 2 GiB, not 8. V2.5's hardening of the device-tree parser (review M14) made `fdt_find_name` and `fdt_find_compatible` count depth from the node they start after, so that node's own end looked like the end of the tree, and only the first `memory` node was found. Both now walk from the root. `V1.1 fdt` checks that three nodes of one name are all found, and failed before the fix. U-Boot was never the problem; the commit from before M14 found both banks on the same board.
+- **The RV2 rig** now always boots with `reboot` (`mk/ky-x1.mk`), as the CIX does. A board left idle in the kernel answers no U-Boot prompt, and the next run needs someone at the power switch.
+
+### The plan, as written before the step
 
 - **On the CIX:** `make vq3` (32 GB, with sizes scaled).
 - **On the RV2, again:** its allocation times were dominated by a byte-at-a-time `memset`, and V2.5 fixed that.

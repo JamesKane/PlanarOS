@@ -209,14 +209,27 @@ void selftest_fdt(void)
     build_blob(wraps, 7);
     be32_at(2, 4096);               /* the structure block past the end */
     ok &= !fdt_init(bad_blob);
+    /* And a good one: the root, nodes "m", "m" and "n", and an "m" inside
+     * "n". A search goes on past the end of the node it starts from: on
+     * the RV2 the second memory bank is the second "memory" node. */
+    static const uint32_t three_m[] = { 1, 0, 1, 0x6d000000, 2, 1, 0x6d000000, 2,
+                                        1, 0x6e000000, 1, 0x6d000000, 2, 2, 2, 9 };
+    build_blob(three_m, 16);
+    int32_t m[4] = { -1, -1, -1, -1 };
+    bool found = fdt_init(bad_blob);
+    for (unsigned i = 0; i < 4 && found; i++)
+        m[i] = fdt_find_name(i ? m[i - 1] : -1, "m");
+    found &= m[0] == 8 && m[1] == 20 && m[2] == 40 && m[3] < 0;
     if (real && !fdt_init(real))
         fail("V1.1 fdt", "the real device tree no longer reads");
     if (!real)
         fdt_init(nullptr);          /* booted from ACPI, or from nothing */
     if (!ok)
         fail("V1.1 fdt", "a broken device tree got past the parser");
+    if (!found)
+        fail("V1.1 fdt", "a search stopped at the end of the node it started from");
     kprintf("V1.1 fdt ok: a wrapping length, extra node ends, blocks past the end and an "
-            "endless name were all refused\n");
+            "endless name were all refused; three nodes of one name all found\n");
 }
 
 static void deadline_fn(void *)
@@ -1318,6 +1331,8 @@ void selftest_tasks(void *)
     kprintf("V3.4 done\n");
     selftest_costs();
     kprintf("V3.5 done\n");
+    selftest_tlb();
+    kprintf("V3.6 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2235,6 +2250,133 @@ void selftest_costs(void)
                     (long long)domsg, (unsigned long long)(mhz ? domsg * 1000 / mhz : 0));
         kprintf("\n");
     }
+}
+
+/* ---------------------------------------------------------------------
+ * V3 step 6: TLB misses in this boot's layout (VQ3).
+ */
+
+/* Run tlbwalk with 'arg' on CPU 'a' alone, counting user mode's TLB
+ * events there: 'n' of them, as arch_tlb_count_start set up. Returns its
+ * cycles per touch, in tenths. */
+static int64_t tlb_run(uint64_t arg, unsigned a, unsigned n, uint64_t counts[ARCH_TLB_EVENTS])
+{
+    const char *names[ARCH_TLB_EVENTS];
+    struct process *p;
+    int64_t code;
+
+    if (arch_tlb_count_start(names) != n)
+        fail("V3.6 tlb", "the counters changed");
+    p = run_on("tlbwalk", arg, 10000000, cpu_mask(a));
+    arch_tlb_count_read(n, counts);
+    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code <= 0)
+        fail("V3.6 tlb", "tlbwalk failed");
+    code = p->exit_code;
+    process_free(p);
+    return code;
+}
+
+/* Of the pages of 64 fresh 64-page Areas in this boot's layout, the
+ * shares (percent) that follow the page before them physically, and
+ * whose address and physical address agree below 64 KiB: what a TLB
+ * that coalesces neighbouring entries needs. All of them in the
+ * identity layout. */
+static void contiguous_shares(uint64_t *follow, uint64_t *aligned)
+{
+    static struct area *a[64];
+
+    *follow = *aligned = 0;
+    for (unsigned i = 0; i < 64; i++)
+        if (!(a[i] = area_new(layout_boot(), 64, 0, false)))
+            fail("V3.6 tlb", "area_new failed");
+    for (unsigned i = 0; i < 64; i++) {
+        for (uint64_t off = 0; off < 64 * PAGE_SIZE; off += PAGE_SIZE) {
+            uint64_t pa = area_pa(a[i], off);
+
+            *aligned += (area_base(a[i]) + off - pa) % (64 * 1024) == 0;
+            if (off)
+                *follow += pa == area_pa(a[i], off - PAGE_SIZE) + PAGE_SIZE;
+        }
+        area_destroy(a[i]);
+    }
+    *follow = *follow * 100 / (64 * 63);
+    *aligned = *aligned * 100 / (64 * 64);
+}
+
+/* tlbwalk's cycles per touch, in tenths, over 16 and 48 MiB. */
+static void print_touch(const int64_t cyc[2])
+{
+    kprintf("; cycles a touch %lld.%lld over 16 MiB, %lld.%lld over 48 MiB",
+            (long long)(cyc[0] / 10), (long long)(cyc[0] % 10), (long long)(cyc[1] / 10),
+            (long long)(cyc[1] % 10));
+}
+
+static void print_counts(const char *what, unsigned n, const char *const names[],
+                         const int64_t per[])
+{
+    kprintf("; %s,", what);
+    for (unsigned i = 0; i < n; i++)
+        kprintf(" %s %lld", names[i], (long long)per[i]);
+}
+
+/* On the first CPU of each class: TLB events per thousand pages touched
+ * at random over 16 and 48 MiB (tlbwalk), and per thousand DoMsg round
+ * trips between two processes. Only user mode counts; the layout is
+ * this boot's. */
+void selftest_tlb(void)
+{
+    constexpr unsigned SIZES[2] = { 64, 192 };     /* Areas of 64 pages */
+    uint64_t follow, aligned;
+
+    if (!user_images[0].name) {
+        kprintf("V3.6 tlb skipped: no user programs\n");
+        return;
+    }
+    contiguous_shares(&follow, &aligned);
+    for (unsigned k = 0; cpu_class(k); k++) {
+        const char *names[ARCH_TLB_EVENTS];
+        uint64_t one[ARCH_TLB_EVENTS], nine[ARCH_TLB_EVENTS], msg[ARCH_TLB_EVENTS], calls[2];
+        int64_t walk[2][ARCH_TLB_EVENTS], per_msg[ARCH_TLB_EVENTS], code, cyc[2];
+        unsigned a = ~0u, n;
+
+        for (unsigned i = 0; i < ncpus && a == ~0u; i++)
+            if (cpus[i].cls == k && atomic_load(&cpus[i].online))
+                a = i;
+        task_set_affinity(cpu_mask(a));
+        n = arch_tlb_count_start(names);
+        for (unsigned z = 0; z < 2; z++) {  /* run even with nothing to count */
+            int64_t touches = 8 * SIZES[z] * 64;
+
+            tlb_run((uint64_t)SIZES[z] << 16 | 1, a, n, one);
+            cyc[z] = tlb_run((uint64_t)SIZES[z] << 16 | 9, a, n, nine);
+            for (unsigned i = 0; i < n; i++)
+                walk[z][i] = ((int64_t)nine[i] - (int64_t)one[i]) * 1000 / touches;
+        }
+        arch_tlb_count_start(names);
+        with_echo_on("pingpong", 1, calls, cpu_mask(a), &code);
+        arch_tlb_count_read(n, msg);
+        if (code <= 0)
+            fail("V3.6 tlb", "pingpong failed");
+        for (unsigned i = 0; i < n; i++)
+            per_msg[i] = (int64_t)(msg[i] * 1000 / 20000);
+
+        kprintf("V3.6 tlb: ");
+        print_class(cpu_class(k));
+        kprintf(", %s layout, %llu%% of pages after their neighbour, %llu%% aligned alike",
+                layout_name(layout_boot()), (unsigned long long)follow,
+                (unsigned long long)aligned);
+        if (!n) {
+            print_touch(cyc);
+            kprintf("; no TLB events to count\n");
+            continue;
+        }
+        print_touch(cyc);
+        print_counts("per 1000 touches over 16 MiB", n, names, walk[0]);
+        print_counts("over 48 MiB", n, names, walk[1]);
+        print_counts("per 1000 DoMsg", n, names, per_msg);
+        kprintf("\n");
+    }
+    task_set_affinity(1);
 }
 
 /* ---------------------------------------------------------------------

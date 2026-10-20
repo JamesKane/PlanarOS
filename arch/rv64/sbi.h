@@ -12,6 +12,7 @@ constexpr uint32_t SBI_EXT_IPI  = 0x735049;
 constexpr uint32_t SBI_EXT_HSM  = 0x48534d;
 constexpr uint32_t SBI_EXT_RFENCE = 0x52464e43;
 constexpr uint32_t SBI_EXT_SRST = 0x53525354;
+constexpr uint32_t SBI_EXT_PMU  = 0x504d55;
 
 constexpr uint32_t SBI_BASE_GET_SPEC_VERSION = 0;
 constexpr uint32_t SBI_BASE_PROBE_EXTENSION  = 3;
@@ -23,6 +24,11 @@ constexpr uint32_t SBI_RFENCE_FENCE_I        = 0;
 constexpr uint32_t SBI_RFENCE_SFENCE_VMA_ASID = 2;
 constexpr uint64_t SBI_ALL_HARTS             = ~0ULL;   /* hart_mask_base: every hart */
 constexpr uint32_t SBI_SRST_RESET            = 0;       /* type 1: cold reboot */
+constexpr uint32_t SBI_PMU_NUM_COUNTERS      = 0;
+constexpr uint32_t SBI_PMU_COUNTER_GET_INFO  = 1;
+constexpr uint32_t SBI_PMU_COUNTER_CFG_MATCH = 2;
+constexpr uint32_t SBI_PMU_COUNTER_START     = 3;
+constexpr uint32_t SBI_PMU_COUNTER_STOP      = 4;
 
 struct sbiret {
     int64_t error;      /* 0 or a negative SBI_ERR_* */

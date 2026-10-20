@@ -19,12 +19,13 @@ Each entry gives the question, where it came up, and the current leaning or deci
 
 **VQ3 ★ Identity SAS (VA = PA) or global-VA SAS (Omega). Decide from measurements.**
 
-No commitment until V1 has numbers from the RV2 and at least one Arm board. Both layouts are built (V1 step 5) and chosen at boot with `layout=`. The **first QEMU results are in [vq3-results.md](vq3-results.md)**:
-- Under memory pressure, identity fails about 0.2% of allocations even though enough memory is free.
-- Global leaves physical memory about 2.8× more fragmented.
-- Page tables and allocation time are about the same.
+**Decided (2026-10-20): identity SAS.** The data and the reasons are in [vq3-results.md](vq3-results.md), from QEMU, the RV2 and the CIX P1 (V3 step 6):
+- Global costs 7–10% more per random touch on the A720, and up to 45–65% more on the A520. The Arm cores combine TLB entries only when VA and PA line up, which identity gives every page. On the X60 the layouts are within 3%.
+- Identity leaves 38–60% longer free physical runs and uses 9–11% fewer page-table pages.
+- Context switches cost the same in both.
+- Identity's cost: under pressure about 0.15% of allocations fail with enough memory free, and the peak is about 5% lower. That is open work for V4.
 
-Once it's decided (V3 step 6), the losing layout is deleted after V3, in a commit of its own (v3-plan decision 3, 2026-10-20).
+The global layout is deleted after V3, in a commit of its own (v3-plan decision 3, 2026-10-20).
 
 V1 measures:
 - Largest free run per zone after a soak test that creates and destroys processes and grows and shrinks heaps.

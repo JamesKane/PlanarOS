@@ -7,17 +7,17 @@
 #   make PLATFORM=ky-x1 test       the same, checking the transcript
 #
 # Over the serial console, the kernel arguments (LAYOUT, BOOTARGS) go in
-# U-Boot's bootargs; "reboot" makes the board reset after its tests, so
-# runs can follow each other without anyone at the power switch.
+# U-Boot's bootargs, always with "reboot": the board resets after its
+# tests, so runs can follow each other without anyone at the power
+# switch (as on the CIX, mk/uefi-a64.mk). A board left idle in the
+# kernel answers no U-Boot prompt.
 
 LOAD_ADDR := 0x200000
 BOOT_TIMEOUT := 900
 
-# With "reboot", success is the board going round again; serial-boot.py
-# reports a reset the firmware refused.
-ifneq ($(findstring reboot,$(BOOTARGS))$(findstring hang,$(BOOTARGS)),)
+# Success is the board going round again; serial-boot.py reports a
+# reset the firmware refused.
 EXPECT := serial-boot: the board reset itself
-endif
 include mk/arch-rv64.mk
 
 PLAT_SRCS := \
@@ -28,7 +28,7 @@ PLAT_SRCS := \
 SERIAL ?= $(firstword $(wildcard /dev/cu.usbserial-*))
 
 RUN_CMD := python3 -I tools/serial-boot.py --port $(SERIAL) --image $(IMAGE) \
-	--bootargs 'layout=$(LAYOUT) $(BOOTARGS)' --log $(BUILD)/serial-boot.log
+	--bootargs 'layout=$(LAYOUT) reboot $(BOOTARGS)' --log $(BUILD)/serial-boot.log
 
 run: $(IMAGE)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }

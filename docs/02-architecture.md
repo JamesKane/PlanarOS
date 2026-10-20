@@ -96,6 +96,8 @@ Kernel entry contract (`arch_entry`):
 
 **Built (V3 step 4).** Each CPU has a core class: its core type, from MIDR (or RISC-V's `marchid`), read on the CPU itself. The PPTT's clusters are a cross-check. A class's capacity is measured at boot, by timing one fixed workload on every CPU; the fastest class gets 1024. Placement fills idle big cores first, then idle little ones, then goes where a task gets the most capacity per task. On a symmetric machine that is the old least-loaded rule.
 
+**Built (V3 step 6).** VQ3 is decided: the identity layout (docs §3.1, [vq3-results.md](vq3-results.md)). `arch_tlb_count_start` and `arch_tlb_count_read` count user mode's TLB misses on a CPU, through the PMU on AArch64 and the SBI PMU on RISC-V.
+
 **Built (V3 step 5).** On AArch64, as on RV64, a kernel call saves only what the calling convention keeps, and zeroes the scratch registers on the way out. On the CIX a null kernel call is 258 cycles on an A720 and 586 on an A520, and a `DoMsg` round trip 1,533 and 3,366 (the RV2: 469 and 3,209). `make PROFILE=1` profiles both ISAs.
 
 **Built (V3 step 3).** One `uefi-a64` image runs on the CIX P1, with no board-specific code: the board's differences are ACPI quirk data. Leaving EL2, the entry code writes every EL2 control that can trap EL1 whole, because on a core just started by PSCI they're UNKNOWN. The direct map covers 1 TiB. The GTDT's SBSA watchdog is kept armed, so a hang resets the board.

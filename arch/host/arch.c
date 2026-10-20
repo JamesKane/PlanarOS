@@ -233,3 +233,12 @@ bool arch_probe_read(uint64_t, uint64_t *)
     fflush(stdout);
     exit(0);
 }
+
+unsigned arch_tlb_count_start(const char *[ARCH_TLB_EVENTS])
+{
+    return 0;
+}
+
+void arch_tlb_count_read(unsigned, uint64_t [ARCH_TLB_EVENTS])
+{
+}

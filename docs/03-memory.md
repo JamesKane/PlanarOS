@@ -2,7 +2,7 @@
 
 ## 3.1 Model
 
-**Proposed: an identity-mapped single address space (identity SAS).**
+**Decided (VQ3, 2026-10-20): an identity-mapped single address space (identity SAS).** See [vq3-results.md](vq3-results.md).
 
 - All of the system lives in **one address space, and VA = PA**. A pointer is a physical address in every domain, and also to the kernel. On devices with no IOMMU, or an identity-mapped one, it is the address the device uses as well.
 - A **protection domain** is a set of (region, rights) grants. The page-table back end turns that set into an ASID-tagged translation table that maps only the granted regions, each at its own physical address.
@@ -12,7 +12,7 @@ How this differs from Omega:
 - Omega keeps a **global VA allocator** that is separate from physical memory. Its layout is Areas at `0x1_0000`–`0x1F_FFFF_FFFF`, then the shared region, then lease windows.
 - Planar drops that layer, so the "where does this Area live" allocator is the physical page allocator.
 
-| | Identity SAS (Planar, proposed) | Global-VA SAS (Omega) |
+| | Identity SAS (Planar) | Global-VA SAS (Omega) |
 |---|---|---|
 | Pointer = DMA address | Yes, when there is no IOMMU or it is identity-mapped | No; translation needed |
 | Area larger than the biggest free physical run | Impossible | Possible |
@@ -22,11 +22,11 @@ How this differs from Omega:
 | Fit with a PMP/MPU back end | Natural: PMP is physical | Needs a different design |
 | Kernel view | Upper-half direct map (§3.2) | Upper-half direct map (§3.2) |
 
-**Open (VQ3). Decided by measurement, not ahead of time.**
+**Decided by measurement (VQ3).** V1 built both layouts behind `arch_domain_*`, with omega providing the global-VA layout, and ran the same soak and cost probes on QEMU, the RV2 and the CIX P1. Identity won on TLB cost on Arm (global costs 7–65% more per random touch on the A720 and A520, through TLB entries the cores combine only when VA and PA line up), on physical fragmentation, and on page tables. Context switches cost the same in both. Its cost is the one this section predicted: under pressure about 0.15% of allocations fail with enough memory free, because a large Area needs one physical run.
 
-Identity SAS follows the paper most closely and makes devices simplest. Its cost is fragmentation. A hybrid could reserve one non-identity window for "virtual-contiguous" Areas, but every pointer into that window would be a non-DMA pointer, which brings back the distinction the design is trying to remove.
+A hybrid could reserve one non-identity window for "virtual-contiguous" Areas, but every pointer into that window would be a non-DMA pointer, which brings back the distinction the design is trying to remove. The needless failures are worked on within identity instead (V4).
 
-V1 builds both layouts behind `arch_domain_*`, with omega providing the global-VA layout. It then runs the soak test and cost probes listed under VQ3 in `questions.md` on the RV2 and an Arm board. Nothing above the protection back end and the physical allocator may assume VA = PA until that decision is made.
+The global layout is deleted after V3, in a commit of its own (v3-plan decision 3). From now on, code above the protection back end may assume VA = PA for user addresses.
 
 ## 3.2 Kernel mapping
 

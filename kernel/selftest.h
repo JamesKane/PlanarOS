@@ -60,4 +60,8 @@ void selftest_classes(void);
  * from selftest_tasks. */
 void selftest_costs(void);
 
+/* V3 step 6: user mode's TLB misses in this boot's layout (VQ3). Called
+ * from selftest_tasks. */
+void selftest_tlb(void);
+
 #endif /* KERNEL_SELFTEST_H */
