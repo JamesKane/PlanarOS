@@ -165,6 +165,26 @@ If the `power` server crashes and restarts while drivers are running, how does i
 
 Raised in §12.7.
 
+## Workbench and UI
+
+**VQ31 Direct DPU plane promotion vs. full-screen composition.**
+
+Should `intuition` assign visible top-level windows directly to hardware DPU overlay planes when within the plane budget, or compose into a single primary scanout buffer? *Leaning:* always use the hardware cursor plane for the pointer; compose windows into one primary scanout buffer first, then promote full-screen or GPU queue-lease windows to dedicated overlay planes.
+
+Raised in §13.1 and §13.7.
+
+**VQ32 Icon asset representation.**
+
+Store icons in `.info` sidecar files (works on FAT32 and the native filesystem alike) with a compact vector command stream, or as pre-rasterised `ARGB8888` bitmaps? *Leaning:* `.info` sidecar files containing a tiny binary vector stream plus a cached `64×64` bitmap.
+
+Raised in §13.4 and §13.7.
+
+**VQ33 Window translucency (`Shell` backdrop blur).**
+
+How should `intuition` implement the translucent `Shell` background before GPU composition is up on every board? *Leaning:* sample from a pre-blurred copy of the static procedural backdrop on CPU composition; optional GPU blur when `intuition` holds a queue lease.
+
+Raised in §13.5 and §13.7.
+
 ## Coprocessors
 
 **VQ16 Is the Hexagon CDSP in scope?**

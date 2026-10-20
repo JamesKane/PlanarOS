@@ -75,8 +75,9 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 10. [Hardware description](docs/09-hardware-description.md): ACPI and FDT, the hwdb device graph, AML isolation (VQ7, decided).
 11. [Driver model](docs/11-driver-model.md): lessons from other systems' driver models, applied to user-mode drivers (proposed).
 12. [Fault tolerance: let it crash](docs/12-let-it-crash.md): Erlang-style crash recovery, supervision and its hardware limits (proposed).
-13. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
-14. [Open questions](docs/questions.md): the question register.
+13. [Workbench and desktop environment](docs/13-workbench.md): Intuition, zero-copy window surfaces, visual design system, widget toolkit and native iconography (proposed).
+14. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
+15. [Open questions](docs/questions.md): the question register.
 
 ## Status
 
