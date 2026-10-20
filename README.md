@@ -77,8 +77,10 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 12. [Fault tolerance: let it crash](docs/12-let-it-crash.md): Erlang-style crash recovery, supervision and its hardware limits (proposed).
 13. [Workbench and desktop environment](docs/13-workbench.md): Intuition, zero-copy window surfaces, visual design system, widget toolkit and native iconography (proposed).
 14. [OpenType and TrueType font engine](docs/14-font-engine.md): clean-room `font.library` from the spec for English layouts, stubbed non-English/colour features, and host-side FreeType/HarfBuzz test oracle (proposed).
-15. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
-16. [Open questions](docs/questions.md): the question register.
+15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
+16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
+17. [V1 plan](docs/v1-plan.md): steps of the SAS core, and the kernel's upper-half decision.
+18. [Open questions](docs/questions.md): the question register.
 
 ## Status
 

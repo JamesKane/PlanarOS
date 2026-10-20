@@ -197,6 +197,24 @@ Should `font.library` cache `4×` horizontal subpixel phases (`0.0`, `0.25`, `0.
 
 Raised in §14.7.
 
+**VQ38 Compressed / tiled framebuffer modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. linear-only surfaces in V5.**
+
+Should `AllocBitMap` default to `MOD_LINEAR` and reserve `MOD_AFBC_16x16` for explicit GPU-rendered scanout surfaces on CIX P1 (G720 + Linlon) and RK3588 (G610 + VOP2)? *Leaning:* yes; `MOD_LINEAR` (`ARGB8888` / `XRGB8888`) is the universal baseline for CPU SIMD and mixed surfaces, while `MOD_AFBC_16x16` is selected only when `BMF_GPU_ONLY | BMF_DISPLAYABLE` is requested on an AFBC-capable `friend_bitmap`.
+
+Raised in §16.8.
+
+**VQ39 Hardware screen dragging and multi-screen DPU plane budgeting.**
+
+When multiple Intuition `Screen`s are visible at once (e.g. classic vertical screen dragging revealing a background screen at a different resolution or pixel format), how should `intuition` partition the DPU's 4–8 hardware planes between `Screen`s and promoted windows (VQ31)? *Leaning:* each visible `Screen` gets at least one dedicated hardware DPU plane (plus the hardware cursor plane) so vertical screen dragging is always zero-copy in hardware; remaining DPU planes go to promoted video/GPU windows on the frontmost screen.
+
+Raised in §16.3 and §16.8.
+
+**VQ40 Per-plane colour space and HDR10 / wide-gamut scanout (`bm_ColorSpace`).**
+
+Should `BitMap` carry `bm_ColorSpace` (`CS_SRGB`, `CS_BT709`, `CS_BT2020_PQ`) from day one so `MakeVPort` can program the DPU's hardware per-plane degamma/CSC/gamma blocks automatically? *Leaning:* yes; it defaults to `CS_SRGB` (`0`) and lets the DPU blend sRGB UI planes with HDR10/YUV planes during scanout.
+
+Raised in §16.3 and §16.8.
+
 ## Audio and DSP
 
 **VQ36 Hardware Audio DSP offload (`sky1_audss0` HiFi4, Q8B ADSP) vs. efficiency-core SIMD.**
