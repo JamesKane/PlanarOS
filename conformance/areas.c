@@ -109,8 +109,11 @@ int main(void)
     CHECK(QueryArea((void *)8, &info) == ERR_NOTFOUND);
 
     /* More than there is: refused, as an error (review M5's handle-or-
-     * error return; the kernel tests failing part way itself). */
-    CHECK(AllocArea(31ULL << 30, 0, (void **)&q) == ERR_NOMEM);
+     * error return; the kernel tests failing part way itself). The
+     * largest size AllocArea takes, half the 64 GiB window: more than any
+     * board here has free. 31 GiB wasn't, on the CIX's 32 GB: allocated
+     * page by page in the global layout, it outran the test's timeout. */
+    CHECK(AllocArea(32ULL << 30, 0, (void **)&q) == ERR_NOMEM);
 
     /* Churn: each live Area keeps its contents and no two overlap. */
     for (unsigned i = 0; i < SLOTS; i++)

@@ -86,7 +86,9 @@ struct efi_boot_services {
          *install_configuration_table;
     void *load_image, *start_image, *exit, *unload_image;
     efi_status (*exit_boot_services)(efi_handle image, uint64_t key);
-    void *get_next_monotonic_count, *stall, *set_watchdog_timer;
+    void *get_next_monotonic_count;
+    efi_status (*stall)(uint64_t microseconds);
+    void *set_watchdog_timer;
     void *connect_controller, *disconnect_controller;
     void *open_protocol, *close_protocol, *open_protocol_information;
     void *protocols_per_handle, *locate_handle_buffer;
@@ -99,6 +101,18 @@ struct efi_configuration_table {
     void *table;
 };
 
+/* Only ResetSystem: the stub's stub=reset. */
+enum : uint32_t { EFI_RESET_COLD, EFI_RESET_WARM, EFI_RESET_SHUTDOWN };
+
+struct efi_runtime_services {
+    struct efi_table_header hdr;
+    void *get_time, *set_time, *get_wakeup_time, *set_wakeup_time;
+    void *set_virtual_address_map, *convert_pointer;
+    void *get_variable, *get_next_variable_name, *set_variable;
+    void *get_next_high_monotonic_count;
+    void (*reset_system)(uint32_t type, efi_status status, uint64_t size, void *data);
+};
+
 struct efi_system_table {
     struct efi_table_header hdr;
     efi_char16 *firmware_vendor;
@@ -109,7 +123,7 @@ struct efi_system_table {
     struct efi_simple_text_output *con_out;
     efi_handle standard_error_handle;
     void *std_err;
-    void *runtime_services;
+    struct efi_runtime_services *runtime_services;
     struct efi_boot_services *boot_services;
     uint64_t tables;
     struct efi_configuration_table *table;

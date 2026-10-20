@@ -63,6 +63,11 @@ void memmap_clip(uint64_t top)
     clip(top);
 }
 
+uint64_t memmap_unmapped(void)
+{
+    return unmapped;
+}
+
 /* From the device tree's memory nodes. */
 static void fdt_ram(void)
 {

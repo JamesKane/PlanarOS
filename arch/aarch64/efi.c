@@ -14,6 +14,8 @@
  * which is what the compiler makes of everything else. The build checks
  * this file's object for absolute relocations (mk/arch-aarch64.mk).
  */
+#include <planar/arch_inline.h>
+
 #include "aarch64.h"
 #include "bootinfo.h"
 #include "efi.h"
@@ -21,7 +23,7 @@
 
 constexpr uint64_t MIB2 = 1ULL << 21;
 constexpr uint64_t PAGES_PER_2MIB = MIB2 / EFI_PAGE_SIZE;
-constexpr uint64_t DIRECT_MAP_TOP = 512ULL << 30;   /* entry.S's boot tables */
+constexpr uint64_t DIRECT_MAP_TOP = (uint64_t)ARCH_DIRECT_MAP_GIB << 30;   /* entry.S's boot tables */
 
 extern char _kernel_start[], _edata[], __bss_end[];  /* link.ld */
 
@@ -133,6 +135,61 @@ static void copy_cmdline(const struct efi_loaded_image *li, struct boot_info *bi
     bi->cmdline[out] = 0;
 }
 
+/* Whether the load options include 'word', whole. */
+static bool has_word(const char *s, const char *word)
+{
+    size_t n = kstrlen(word);
+
+    for (const char *p = s; *p; p++)
+        if ((p == s || p[-1] == ' ') && memcmp(p, word, n) == 0 && (!p[n] || p[n] == ' '))
+            return true;
+    return false;
+}
+
+/*
+ * stub=reset: say what UEFI gave, and reset the board instead of entering
+ * the kernel. For a new board's first boot, where a hang would need
+ * someone at the power switch. Not a return to the firmware: the CIX's
+ * goes to its boot manager then, not on to the next boot option; after a
+ * reset, with BootNext used, it boots the usual system.
+ */
+static efi_status report_and_reset(struct efi_system_table *st, struct boot_info *bi,
+                                    uint64_t map_cap)
+{
+    uint64_t size = map_cap, key, desc_size, ram = 0;
+    uint32_t version;
+    efi_status s;
+
+    s = st->boot_services->get_memory_map(&size, (struct efi_memory_descriptor *)(uintptr_t)bi->mmap,
+                                          &key, &desc_size, &version);
+    if (s != EFI_SUCCESS)
+        return fail(st, "no memory map", s);
+    say(st, "planar: EFI memory map (type, start, pages):\n");
+    for (uint64_t off = 0; off + desc_size <= size; off += desc_size) {
+        const struct efi_memory_descriptor *d = (const void *)(uintptr_t)(bi->mmap + off);
+
+        say(st, "  ");
+        say_hex(st, d->type);
+        say(st, " ");
+        say_hex(st, d->physical_start);
+        say(st, " ");
+        say_hex(st, d->pages);
+        say(st, "\n");
+        if (d->type == EFI_CONVENTIONAL_MEMORY || d->type == EFI_LOADER_CODE ||
+            d->type == EFI_LOADER_DATA || d->type == EFI_BOOT_SERVICES_CODE ||
+            d->type == EFI_BOOT_SERVICES_DATA)
+            ram += d->pages;
+    }
+    say(st, "planar: free after boot services, pages ");
+    say_hex(st, ram);
+    say(st, "\nplanar: arguments \"");
+    say(st, bi->cmdline);
+    say(st, "\"\nplanar: EFI stub resetting the board\n");
+    st->boot_services->stall(500000);   /* let the UART drain */
+    st->runtime_services->reset_system(EFI_RESET_COLD, EFI_SUCCESS, 0, nullptr);
+    return fail(st, "ResetSystem returned", EFI_SUCCESS);
+}
+
 /* Pages for the image at a 2 MiB boundary, below the boot tables' reach:
  * allocate 2 MiB more than needed and give back both ends. */
 static efi_status allocate_image(struct efi_boot_services *bs, uint64_t pages, uint64_t *at)
@@ -192,6 +249,14 @@ efi_status efi_main(efi_handle image, struct efi_system_table *st)
     find_tables(st, bi);
     find_framebuffer(st, bi);
     copy_cmdline(li, bi);
+    if (has_word(bi->cmdline, "stub=reset")) {
+        say(st, bi->dtb ? "planar: device tree given\n" : "");
+        say(st, bi->rsdp ? "planar: ACPI given\n" : "");
+        s = report_and_reset(st, bi, map_cap);
+        bs->free_pages(info_pa, info_pages);
+        bs->free_pages(kernel, image_pages);
+        return s;
+    }
 
     memcpy((void *)(uintptr_t)kernel, _kernel_start, file_size);
 

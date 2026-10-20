@@ -4,6 +4,8 @@
 #   make PLATFORM=qemu-virt-a64    AArch64 image for QEMU's virt machine
 #                                  (EFI=1 runs it through UEFI, edk2;
 #                                  HW=acpi with ACPI, not a device tree)
+#   make PLATFORM=uefi-a64         AArch64 image for UEFI boards with ACPI
+#                                  (the CIX P1; run and test boot it there)
 #   make PLATFORM=hosted           host executable
 #   make PLATFORM=... run          build and run where that makes sense
 #   make PLATFORM=... test         build, run, and check the boot transcript
@@ -64,7 +66,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V3.2 done
+EXPECT := V3.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 

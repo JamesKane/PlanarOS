@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: in progress (2026-10-20).** Steps 1 and 2 done. All three decisions are made (end of this plan).
+**Status: in progress (2026-10-20).** Steps 1 to 3 done. All three decisions are made (end of this plan).
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -25,7 +25,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 |---|---|
 | **1. UEFI entry, on QEMU** ✅ | The image is also an EFI application. A stub takes the memory map and the configuration tables, exits boot services and enters the kernel. It runs under edk2 on QEMU, at EL1 and at EL2. |
 | **2. ACPI, on QEMU** ✅ | `kernel/acpi.c` parses the static tables into the same facts `fdt.c` gives. Both sources are compared on one machine. |
-| **3. The board** | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
+| **3. The board** ✅ | One UEFI image for the CIX: serial, the memory map, the GIC-700 and the watchdog, then one core through the suites, then all 12. Both layouts. |
 | **4. Big and little** | Core classes from the PPTT and MIDR, and costs per class. |
 | **5. Arm costs** | The profiler on AArch64, a lean kernel-call path like the RV64 one, and the numbers on both core types. |
 | **6. VQ3** | The `vq3` workload on the CIX, again on the RV2, and switch and TLB-miss costs per layout. Then the decision. |
@@ -117,14 +117,35 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 - **The comparison test:** QEMU boots once from each source. The kernel prints its facts in one canonical form: memory ranges, CPUs, GIC, timer and console. boot-check fails if the two lists differ.
 - **Board quirks are data**, keyed by the ACPI OEM ID and OEM table ID (docs/09 §9.4). The first entries are the CIX's DBG2 fallback and its RSVL ranges, for whenever audio or the DSP is driven.
 
-## 3. The board
+## 3. The board ✅
+
+**Done (2026-10-20).** The V1 and V2 suites pass on all 12 cores of the CIX P1, in both layouts, booted through UEFI with ACPI only: `make PLATFORM=uefi-a64 test`, with `LAYOUT=global` for the other layout. A soak of 20 boots, 10 in each layout, had no failures. The transcript ends with `V3.3 done`, then the kernel resets the board and FreeBSD comes back.
+
+- **The loop (decision 1) works without anyone at the board.** `tools/efi-boot.py` waits for the board's FreeBSD, copies the image to `\EFI\planar\planar.efi`, writes a `Boot0050` entry whose load options are the kernel arguments, sets `BootNext` and reboots. It then watches UART2. The firmware honours `BootNext`.
+  - FreeBSD's `efibootmgr` can't set load options, so the entry is written with `efivar -w`, which takes the value on stdin (its `-f` isn't implemented for writes).
+  - An EFI application that returns lands in this firmware's boot manager, not the next boot option. So the first-boot probe, `stub=reset`, prints the memory map and the arguments and then resets through `ResetSystem`.
+  - With `reboot`, a failed test resets the board too.
+- **`PLATFORM=uefi-a64`** (`mk/uefi-a64.mk`, `plat/uefi/`) is the one image of decision 2: nothing in it names the CIX. The board's differences are the ACPI quirk entry from step 2.
+- **Three A520s hung in their first instructions at EL1** (MPIDR 100, 200, 300), at the first virtual-timer access, silently. The EL2-to-EL1 drop ORed its bits into `CNTHCTL_EL2` and kept the rest. On a core just powered on, the rest is UNKNOWN, and with FEAT_ECV it includes traps of EL1's virtual timer to EL2, which has no vectors. The drop now writes every EL2 control that can trap EL1 whole:
+  - `CNTHCTL_EL2` and `MDCR_EL2` (every PMU counter to EL1);
+  - the fine-grained traps (FEAT_FGT) and `HCRX_EL2` (FEAT_HCX), where present;
+  - `ICC_SRE_EL2`, so EL1 can use the GIC's system registers.
+  - Each secondary records how far it got, and the boot CPU prints the step when one doesn't come online. That is how this was found.
+- **RAM at 512 GiB.** The EFI map has 2 GiB at `0x80_0000_0000`, just past the direct map. The boot tables and the direct map now cover 1 TiB (two level-1 tables), and all 32,590 MiB is managed.
+- **The watchdog** (`drivers/sbsa_wdt.c`) is stopped when the kernel starts. The kernel arms it rather than leaving it off: 10 s to WS0, a reset 10 s later, refreshed through WOR every 2.5 s from a kernel timer. A hang then resets the board: `BOOTARGS=hang` checks that (decision 1 asked for a way to cut power on a hang).
+- **The GIC is a GIC-700, IIDR `0x0402143b`** (variant 2), which matches erratum 2941627. When an SPI is EOI'd on a CPU it isn't routed to, the EOI is followed by `dsb sy` and a write to `GICD_ICACTIVER`. The kernel routes each SPI to one CPU and doesn't move it, so the case doesn't arise yet.
+- **A test that assumed less RAM.** The `areas` program checks that more memory than there is gets refused, and asked for 31 GiB. On the CIX, with all of its RAM mapped, 31 GiB is less than what's free. The global layout backs an Area page by page, so the request ran past the test's timeout, in every global boot of the first soak. It now asks for 32 GiB, the largest size `AllocArea` takes. A board with more than 32 GiB free will need a call that reports free memory.
+- **`V3.3 board`** fails if a CPU the firmware listed isn't online, or if RAM the firmware gave is left out of the direct map. The first boots lost three cores and 2 GiB that way while passing V1.1.
+- **First numbers** (identity layout): an IPI round trip 894 ns; Signal and Wait across CPUs 3.5 µs, on one CPU 456 ns; a `DoMsg` round trip about 1.1 µs. Step 5 measures these properly, per core type.
+
+### The plan, as written before the step
 
 **One image for every UEFI Arm board.** The CIX gets quirk entries, not a platform of its own (decision 2). The order of bring-up:
 
 1. A line from the stub, through UEFI's console.
 2. The kernel's banner on UART2: a PL011, `ARMH0011`, at 3.3 V on the 10-pin header (pin 1 TX, pin 3 RX, pin 5 GND). UEFI leaves it programmed at 115200 (seen on the board), so the kernel writes to it without changing the baud rate.
 3. The MMU and the memory map. The board has 32 GB, and the RAM ranges come from EFI. The direct map has to cover them.
-4. **The watchdog.** The GTDT's SBSA watchdog is disabled at boot if it's running. Its refresh frame is broken (writing WRR doesn't refresh it), so it is refreshed through WOR if it is ever armed.
+4. **The watchdog.** The GTDT's SBSA watchdog is disabled at boot if it's running. Its refresh frame is broken (writing WRR doesn't refresh it), so it is refreshed through WOR if it is ever armed. (Built differently: it's armed, above.)
 5. **The GIC-700.** It needs erratum 2941627's workaround, matched on IIDR as Linux does: an SPI whose affinity excludes this CPU is EOI'd, then `dsb sy`, then deactivated through `GICD_ICACTIVER`, not `ICC_DIR`.
 6. The generic timer at 1 GHz. **Idle is WFI only**, so the per-core timers never stop and the CIX GPT isn't needed (the GPT is deferred, below).
 7. One core through the V1 and V2 suites.

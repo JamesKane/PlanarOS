@@ -36,6 +36,7 @@ struct cpu {
     uint64_t hwid;              /* hart ID, or MPIDR Aff2.Aff1.Aff0 */
     int32_t node;               /* its /cpus node; -1 from ACPI */
     atomic_bool online;
+    atomic_uint boot_step;          /* how far a secondary got (kmain_secondary) */
 
     spinlock_t timer_lock;      /* kernel timers armed on this CPU */
     struct ktimer *timers;

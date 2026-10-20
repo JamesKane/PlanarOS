@@ -23,9 +23,11 @@
 /* Distributor */
 constexpr uint64_t GICD_CTLR       = 0x0000;
 constexpr uint64_t GICD_TYPER      = 0x0004;
+constexpr uint64_t GICD_IIDR       = 0x0008;
 constexpr uint64_t GICD_IGROUPR    = 0x0080;
 constexpr uint64_t GICD_ISENABLER  = 0x0100;
 constexpr uint64_t GICD_ICENABLER  = 0x0180;
+constexpr uint64_t GICD_ICACTIVER  = 0x0380;
 constexpr uint64_t GICD_IPRIORITYR = 0x0400;
 constexpr uint64_t GICD_IROUTER    = 0x6000;
 constexpr uint32_t GICD_CTLR_RWP   = 1u << 31;
@@ -61,6 +63,20 @@ static unsigned nregions;
 #define rdist (rdists[this_cpu()->index])
 static uint32_t nlines;
 
+/*
+ * GIC-700 erratum 2941627: an SPI's deactivation can be lost when the
+ * CPU that EOIs it isn't the one it's routed to, as when its route
+ * changed while it was active. The EOI then also deactivates it in the
+ * distributor. Matched on GICD_IIDR as Linux matches it: GIC-700
+ * (product 4, Arm), variants 0 to 2.
+ */
+static bool erratum_2941627;
+
+static bool iidr_2941627(uint32_t iidr)
+{
+    return (iidr & 0xff0e0fff) == 0x0400043b || (iidr & 0xff0f0fff) == 0x0402043b;
+}
+
 static volatile uint32_t *d32(uint64_t off) { return (volatile uint32_t *)(dist + off); }
 static volatile uint8_t *d8(uint64_t off) { return (volatile uint8_t *)(dist + off); }
 static volatile uint64_t *d64(uint64_t off) { return (volatile uint64_t *)(dist + off); }
@@ -89,6 +105,9 @@ static bool setup(uint64_t pa)
     *d32(GICD_CTLR) = 0;
     dist_wait();
     nlines = 32 * ((*d32(GICD_TYPER) & 0x1f) + 1);
+    erratum_2941627 = iidr_2941627(*d32(GICD_IIDR));
+    if (erratum_2941627)
+        kprintf("planar: GIC-700 (IIDR %x): erratum 2941627 worked around\n", *d32(GICD_IIDR));
     if (nlines > 1020)
         nlines = 1020;
     /* Every SPI: Group 1, masked, middling priority. Routed when enabled. */
@@ -223,6 +242,13 @@ static void complete(uint32_t source)
 {
     sysreg_write(ICC_EOIR1_EL1, source);
     isb();
+    if (erratum_2941627 && source >= 32 && source < nlines &&
+        (*d64(GICD_IROUTER + 8 * (uint64_t)source) & 0xff00ffffffULL) !=
+            (sysreg_read(mpidr_el1) & 0xff00ffffffULL)) {
+        /* The EOI's deactivate must reach the GIC first. */
+        __asm__ volatile("dsb sy" : : : "memory");
+        *d32(GICD_ICACTIVER + source / 32 * 4) = 1u << (source % 32);
+    }
 }
 
 /* Three cells per interrupt: type (0 SPI, 1 PPI), number, flags. */

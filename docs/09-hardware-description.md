@@ -91,6 +91,7 @@ Two small parsers fill one `struct bootinfo`. The kernel uses nothing else.
   - Each consumer asks the chosen parser directly. `acpi.c` is 490 lines.
   - Every boot prints the facts it took as `hw:` lines, and `make compare-hw` checks that QEMU gives the same lines from both sources.
   - The early quirk table lives in `acpi.c`: the CIX's DBG2 console and RSVL ranges.
+- **Built (V3 step 3):** on the CIX P1, every fact the kernel uses comes from ACPI and the quirk entry. The GTDT's watchdog is driven (`drivers/sbsa_wdt.c`).
 - The raw blobs are then handed to user space as a read-only Area.
 
 ### Layer 1: hwdb, the device graph (D2)

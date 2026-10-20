@@ -93,6 +93,8 @@ Kernel entry contract (`arch_entry`):
 
 **Built (V3 step 2).** The kernel reads ACPI's static tables as a second source (`kernel/acpi.c`), and `kernel/hw.c` chooses between ACPI and the device tree: the DTB, unless `hw=acpi`.
 
+**Built (V3 step 3).** One `uefi-a64` image runs on the CIX P1, with no board-specific code: the board's differences are ACPI quirk data. Leaving EL2, the entry code writes every EL2 control that can trap EL1 whole, because on a core just started by PSCI they're UNKNOWN. The direct map covers 1 TiB. The GTDT's SBSA watchdog is kept armed, so a hang resets the board.
+
 The stub is part of the kernel image, not a separate unit. The image header is both an arm64 `Image` header and a PE/COFF header, so one file boots through `booti`, QEMU's `-kernel` and UEFI. The stub runs before relocation, so it may use only PC-relative addresses. The build checks this.
 
 Hardware description: **VQ7. Needs a design session.** ACPI and FDT are both first-class sources:

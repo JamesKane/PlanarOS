@@ -40,6 +40,14 @@
 [[noreturn]] static void fail(const char *test, const char *why)
 {
     kprintf("%s FAIL: %s\n", test, why);
+    if (bootargs_has("reboot")) {
+        /* A board's loop: start over, rather than wait for the switch. */
+        for (uint64_t t = time_now(); time_now() - t < time_us(200000);)
+            arch_cpu_relax();
+        kprintf("planar: rebooting\n");
+        plat_reboot();
+        arch_reboot();
+    }
     arch_halt();
 }
 
@@ -1039,6 +1047,25 @@ void selftest_acpi(void)
             acpi_quirk_name() ? " (with quirks)" : "", refused);
 }
 
+/* ---------------------------------------------------------------------
+ * V3 step 3: the board gave the kernel all of itself. A new board's
+ * first boots lost three cores and 2 GiB of RAM without failing a
+ * test (the CIX P1); now either fails here.
+ */
+void selftest_board(void)
+{
+    uint64_t base, size, ram = 0;
+
+    if (cpus_online() != ncpus)
+        fail("V3.3 board", "a CPU the firmware listed isn't online");
+    if (memmap_unmapped())
+        fail("V3.3 board", "RAM the firmware gave is past the direct map, or unmapped");
+    for (unsigned i = 0; memmap_ram(i, &base, &size); i++)
+        ram += size;
+    kprintf("V3.3 board ok: %u of %u CPUs online; %llu MiB of RAM mapped, none left out\n",
+            cpus_online(), ncpus, (unsigned long long)(ram >> 20));
+}
+
 /* --- ping-pong: the cost of Signal + Wait, on one CPU and across two --- */
 
 constexpr unsigned PINGS = 2000;
@@ -1117,6 +1144,8 @@ void selftest_tasks(void *)
     kprintf("V3.1 done\n");
     selftest_acpi();
     kprintf("V3.2 done\n");
+    selftest_board();
+    kprintf("V3.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

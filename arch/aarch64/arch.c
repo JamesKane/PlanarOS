@@ -18,7 +18,7 @@ const struct intc_driver *const arch_intc_drivers[] = { &gicv3_driver, nullptr }
 
 extern const char vectors[];                    /* vectors.S */
 extern const char secondary_entry[];            /* entry.S */
-extern uint64_t boot_l1[512], boot_l2[512];     /* entry.S */
+extern uint64_t boot_l1[ARCH_DIRECT_MAP_GIB], boot_l2[512];    /* entry.S */
 extern char _kernel_start[], _kernel_end[];     /* link.ld */
 
 constexpr uint64_t DESC_VALID_MASK = 3;

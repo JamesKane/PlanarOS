@@ -11,12 +11,12 @@
 
 /*
  * The kernel half (docs §3.2): TTBR1 maps every physical address P at
- * ARCH_DIRECT_MAP + P, the kernel included. entry.S maps the first 512 GiB
+ * ARCH_DIRECT_MAP + P, the kernel included. entry.S maps the first 1 TiB
  * of physical addresses as device memory and the kernel image as normal
  * memory; arch_memory_init() makes the rest of RAM normal.
  */
 #define ARCH_DIRECT_MAP     0xffff000000000000ULL
-#define ARCH_DIRECT_MAP_GIB 512
+#define ARCH_DIRECT_MAP_GIB 1024
 
 /* TTBR0's half with 48-bit addresses; everything above belongs to TTBR1. */
 #define ARCH_USER_TOP       0x0001000000000000ULL

@@ -16,7 +16,8 @@
  * set of boot tables and loads it in both TTBR0 and TTBR1, so it maps
  * the same physical memory at 0 and at the direct map:
  *
- *   L0[0]  -> L1: 512 x 1 GiB blocks covering physical 0..512 GiB, all
+ *   L0[0], L0[1] -> L1: two tables, 1024 x 1 GiB blocks covering
+ *                 physical 0..1 TiB (the CIX has RAM at 512 GiB), all
  *                 Device-nGnRE and execute-never, except
  *   L1[kg] -> L2: the GiB holding the kernel, as 2 MiB blocks: the
  *                 kernel image's are normal write-back memory, the rest
@@ -126,7 +127,15 @@ section_table:
  * interrupts masked. Clearing HCR_EL2 also clears E2H; firmware that
  * enters with VHE on (CIX) leaves it writable on the A720 (verify on the
  * board). EL1 gets the physical timer and counter, untrapped FP, and a
- * known SCTLR_EL1. Uses x9 only.
+ * known SCTLR_EL1.
+ *
+ * Every EL2 control that can trap EL1 is written whole, not left as
+ * found: on a core just powered on by PSCI they're UNKNOWN, and a trap
+ * to an EL2 with no vectors hangs the core silently (three of the CIX's
+ * A520s, at their first virtual timer access: CNTHCTL_EL2's FEAT_ECV
+ * trap bits). MDCR_EL2 gives EL1 every PMU counter; the fine-grained
+ * traps (FEAT_FGT) and HCRX_EL2 (FEAT_HCX) are cleared where they exist;
+ * ICC_SRE_EL2 lets EL1 use the GIC's system registers. Uses x9 and x10.
  */
     .macro  EL2_TO_EL1 resume
     mrs     x9, CurrentEL
@@ -135,14 +144,43 @@ section_table:
     b.ne    \resume
     mov     x9, #HCR_EL2_RW
     msr     hcr_el2, x9
-    mrs     x9, cnthctl_el2
-    orr     x9, x9, #3              /* EL1PCTEN, EL1PCEN */
-    msr     cnthctl_el2, x9
+    mov     x9, #3                  /* EL1PCTEN, EL1PCEN; with FEAT_ECV, no */
+    msr     cnthctl_el2, x9         /* trap of EL1's virtual timer (EL1TVT) */
     msr     cntvoff_el2, xzr
     mov     x9, #CPTR_EL2_RES1
     msr     cptr_el2, x9
     msr     hstr_el2, xzr
-    ldr     x9, =SCTLR_EL1_RES1
+    mov     x9, #0
+    mrs     x10, id_aa64dfr0_el1
+    ubfx    x10, x10, #8, #4        /* PMUVer: 0 none, 0xf IMPDEF */
+    cbz     x10, 90f
+    cmp     x10, #0xf
+    b.eq    90f
+    mrs     x9, pmcr_el0
+    ubfx    x9, x9, #11, #5         /* N: HPMN, every counter EL1's */
+90: msr     mdcr_el2, x9
+    mrs     x10, id_aa64mmfr0_el1
+    ubfx    x10, x10, #56, #4       /* FGT */
+    cbz     x10, 91f
+    msr     s3_4_c1_c1_4, xzr       /* HFGRTR_EL2 */
+    msr     s3_4_c1_c1_5, xzr       /* HFGWTR_EL2 */
+    msr     s3_4_c1_c1_6, xzr       /* HFGITR_EL2 */
+    msr     s3_4_c3_c1_4, xzr       /* HDFGRTR_EL2 */
+    msr     s3_4_c3_c1_5, xzr       /* HDFGWTR_EL2 */
+    mrs     x10, id_aa64pfr0_el1
+    ubfx    x10, x10, #44, #4       /* AMU */
+    cbz     x10, 91f
+    msr     s3_4_c3_c1_6, xzr       /* HAFGRTR_EL2 */
+91: mrs     x10, id_aa64mmfr1_el1
+    ubfx    x10, x10, #40, #4       /* HCX */
+    cbz     x10, 92f
+    msr     s3_4_c1_c2_2, xzr       /* HCRX_EL2 */
+92: mrs     x10, id_aa64pfr0_el1
+    ubfx    x10, x10, #24, #4       /* GIC: system registers */
+    cbz     x10, 93f
+    mov     x9, #0xf                /* ICC_SRE_EL2: Enable, DIB, DFB, SRE */
+    msr     s3_4_c12_c9_5, x9
+93: ldr     x9, =SCTLR_EL1_RES1
     msr     sctlr_el1, x9
     mov     x9, #SPSR_EL1H_DAIF
     msr     spsr_el2, x9
@@ -179,7 +217,7 @@ in_el1:
 3:  orr     x3, x1, x2, lsl #30
     str     x3, [x0, x2, lsl #3]
     add     x2, x2, #1
-    cmp     x2, #512
+    cmp     x2, #1024
     b.lo    3b
 
     /* L2 for the kernel's GiB (kg = _start >> 30): device 2 MiB blocks,
@@ -213,7 +251,9 @@ in_el1:
     str     x3, [x0, x5, lsl #3]    /* L1[kg] -> L2 */
     adrp    x6, boot_l0
     orr     x3, x0, #TABLE
-    str     x3, [x6]                /* L0[0] -> L1 */
+    str     x3, [x6]                /* L0[0] -> L1, 0..512 GiB */
+    add     x3, x3, #4096
+    str     x3, [x6, #8]            /* L0[1] -> L1, 512 GiB..1 TiB */
 
     /* Everything since the MMU went off was written past the caches.
      * Drop any lines a loader left for .bss (the boot tables are in it),
@@ -374,7 +414,7 @@ efi_enter_kernel:
 boot_l0:
     .space  4096
 boot_l1:
-    .space  4096
+    .space  8192
 boot_l2:
     .space  4096
 

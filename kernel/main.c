@@ -122,6 +122,8 @@
         kprintf("V3.1 done\n");
         selftest_acpi();            /* needs no tasks */
         kprintf("V3.2 done\n");
+        selftest_board();
+        kprintf("V3.3 done\n");
         arch_halt();
     }
     sched_idle();

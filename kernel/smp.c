@@ -124,8 +124,8 @@ unsigned smp_start(void)
         while (!atomic_load(&c->online) && time_now() - start < time_hz())
             arch_cpu_relax();
         if (!atomic_load(&c->online))
-            kprintf("planar: cpu %u (%llx) started but never came online\n", i,
-                    (unsigned long long)c->hwid);
+            kprintf("planar: cpu %u (%llx) started but never came online (step %u of 5)\n", i,
+                    (unsigned long long)c->hwid, atomic_load(&c->boot_step));
     }
     return cpus_online();
 }
@@ -133,11 +133,17 @@ unsigned smp_start(void)
 /* Each secondary CPU starts here, on its own stack, with this_cpu() set. */
 [[noreturn]] void kmain_secondary(struct cpu *c)
 {
+    /* Each step is counted, for smp_start to say where one stopped. */
+    atomic_store(&c->boot_step, 1);
     arch_cpu_init();
+    atomic_store(&c->boot_step, 2);
     sched_init_cpu();
+    atomic_store(&c->boot_step, 3);
     if (!intc_init_cpu(c->hwid))
         kprintf("planar: cpu %u has no interrupt controller\n", c->index);
+    atomic_store(&c->boot_step, 4);
     ipi_init_cpu();
+    atomic_store(&c->boot_step, 5);
     time_init_cpu();
     atomic_store(&c->online, true);
     sched_idle();

@@ -53,5 +53,6 @@ void selftest_boot(void);
 /* V3 step 2: the choice of firmware description, and the ACPI parser
  * against good and broken tables. Called from selftest_tasks. */
 void selftest_acpi(void);
+void selftest_board(void);
 
 #endif /* KERNEL_SELFTEST_H */
