@@ -119,6 +119,17 @@ probe_stimecmp:
     ret
     FIXUP   .Lstimecmp, .Lstimecmp_done
 
+/* uint64_t probe_vlenb(uint64_t *val); needs sstatus.VS on */
+    .globl  probe_vlenb
+probe_vlenb:
+.Lvlenb:
+    csrr    t0, 0xc22               /* vlenb */
+    sd      t0, 0(a0)
+    li      a0, 0
+.Lvlenb_done:
+    ret
+    FIXUP   .Lvlenb, .Lvlenb_done
+
 /* uint64_t probe_copy_from_user(void *dst, uint64_t src, size_t n): 0, or
  * scause. Called with sstatus.SUM set, so user pages are readable. */
     .globl  probe_copy_from_user

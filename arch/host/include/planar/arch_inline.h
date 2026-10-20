@@ -21,6 +21,10 @@ struct arch_context {
     ucontext_t uc;
 };
 
+struct arch_cpu {
+    int unused;
+};
+
 /* No protection in a host process. */
 struct arch_domain {
     uint64_t unused;

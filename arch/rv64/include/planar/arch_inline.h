@@ -32,6 +32,18 @@ struct arch_context {
     uint64_t ra;
     uint64_t sp;
     uint64_t s[12];
+    uint64_t *lazy;     /* FP, then vector, save area (a page), or nullptr */
+    int lazy_cpu;       /* where the registers were last loaded from it, or -1 */
+};
+
+/*
+ * Per CPU (struct cpu's 'arch'): whose FP and vector state the registers
+ * hold, and whether it has been written since it was last saved
+ * (lazy.c).
+ */
+struct arch_cpu {
+    struct arch_context *fp_owner, *vec_owner;
+    bool fp_dirty, vec_dirty;
 };
 
 /* A protection domain: an Sv39 root table and its ASID. */

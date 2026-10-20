@@ -23,6 +23,12 @@ static inline void tlb_flush_local(void)
 }
 
 
+/* Lazy FP/SIMD (lazy.c): before every return to EL0, and on a trapped
+ * first use, for the running task's context. */
+struct arch_context;
+void aarch64_lazy_return(struct arch_context *ctx);
+bool aarch64_lazy_first_use(struct arch_context *ctx);
+
 /* Accesses that may fault (vectors.S): 0 and the value, or the ESR. */
 uint64_t probe_ld(uint64_t addr, uint64_t *val);
 

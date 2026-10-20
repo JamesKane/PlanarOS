@@ -50,6 +50,7 @@ struct cpu {
     bool quantum_on;
     uint64_t capacity;          /* relative speed: capacity-dmips-mhz, or 1024 */
     const void *loaded_domain;  /* arch: the domain this CPU has loaded */
+    struct arch_cpu arch;       /* arch: lazily switched register state */
 };
 
 static_assert(offsetof(struct cpu, stack_top) == 0, "entry code reads stack_top at 0");

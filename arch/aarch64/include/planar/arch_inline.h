@@ -29,6 +29,18 @@
 struct arch_context {
     uint64_t x[10];     /* x19-x28 */
     uint64_t fp, lr, sp;
+    uint64_t *lazy;     /* FP/SIMD save area (a page), or nullptr */
+    int lazy_cpu;       /* where the registers were last loaded from it, or -1 */
+};
+
+/*
+ * Per CPU (struct cpu's 'arch'): whose FP/SIMD state the registers hold,
+ * and whether it may have been written since it was last saved. AArch64
+ * has no dirty bit: access on means possibly written (lazy.c).
+ */
+struct arch_cpu {
+    struct arch_context *fp_owner;
+    bool fp_dirty;
 };
 
 /* A protection domain: a TTBR0 table (4 levels, 48 bits) and its ASID. */

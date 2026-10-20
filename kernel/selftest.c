@@ -693,6 +693,45 @@ static uint64_t expect_killed(const char *name)
     return time_to_us(start);
 }
 
+/*
+ * FP and vector state: two copies of fpu (three tasks each, more tasks
+ * than CPUs) hold all their registers through preemption and moves
+ * between CPUs; the kernel switches the state lazily.
+ */
+static void test_fpu(void)
+{
+    struct process *p[2];
+    struct arch_lazy_counts before, after;
+    uint64_t start = time_now();
+
+    arch_lazy_counts(&before);
+    task_set_signal(0, SIGF_DEAD);
+    for (int i = 0; i < 2; i++)
+        if (!(p[i] = process_create("fpu", 5, time_us(10000), task_self(), SIGF_DEAD)))
+            fail("V1.4 fpu", "process_create failed");
+    while ((!atomic_load(&p[0]->dead) || !atomic_load(&p[1]->dead)) &&
+           time_now() - start < 10 * time_hz())
+        wait_test_dead();
+    for (int i = 0; i < 2; i++) {
+        if (!atomic_load(&p[i]->dead))
+            fail("V1.4 fpu", "fpu never finished");
+        if (p[i]->fault != FAULT_NONE)
+            fail("V1.4 fpu", "fpu faulted");
+        if (p[i]->exit_code != 0)
+            fail("V1.4 fpu", "registers changed under a task");
+        process_free(p[i]);
+    }
+    arch_lazy_counts(&after);
+    if (after.first_uses == before.first_uses || after.loads == before.loads)
+        fail("V1.4 fpu", "state was never switched lazily");
+    kprintf("V1.4 fpu ok: 6 tasks kept their registers; %llu first uses, %llu loads, "
+            "%llu saves, %llu returns found their state still loaded\n",
+            (unsigned long long)(after.first_uses - before.first_uses),
+            (unsigned long long)(after.loads - before.loads),
+            (unsigned long long)(after.saves - before.saves),
+            (unsigned long long)(after.reuses - before.reuses));
+}
+
 void selftest_user(void)
 {
     uint64_t free_before = pmm_free_pages(), spin_us, wait_us;
@@ -719,6 +758,8 @@ void selftest_user(void)
     wait_us = expect_killed("waiter");
     kprintf("V1.4 kill ok: 3 spinning tasks dead %llu us after the kill, a blocked one %llu us\n",
             (unsigned long long)spin_us, (unsigned long long)wait_us);
+
+    test_fpu();
 
     /* Reclamation is asynchronous only by a switch; give it a moment. */
     task_sleep_until(time_now() + time_us(5000));

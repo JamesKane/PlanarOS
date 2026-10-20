@@ -98,13 +98,17 @@ void trap_el0_sync(struct trap_frame *f, uint64_t)
         process_fault(FAULT_ALIGN, f->elr, far);
     case EC_BRK:
         process_fault(FAULT_BREAK, f->elr, f->elr);
+    case EC_FP:
+        if (aarch64_lazy_first_use(&task_self()->ctx))
+            break;          /* run it again, now allowed */
+        process_fault(FAULT_ILLEGAL, f->elr, f->elr);
     case EC_UNKNOWN:
-    case EC_FP:             /* until FP state is switched (V1 step 4b) */
         process_fault(FAULT_ILLEGAL, f->elr, f->elr);
     default:
         process_fault(FAULT_OTHER, f->elr, far);
     }
     user_return();          /* a killed task stops here */
+    aarch64_lazy_return(&task_self()->ctx);
 }
 
 void trap_el0_irq(struct trap_frame *, uint64_t)
@@ -113,6 +117,7 @@ void trap_el0_irq(struct trap_frame *, uint64_t)
     irq_external();
     irq_exit();
     user_return();
+    aarch64_lazy_return(&task_self()->ctx);
 }
 
 void trap_unexpected(struct trap_frame *f, uint64_t kind)
@@ -132,6 +137,7 @@ void trap_unexpected(struct trap_frame *f, uint64_t kind)
     f.elr = pc;
     f.spsr = 0;             /* EL0t, interrupts unmasked */
     arch_irq_disable();
+    aarch64_lazy_return(&task_self()->ctx);
     trap_resume(&f);
 }
 

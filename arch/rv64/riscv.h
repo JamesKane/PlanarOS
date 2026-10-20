@@ -61,4 +61,15 @@ void riscv_probe_asids(void);
 unsigned riscv_asid_bits(void);
 bool riscv_fault_spurious(uint64_t va, uint64_t scause);
 
+/* lazy.c: FP and vector state, for the running task's context. */
+struct arch_context;
+void riscv_lazy_init(uint64_t vlenb);
+void riscv_lazy_enter(uint64_t *sstatus, struct arch_context *ctx);
+void riscv_lazy_return(uint64_t *sstatus, struct arch_context *ctx);
+void riscv_lazy_note_reuse(uint64_t sstatus);
+bool riscv_lazy_first_use(uint64_t *sstatus, uint32_t insn, struct arch_context *ctx);
+
+/* The vector register length in bytes, or 0 without V (trap.S probe). */
+uint64_t probe_vlenb(uint64_t *val);
+
 #endif /* ARCH_RV64_RISCV_H */

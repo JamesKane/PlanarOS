@@ -5,14 +5,19 @@
 
 USER_PROGS   := $(basename $(notdir $(wildcard conformance/*.c)))
 USER_CFLAGS  := -std=c23 -Wall -Wextra -O2 $(USER_FLAGS) -ffreestanding -fno-builtin \
-	-fno-stack-protector -fno-pic -Iinclude
+	-fno-stack-protector -fno-pic -Iinclude -Iconformance
 USER_LDFLAGS := $(USER_FLAGS) -nostdlib -static --ld-path=$(LD_PATH) \
 	-Wl,-T,arch/$(ARCH)/user/user.ld -Wl,--no-dynamic-linker
-USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/string.o
+USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/string.o \
+	$(BUILD)/user/fpregs.o
 
 $(BUILD)/user/%.o: arch/$(ARCH)/user/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(BUILD)/user/%.o: arch/$(ARCH)/user/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/user/rt/%.o: lib/rt/%.c
 	@mkdir -p $(dir $@)

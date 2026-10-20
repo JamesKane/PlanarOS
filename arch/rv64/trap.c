@@ -49,6 +49,21 @@ static enum fault fault_kind(uint64_t scause)
     }
 }
 
+/* The instruction at 'pc' in user memory, for an illegal-instruction
+ * trap that didn't leave it in stval. 0 if unreadable. */
+static uint32_t user_insn(uint64_t pc, uint64_t stval)
+{
+    uint16_t half[2] = { 0, 0 };
+
+    if (stval)
+        return (uint32_t)stval;
+    if (!arch_copy_from_user(&half[0], pc, 2))
+        return 0;
+    if ((half[0] & 3) == 3 && !arch_copy_from_user(&half[1], pc + 2, 2))
+        return 0;
+    return (uint32_t)half[1] << 16 | half[0];
+}
+
 static void user_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
 {
     if (scause == CAUSE_ECALL_U) {
@@ -60,6 +75,9 @@ static void user_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
     }
     if ((scause == 12 || scause == 13 || scause == 15) && riscv_fault_spurious(stval, scause))
         return;
+    if (scause == 2 && riscv_lazy_first_use(&f->sstatus, user_insn(f->sepc, stval),
+                                            &task_self()->ctx))
+        return;             /* run it again, now allowed */
     process_fault(fault_kind(scause), f->sepc, stval);
 }
 
@@ -88,6 +106,8 @@ void trap_handler(struct trap_frame *f)
     uint64_t stval = csr_read_stval();
     bool from_user = !(f->sstatus & SSTATUS_SPP);
 
+    if (from_user)
+        riscv_lazy_enter(&f->sstatus, &task_self()->ctx);
     if (scause & SCAUSE_INTERRUPT) {
         irq_enter();
         if (scause == (SCAUSE_INTERRUPT | IRQ_S_TIMER)) {
@@ -104,8 +124,11 @@ void trap_handler(struct trap_frame *f)
     } else {
         kernel_trap(f, scause, stval);
     }
-    if (from_user)
+    if (from_user) {
         user_return();      /* a killed task stops here */
+        riscv_lazy_return(&f->sstatus, &task_self()->ctx);
+        riscv_lazy_note_reuse(f->sstatus);
+    }
 }
 
 /* The frame is built on the current stack; once popped, the slot above

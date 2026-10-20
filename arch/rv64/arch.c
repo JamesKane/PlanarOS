@@ -39,6 +39,8 @@ void arch_early_init(void)
     have_sstc = probe_stimecmp(&v) == 0;
     kernel_satp = csr_read_satp();
     riscv_probe_asids();
+    __asm__ volatile("csrs sstatus, %0" : : "r"(2ULL << 9) : "memory");     /* VS clean */
+    riscv_lazy_init(probe_vlenb(&v) == 0 ? v : 0);
     arch_cpu_init();
 }
 
@@ -107,6 +109,7 @@ void arch_context_init(struct arch_context *ctx, void *stack_top)
     *ctx = (struct arch_context){
         .ra = (uint64_t)(uintptr_t)arch_task_start,
         .sp = (uint64_t)(uintptr_t)stack_top & ~(uint64_t)15,
+        .lazy_cpu = -1,
     };
 }
 

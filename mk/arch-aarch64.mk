@@ -17,14 +17,16 @@ ARCH_SRCS := \
 	arch/aarch64/entry.S \
 	arch/aarch64/arch.c \
 	arch/aarch64/gicv3.c \
+	arch/aarch64/lazy.c \
+	arch/aarch64/lazy.S \
 	arch/aarch64/mmu.c \
 	arch/aarch64/switch.S \
 	arch/aarch64/trap.c \
 	arch/aarch64/vectors.S
 
-# User programs: no FP/SIMD either, until its state is switched (V1 step
-# 4b).
-USER_FLAGS := --target=aarch64-unknown-none-elf -march=armv8.2-a -mgeneral-regs-only
+# User programs get FP/SIMD (switched lazily, lazy.c); the compiler uses
+# it freely.
+USER_FLAGS := --target=aarch64-unknown-none-elf -march=armv8.2-a
 include mk/user.mk
 
 ELF   := $(BUILD)/planar.elf

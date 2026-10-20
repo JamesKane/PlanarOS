@@ -97,6 +97,19 @@ void arch_switch(struct arch_context *from, struct arch_context *to)
     swapcontext(&from->uc, &to->uc);
 }
 
+void arch_switch_out(struct arch_context *)
+{
+}
+
+void arch_context_free(struct arch_context *)
+{
+}
+
+void arch_lazy_counts(struct arch_lazy_counts *c)
+{
+    *c = (struct arch_lazy_counts){ 0 };
+}
+
 /* One host process, one CPU: there's nothing else to start or interrupt. */
 void arch_set_this_cpu(struct cpu *)
 {

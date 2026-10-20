@@ -67,6 +67,10 @@ void arch_cpu_init(void)
         sysreg_write(pmcntenset_el0, 1ULL << 31);              /* PMCCNTR */
     }
 
+    /* FP/SIMD traps until a task's state is loaded (lazy.c). */
+    sysreg_write(cpacr_el1, sysreg_read(cpacr_el1) & ~(3ULL << 20));
+    isb();
+
     /* The virtual timer: on, unmasked, disarmed. */
     sysreg_write(cntv_cval_el0, ~(uint64_t)0);
     sysreg_write(cntv_ctl_el0, 1);
@@ -148,6 +152,7 @@ void arch_context_init(struct arch_context *ctx, void *stack_top)
     *ctx = (struct arch_context){
         .lr = (uint64_t)(uintptr_t)arch_task_start,
         .sp = (uint64_t)(uintptr_t)stack_top & ~(uint64_t)15,
+        .lazy_cpu = -1,
     };
 }
 

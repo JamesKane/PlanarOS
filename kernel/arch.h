@@ -97,6 +97,21 @@ void arch_context_init(struct arch_context *ctx, void *stack_top);
 void arch_switch(struct arch_context *from, struct arch_context *to);
 
 /*
+ * Lazily switched state (FP, vector; V1 step 4b). arch_switch_out() runs
+ * before every switch away from 'ctx' on this CPU: it saves what the
+ * registers hold for it if that was written, so no CPU ever holds state
+ * a task needs elsewhere. arch_context_free() gives back what a dead
+ * task's context holds beyond its registers.
+ */
+void arch_switch_out(struct arch_context *ctx);
+void arch_context_free(struct arch_context *ctx);
+
+struct arch_lazy_counts {
+    uint64_t first_uses, loads, saves, reuses;
+};
+void arch_lazy_counts(struct arch_lazy_counts *c);
+
+/*
  * Protection domains and user mode (V1 step 4; docs §3.5 is where the
  * contract is going). A domain maps user pages in the lower half; the
  * kernel half is the same in all of them. struct arch_domain comes from

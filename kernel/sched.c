@@ -186,6 +186,7 @@ static void finish_switch(struct task *prev)
     } else if (prev->state == TASK_DEAD) {
         struct process *p = prev->process;
 
+        arch_context_free(&prev->ctx);
         for (unsigned i = 0; i < TASK_STACK_PAGES; i++)
             pmm_free(prev->stack + i * PAGE_SIZE);
         if (p)
@@ -228,6 +229,7 @@ void schedule(void)
         /* A kernel task runs in the kernel's domain alone, so a domain
          * is loaded only while one of its tasks runs (process.c relies
          * on that to reclaim). */
+        arch_switch_out(&prev->ctx);
         arch_domain_switch(next->domain);
         arch_switch(&prev->ctx, &next->ctx);
         /* Back here, maybe on another CPU, as 'prev'. */
