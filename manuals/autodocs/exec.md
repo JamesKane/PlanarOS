@@ -2,7 +2,7 @@
 
 *Checked against V2.*
 
-The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas) and `planar/ipc.h` (ports and connections). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors).
+The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas) and `planar/ipc.h` (ports and connections). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
 Most programs use connections through the [msg library](msg.md) rather than the connection calls here.
 
@@ -35,16 +35,19 @@ The connection's handle, or:
 - `ERR_BADADDR` -- `arena` isn't writable.
 - `ERR_BADHANDLE` -- `port` isn't a port this process owns.
 - `ERR_NOTFOUND` -- no connection is waiting.
-- `ERR_NOMEM` -- out of memory or handles.
+- `ERR_LIMIT` -- the calling process already holds 32 connection ends, or 256 handles.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full.
 
 **NOTES**
 - The kernel doesn't check that `sigbit` was allocated with `AllocSignal`.
 - A connection whose client went before it was accepted can still be accepted. Its arena already says `CONNF_CLIENT_GONE`.
 - The connection belongs to the calling *task*. It closes when that task ends.
 - The arena layout is checked by `AcceptPort`, not by this call.
+- Each connection accepted counts against the process's 32 connection ends, client ends included. A server serves at most 32 clients at once, fewer if it is also a client.
+- If `arena` stops being writable during the call, the result is `ERR_BADADDR` but the connection has been accepted. It's closed when the task ends.
 
 **BUGS**
-None known.
+In that last case the handle is lost to the caller, as with `OpenPort`.
 
 **SEE ALSO**
 [AcceptPort](msg.md#execacceptport), [CreatePort](#execcreateport), [OpenPort](#execopenport), [CloseConn](#execcloseconn)
@@ -59,7 +62,7 @@ AllocArea -- allocate an Area of memory
 **SYNOPSIS**
 ```c
 #include <planar/exec.h>
-Handle AllocArea(uint64_t size, uint32_t flags, void **address);
+int64_t AllocArea(uint64_t size, uint32_t flags, void **address);
 ```
 
 **FUNCTION**
@@ -73,17 +76,20 @@ A kernel call.
 - `address` -- where to store the Area's address.
 
 **RESULT**
-The Area's handle, or an error converted to `Handle`:
-- `(Handle)ERR_BADARG` -- `size` is 0 or more than half the user address window, or `flags` has an unknown bit.
-- `(Handle)ERR_NOMEM` -- out of memory or handles.
-- `(Handle)ERR_BADADDR` -- `address` isn't writable. The Area has been freed again.
+The Area's handle (positive), or:
+- `ERR_BADARG` -- `size` is 0 or more than half the user address window, or `flags` has an unknown bit.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full. A `size` of more pages than are free fails at once, before anything is allocated.
+- `ERR_LIMIT` -- the calling process already holds 256 handles.
+- `ERR_BADADDR` -- `address` isn't writable. The Area has been freed again.
+- `ERR_BADHANDLE` -- another task of the process freed the new handle before this call returned.
 
 **NOTES**
 - The Area starts with `AREAR_READ | AREAR_WRITE` rights, even with `AREAF_EXEC`. Use `ProtectArea` to make it executable.
 - `AREAF_CLEAR` changes nothing: every Area is zeroed.
+- Keep the result in an `int64_t` and test it with `< 0`; cast to `Handle` only once it's known to be one.
 
 **BUGS**
-The result type is `Handle`, so errors arrive as large unsigned values and `(int64_t)h > 0` is true for them. Compare with `(Handle)ERR_…`. The type is expected to become `int64_t`, like the port calls.
+None known.
 
 **SEE ALSO**
 [FreeArea](#execfreearea), [ProtectArea](#execprotectarea), [QueryArea](#execqueryarea), [ShareArea](#execsharearea)
@@ -189,7 +195,8 @@ The port's handle, or:
 - `ERR_BADARG` -- `sigbit` is out of range.
 - `ERR_BADADDR` -- `name` isn't readable, is empty, or is longer than 31 characters.
 - `ERR_EXISTS` -- a port with that name exists.
-- `ERR_NOMEM` -- out of memory or handles.
+- `ERR_LIMIT` -- the calling process already holds 256 handles.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full.
 
 **NOTES**
 The port belongs to the calling task and goes when it ends.
@@ -210,7 +217,7 @@ CreateTask -- start another task in this process
 **SYNOPSIS**
 ```c
 #include <planar/exec.h>
-Handle CreateTask(void (*entry)(uint64_t arg), uint64_t arg);
+int64_t CreateTask(void (*entry)(uint64_t arg), uint64_t arg);
 ```
 
 **FUNCTION**
@@ -223,15 +230,17 @@ A kernel call.
 - `arg` -- passed to `entry`.
 
 **RESULT**
-The new task's handle, or an error converted to `Handle`:
-- `(Handle)ERR_NOMEM` -- out of memory or handles.
-- `(Handle)ERR_NOTFOUND` -- the process is ending.
+The new task's handle (positive), or:
+- `ERR_LIMIT` -- the process already has 64 tasks, or holds 256 handles.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full.
+- `ERR_NOTFOUND` -- the process is ending.
 
 **NOTES**
-`entry` isn't checked. A bad address faults the new task, which ends the whole process.
+- `entry` isn't checked. A bad address faults the new task, which ends the whole process.
+- The new task may run, and end, before this call returns. The handle is then already stale, and calls on it fail with `ERR_BADHANDLE`.
+- The 64 tasks include the one running `main()`.
 
 **BUGS**
-- The result type is `Handle`: see [AllocArea](#execallocarea). `conformance/tasks.c` tests `!CreateTask(…)`, which misses errors.
 - Returning from `entry` isn't caught; there is no return address to go to.
 
 **SEE ALSO**
@@ -346,7 +355,7 @@ The handle, or `(Handle)ERR_NOTFOUND` for any non-null `name`.
 **Differs from Exec**: finding a task by name is **planned**, not built.
 
 **BUGS**
-The result type is `Handle`: see [AllocArea](#execallocarea).
+The result type is `Handle`, unsigned 32-bit, so the error arrives as `(Handle)ERR_NOTFOUND` and `(int64_t)h > 0` is true for it. Compare with `(Handle)ERR_NOTFOUND`. The calls that make handles return `int64_t`; this one has not been changed yet.
 
 **SEE ALSO**
 [Signal](#execsignal), [CreateTask](#execcreatetask)
@@ -376,7 +385,8 @@ A kernel call.
 0, or `ERR_BADHANDLE` if `area` isn't an Area this process owns.
 
 **NOTES**
-Freeing doesn't take the Area away from processes it was shared with. Unshare it from them first if that matters.
+- Freeing doesn't take the Area away from processes it was shared with. Unshare it from them first if that matters.
+- Tasks of one process may race each other on the same handle. Of two `FreeArea` calls, one returns 0 and the other `ERR_BADHANDLE`; a `ShareArea` or `ProtectArea` that loses the race fails rather than map the Area again (`kernel/area.c`).
 
 **BUGS**
 None known.
@@ -425,7 +435,9 @@ int64_t KLog(const char *text);
 ```
 
 **FUNCTION**
-Writes `[name] text` and a newline to the serial console, where `name` is the program's.
+Writes `[name] text` and a newline to the serial console, where `name` is the program's. Any byte that isn't printable ASCII (0x20–0x7E) is written as `?`, so a program can't move the cursor or clear the terminal.
+
+Each process may write 32 lines at once and 20 a second after that. Lines beyond that are dropped and counted. The next line that is written is preceded by `[name] (n lines dropped)`.
 
 A kernel call.
 
@@ -433,13 +445,15 @@ A kernel call.
 - `text` -- a string. Only the first 200 characters are written.
 
 **RESULT**
-0, or `ERR_BADADDR` if `text` isn't readable.
+0, or `ERR_BADADDR` if `text` isn't readable. A dropped line also returns 0.
 
 **NOTES**
-For bring-up and tests. A console device will replace it for programs.
+- For bring-up and tests. A console device will replace it for programs.
+- The limit is per process, shared by its tasks (`kernel/syscall.c`).
 
 **BUGS**
-Truncation is silent.
+- Truncation is silent, and so, until the next line, is dropping.
+- The console is still polled: a long line holds up the CPU, with interrupts off, for about 19 ms at 115200 baud. A buffered console drained by its driver is **planned** with the drivers (V4).
 
 **SEE ALSO**
 [Libraries ch. 1](../libraries/01-introduction.md#logging)
@@ -479,10 +493,13 @@ The connection's handle, or:
 - `ERR_BADARG` -- `sigbit`, `slots` or `heap` out of range, or the port belongs to the calling process.
 - `ERR_BADADDR` -- `name` or `arena` isn't accessible, or `name` is longer than 31 characters.
 - `ERR_NOTFOUND` -- no port has that name.
-- `ERR_NOMEM` -- out of memory or handles.
+- `ERR_FULL` -- 32 connections are already waiting on the port to be accepted. Try again later. **Built, untested**: no conformance program fills a port's queue.
+- `ERR_LIMIT` -- the calling process already holds 32 connection ends, or 256 handles.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full.
 
 **NOTES**
 - The connection is usable before it's accepted: the client may fill the request ring at once.
+- A connection waiting to be accepted counts against the client's 32 connection ends.
 - If `arena` stops being writable during the call, the result is `ERR_BADADDR` but the connection exists. It's closed when the task ends.
 
 **BUGS**
@@ -517,11 +534,13 @@ A kernel call.
 0, or:
 - `ERR_BADHANDLE` -- not an Area this process owns.
 - `ERR_BADARG` -- an unknown bit, or no `AREAR_READ`.
-- `ERR_RIGHTS` -- `AREAR_EXEC` without `AREAF_EXEC` or `AREAF_RWX`; or `AREAR_EXEC | AREAR_WRITE` without `AREAF_RWX`.
-- `ERR_NOTFOUND` -- the owner doesn't map it (not normally possible).
+- `ERR_RIGHTS` -- `AREAR_EXEC` without `AREAF_EXEC` or `AREAF_RWX`; or `AREAR_EXEC | AREAR_WRITE` without `AREAF_RWX`; or, without `AREAF_RWX`, `AREAR_WRITE` while another process maps the Area executable, or `AREAR_EXEC` while another maps it writable.
+- `ERR_NOTFOUND` -- another task of the process freed the Area during the call.
 
 **NOTES**
-Only the owner's own rights change. Processes it's shared with keep theirs.
+- Only the owner's own rights change. Processes it's shared with keep theirs.
+- W^X holds over the whole Area, not each mapping: no process may write it while any process may execute it, unless it is `AREAF_RWX`.
+- Other tasks of the process may go on using the Area during the call. One that touches it just as its mapping is replaced doesn't fault for it: the kernel retries the access. Once the call returns, the new rights hold on every CPU.
 
 **BUGS**
 None known.
@@ -614,9 +633,9 @@ int64_t ShareArea(Handle area, Handle task, uint32_t rights);
 ```
 
 **FUNCTION**
-Maps an Area the calling process owns into the process that `task` belongs to, at the same address, with `rights`.
+Maps an Area the calling process owns into the process that `task` belongs to, at the same address, with `rights`. The target must be a process the caller has an open connection with, either way round.
 
-A kernel call. **Built, untested** from user mode: the kernel's self-tests share Areas, but no conformance program calls this.
+A kernel call.
 
 **INPUTS**
 - `area` -- an Area the calling process owns.
@@ -625,14 +644,18 @@ A kernel call. **Built, untested** from user mode: the kernel's self-tests share
 
 **RESULT**
 0, or:
-- `ERR_BADHANDLE` -- not an Area this process owns.
-- `ERR_NOTFOUND` -- `task` isn't a task.
-- `ERR_BADARG`, `ERR_RIGHTS` -- as for `ProtectArea`.
+- `ERR_BADHANDLE` -- not an Area this process owns, or another task of the process freed it during the call.
+- `ERR_NOTFOUND` -- `task` isn't a task, or its process is ending.
+- `ERR_RIGHTS` -- the target process isn't connected to the caller; or, as for `ProtectArea`, the rights aren't allowed, including W^X against the Area's other mappings.
+- `ERR_BADARG` -- as for `ProtectArea`.
 - `ERR_EXISTS` -- that process already maps it, the owner included.
 - `ERR_NOMEM` -- out of memory.
 
 **NOTES**
-The target process isn't told. Send it the address in a message.
+- The target process isn't told. Send it the address in a message.
+- **Connected** means a connection both ends of which are open: accepted, and not yet closed by either side. A connection still waiting to be accepted doesn't count (`ipc_connected` in `kernel/port.c`).
+- The check is made only when sharing. The mapping stays when the connection closes; use `UnshareArea` to take it back.
+- The caller gets the target's task handle from the target, in a message (`FindTask(nullptr)` there), as `conformance/conn.c` does.
 
 **BUGS**
 None known.
@@ -659,11 +682,14 @@ Sets the bits of `mask` in `task`'s signals, waking it if it's waiting for any o
 A kernel call.
 
 **INPUTS**
-- `task` -- any task's handle, in any process.
+- `task` -- a task in the calling process, the caller included.
 - `mask` -- the signals. The kernel's own bits are removed.
 
 **RESULT**
-0, or `ERR_BADHANDLE`.
+0, or `ERR_BADHANDLE` if `task` isn't a task, or is a task of another process.
+
+**NOTES**
+**Differs from Exec**: Exec's `Signal` reaches any task. Planar's stays inside the process. To wake a task in another process, use a connection: `SignalConn` reaches only its peer (`kernel/syscall.c`).
 
 **BUGS**
 None known.
@@ -687,7 +713,7 @@ int64_t SignalConn(Handle conn);
 **FUNCTION**
 Sets the signal bit the other end chose for this connection, in the other end's task. The rings are the caller's business; the kernel doesn't look at them.
 
-It also ends any priority this task was lent by a client's `DoMsg`.
+It also ends any priority this task was lent by a client's `SignalWaitConn` (handoff boosting).
 
 A kernel call. `PutMsg` and `ReplyMsg` make it only when the other end has said it's asleep.
 
@@ -720,8 +746,8 @@ uint64_t SignalWaitConn(Handle conn, uint64_t mask);
 
 **FUNCTION**
 `SignalConn(conn)` then `Wait(mask)`, with two differences:
-- If the other end wakes and may run on this CPU, it runs next here: the CPU is handed straight to it.
-- From the client end, the server is lent the client's priority until it next signals or waits.
+- If the other end was waiting and may run on this CPU, it runs next here: the CPU is handed straight to it.
+- From the client end, a server handed the CPU this way runs at no less than the client's priority until it next signals or waits.
 
 A kernel call. `DoMsg` and `WaitPorts` use it.
 
@@ -731,6 +757,9 @@ A kernel call. `DoMsg` and `WaitPorts` use it.
 
 **RESULT**
 The signals in `mask` that ended the wait, as for `Wait`. 0, without waiting, if the other end has closed or `conn` isn't a connection handle.
+
+**NOTES**
+The loan is handoff boosting, not full priority inheritance ([docs §4.4](../../docs/04-ipc.md)). A server that was already running or ready is lent nothing; a loan isn't passed on when the server waits on a server of its own; and it ends at the server's next signal or wait, not when the request is answered (`task_post` in `kernel/sched.c`).
 
 **BUGS**
 A bad handle and a closed peer both return 0 at once, which is also `WaitPorts`'s "look again". Callers check `PortGone`.
@@ -762,7 +791,8 @@ A kernel call. **Built, untested**: no conformance program calls it.
 - `ERR_NOTFOUND` -- `task` isn't a task, belongs to the owner, or its process doesn't map the Area.
 
 **NOTES**
-The other process gets no warning. Its next access to the Area faults and ends it, so agree on a protocol first.
+- The other process gets no warning. Its next access to the Area faults and ends it, so agree on a protocol first.
+- Unlike `ShareArea`, this needs no connection: an Area can be taken back after the connection has closed.
 
 **BUGS**
 None known.
@@ -796,7 +826,7 @@ The signals in `mask` that were set. They're cleared.
 
 **NOTES**
 - `Wait(0)` sleeps until the process is killed.
-- Ending a wait also ends any priority this task was lent by `DoMsg`.
+- Ending a wait also ends any priority this task was lent by a client's `SignalWaitConn` (see there).
 
 **BUGS**
 None known.

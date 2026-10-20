@@ -6,10 +6,11 @@ An **Area** is Planar's unit of memory a program can ask for, give to another pr
 
 ## Concepts
 
-- **Allocation.** `AllocArea(size, flags, &address)` rounds `size` up to whole pages, maps the Area read-write into the calling process, and returns its handle. The memory is always zeroed.
+- **Allocation.** `AllocArea(size, flags, &address)` rounds `size` up to whole pages, maps the Area read-write into the calling process, and returns its handle, or a negative error. The memory is always zeroed. A size larger than the free memory fails at once with `ERR_NOMEM`. Each Area's handle counts against the process's 256 (chapter 1, *Limits*).
 - **Ownership.** The process that allocated an Area owns it. Only the owner can share it, unshare it, change its rights or free it.
-- **Sharing.** `ShareArea(area, task, rights)` maps the Area into the process that `task` belongs to, at the **same address**, with the rights given. A pointer into the Area means the same thing in both processes.
+- **Sharing.** `ShareArea(area, task, rights)` maps the Area into the process that `task` belongs to, at the **same address**, with the rights given. A pointer into the Area means the same thing in both processes. The other process must be one the caller has an open, accepted connection with (chapter 4); any other gets `ERR_RIGHTS`.
 - **Rights.** Each process that maps an Area has its own rights to it: read, write, execute. Write and execute need read. Execute needs the Area to have been allocated with `AREAF_EXEC`; write *and* execute at once need `AREAF_RWX`.
+- **W^X across processes.** Unless the Area is `AREAF_RWX`, it is never writable in one process while executable in another. `ShareArea` or `ProtectArea` that would make it so fails with `ERR_RIGHTS`.
 - **Lifetime.** `FreeArea` gives up the owner's handle and its mapping. The memory itself lasts until every process sharing it has dropped it (by `UnshareArea`, or by ending).
 - **Asking.** `QueryArea(address, &info)` says which Area of the caller's an address lies in, and what the caller may do with it.
 
@@ -41,36 +42,41 @@ From `conformance/areas.c`: write code into an Area, then make it executable. W^
 
 ```c
 uint32_t *code;
-Handle a = AllocArea(4096, AREAF_EXEC, (void **)&code);
+int64_t a = AllocArea(4096, AREAF_EXEC, (void **)&code);
 
+if (a < 0)
+    return a;
 emit_code(code);                                    /* writable now */
-if (ProtectArea(a, AREAR_READ | AREAR_EXEC) == 0)   /* executable now; not writable */
+if (ProtectArea((Handle)a, AREAR_READ | AREAR_EXEC) == 0)   /* executable now; not writable */
     result = ((int (*)(void))(void *)code)();
-FreeArea(a);
+FreeArea((Handle)a);
 ```
 
 `ProtectArea` with `AREAR_EXEC` also synchronises the instruction cache over the Area, so no separate cache call is needed.
 
 ### Giving a buffer to another process
 
+From `conformance/conn.c`, in outline. The two processes are already connected, and the peer has sent its task's handle (`FindTask(nullptr)`) in a message.
+
 ```c
 uint8_t *buf;
-Handle a = AllocArea(64 * 1024, 0, (void **)&buf);
+int64_t a = AllocArea(64 * 1024, 0, (void **)&buf);
 
 fill(buf);
-ShareArea(a, peer_task, AREAR_READ);   /* peer sees it at 'buf', read-only */
+ShareArea((Handle)a, peer_task, AREAR_READ);   /* peer sees it at 'buf', read-only */
 /* ... tell the peer the address, in a message ... */
-UnshareArea(a, peer_task);             /* when it's done */
+UnshareArea((Handle)a, peer_task);             /* when it's done */
 ```
 
 The peer receives `buf` as a plain pointer. In V2 the usual way to move data between processes is a connection's arena (chapter 4), which both ends already share. Lending an Area for the length of one request (`IOF_LEND`) is **planned**.
 
 ## Rules
 
-- **Check `AllocArea`'s result against `(Handle)ERR_…`**, not with `> 0` (chapter 1).
+- **Keep `AllocArea`'s result in an `int64_t`** and test it with `< 0` before using it as a `Handle` (chapter 1).
 - **Don't assume where an Area is.** Its address depends on the memory layout (chapter 1), and successive Areas aren't adjacent.
 - **An Area isn't physically contiguous unless you ask** with `AREAF_CONTIG`. Physical addresses aren't visible to programs yet in any case.
 - **Sharing is with a process, named by any of its tasks.** Every task in that process can then reach the memory.
+- **Share only with a peer.** `ShareArea` needs an open connection to the target. The mapping outlasts the connection, so unshare when the peer is done.
 - **A process can map an Area only once.** Sharing it again with the same process fails with `ERR_EXISTS`. To change a sharer's rights, unshare and share again.
 - **Freeing doesn't revoke.** Processes the Area was shared with keep it until they drop it, or until it is unshared from them first.
 
@@ -80,7 +86,7 @@ The peer receives `buf` as a plain pointer. In V2 the usual way to move data bet
 |---|---|
 | `AllocMem(size, MEMF_…)` returns a pointer to any number of bytes | `AllocArea` returns a handle and gives the address separately, in whole pages |
 | All memory is visible to every task | An Area is visible only to the processes it's mapped into |
-| `MEMF_PUBLIC` for memory other tasks may touch | Share it explicitly with `ShareArea` |
+| `MEMF_PUBLIC` for memory other tasks may touch | Share it explicitly with `ShareArea`, and only with a process you're connected to |
 | `FreeMem(ptr, size)` | `FreeArea(handle)` |
 
 ## Functions used

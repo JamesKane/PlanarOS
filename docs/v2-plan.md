@@ -7,6 +7,8 @@
 - `DoMsg` costs no more than omega's 3,361 cycles per round trip on the RV2. **Met: 3,209 (identity), 3,283 (global).**
 - omega's port-based A1 tests (`echo`, `client`, `pingpong`) pass, rewritten for connections, on every CPU, in both layouts, on QEMU and the RV2.
 
+**Status: done (2026-10-20).** Steps 1–4, then hardening (V2.5) and the performance work below. Fewer lock pairs is parked for later (last section).
+
 Each step ends with `make test-all` green and a `V2.n done` line in the transcript.
 
 | Step | Content |
@@ -14,7 +16,7 @@ Each step ends with `make test-all` green and a `V2.n done` line in the transcri
 | **1. Ports and connections** ✅ | Named ports, connections with their arenas, accepting, closing, `SignalConn`. A fix for waking a task while holding a lock. Kernel-side tests. |
 | **2. Rings** ✅ | The arena format and a user library (`lib/exec/msg.c`): `PutMsg`, `GetMsg`, `ReplyMsg`, `WaitPort` over the rings with the `waiting` protocol. `echo` and `client`. Streaming measured in kernel calls per message. |
 | **3. `DoMsg`** ✅ | Send and wait for this message's reply, with the CPU handed straight to the server and priority lent to it. `pingpong` measures the round trip. |
-| **4. Death and load** | Death notices tested from both ends: a client mid-`DoMsg` when its server dies, a server whose client dies. omega's "under load" run: a conversation kept up while other programs compete and crash. Soak, then the RV2. |
+| **4. Death and load** ✅ | Death notices tested from both ends: a client mid-`DoMsg` when its server dies, a server whose client dies. omega's "under load" run: a conversation kept up while other programs compete and crash. Soak, then the RV2. |
 
 Step 1 delivers `kernel/port.c` and `conformance/conn.c`. Two processes connect, check that they share the arena and trade signals. The server leaves a port behind with an unaccepted connection, the client leaves a connection open, and the kernel closes both when each exits. Mutation tests confirm the checks catch: a switch inside a lock, no self-IPI, no close flag, and no cleanup when a task ends. The close *signal* can't be checked by timing here, because the server usually closes before the client blocks. Step 4 kills a server whose client is known to be blocked.
 
@@ -97,3 +99,40 @@ This happens whether the end closed by `CloseConn`, by its task ending, or by it
 - The peer works at least at the caller's priority until it next signals or waits. This is handoff boosting, not full priority inheritance; docs/04-ipc.md §4.4 lists what it doesn't cover.
 
 `DoMsg` is `PutMsg`, then `SignalWaitConn` if the server is asleep, then collecting this message's reply. Any other reply that comes back first is set aside for `GetMsg`.
+
+## Later: fewer lock pairs
+
+**Parked (2026-10-20).** The V2 exit is met without this. It's written down so it isn't rediscovered from scratch.
+
+**Where the pairs are.** A lock pair costs about 55 cycles on the X60: the interrupt mask, an `amoswap.aq` and a releasing store. One `SignalWaitConn` takes five or six:
+
+| # | Lock | Taken in | Why |
+|---|---|---|---|
+| 1 | `port.c`'s one global `lock` | `conn_signal_wait_call` | the end, its peer and whether the peer is open |
+| 2 | the peer's `t->lock` | `task_post` | its signals and its waiting mask |
+| 3 | the peer's last CPU's `rq_lock` | `task_post` | its state. If it's handed to this CPU, that lock is dropped and this CPU's taken: one more pair |
+| 4 | this task's `self->lock` | `end_loan` | only for a task holding a loan (the server's side) |
+| 5 | `self->lock` again | `task_wait_kick` | did a signal come in meanwhile? |
+| 6 | this CPU's `rq_lock` | `task_wait_kick`, let go in `schedule_locked` | mark waiting, pick the next task |
+
+A round trip is two of these calls: the client's `DoMsg` and the server's reply-and-wait. That makes about a dozen pairs, or 600–700 of the 3,209 cycles.
+
+**Ideas, cheapest first:**
+
+1. **Fold `end_loan` into the wait.** `task_wait_kick` takes `self->lock` anyway; give the loan back under that hold, not before it. Saves pair 4 on the server's side. Small and local.
+2. **A waiting task's state belongs to its `t->lock`.** A waiting task is on no run queue, so its last CPU's `rq_lock` has nothing to guard until the task is queued. If `WAITING → READY` moves under `t->lock`, a handoff takes only this CPU's `rq_lock`. Saves the extra pair in the cross-CPU case, and makes idea 3 simpler. Every reader of `t->state` has to be audited for the new rule.
+3. **Post and wait as one operation.** A `task_post_wait(peer, sig, mask)` takes `self->lock` and the peer's `t->lock` in address order, then this CPU's `rq_lock` once. It queues the peer at the front, marks the caller waiting and goes into `schedule_locked` with that lock still held. Pairs 2, 3, 5 and 6 become three locks held together. This adds a lock-order rule: two task locks at once, lower address first. A peer that can't be handed over (wrong affinity, still switching away elsewhere) takes today's path.
+4. **No global IPC lock on the fast path.** Pair 1 serialises every `SignalConn` on every CPU. That's a scaling problem before it's a cycle problem, and it will show once several servers run at once. Options:
+   - a lock per connection: fixes the scaling, saves no cycles;
+   - read the end without a lock, the way `handle_get` already reads the handle table, and free connections only after every CPU has passed a switch (a quiescent point), so a stale read never touches freed memory.
+5. **No `irqsave` where interrupts are known to be off.** Several of these locks are taken inside another that already masked interrupts, so the CSR write and restore are wasted. Small, but it's on every pair.
+
+**Estimate:** ideas 1–3 save about 4–6 pairs per round trip, roughly 250–350 cycles, which would put `DoMsg` near 2,900. Idea 4 matters more for many CPUs talking at once than for one round trip. These are estimates, not measurements.
+
+**Before any of it lands**, because each idea changes the scheduler's locking:
+- the profiler confirms the saving on the RV2;
+- the hunt runs again: thousands of soak boots on both ISAs, and hang hunts that dump registers through the QEMU monitor, as for the three SMP races in V2.5;
+- a mutation test for each new rule (a reversed lock order, a state change outside its lock);
+- the lock order (task → run queue → timer, today only in code comments) is written into docs/02-architecture.md.
+
+**When:** after V3, so the saving can be measured on an Arm core as well, or sooner if a test with several servers shows the global IPC lock contended.

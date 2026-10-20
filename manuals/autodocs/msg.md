@@ -31,7 +31,7 @@ int64_t AcceptPort(struct MsgPort *mp, Handle port, int64_t sigbit);
 0, or:
 - `ERR_NOTFOUND` -- no connection is waiting. The usual way to stop accepting.
 - `ERR_BADARG` -- `sigbit` out of range, or the arena isn't laid out as the kernel lays them out (the connection is closed again).
-- Any other error from `AcceptConn`.
+- Any other error from `AcceptConn`, notably `ERR_LIMIT` once the process holds 32 connection ends.
 
 **BUGS**
 None known.
@@ -157,7 +157,10 @@ int64_t ConnectPort(struct MsgPort *mp, const char *name, int64_t sigbit, uint32
 - `name`, `sigbit`, `slots`, `heap` -- as for `OpenPort`. 0 for `slots` or `heap` takes the default.
 
 **RESULT**
-0, or any error from `OpenPort`, notably `ERR_NOTFOUND` if the server hasn't created the port yet.
+0, or any error from `OpenPort`, notably:
+- `ERR_NOTFOUND` -- the server hasn't created the port yet.
+- `ERR_FULL` -- 32 connections already wait on the port: the server isn't accepting.
+- `ERR_LIMIT` -- the process already holds 32 connection ends, or 256 handles.
 
 **NOTES**
 The conformance clients retry on `ERR_NOTFOUND` while their server starts. A name service to wait on is **planned**.
@@ -182,9 +185,9 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m);
 ```
 
 **FUNCTION**
-Sends `m` and waits until it comes back. If the server is asleep, wakes it and waits in one kernel call (`SignalWaitConn`): the server runs next on this CPU, at no less than the caller's priority, until it replies. If the server is awake, waiting costs no kernel call unless the reply is slow.
+Sends `m` and waits until it comes back. If the server is asleep, wakes it and waits in one kernel call (`SignalWaitConn`): the server runs next on this CPU, at no less than the caller's priority, until it next signals or waits (handoff boosting; see [SignalWaitConn](exec.md#execsignalwaitconn)). If the server is awake, waiting costs no kernel call unless the reply is slow.
 
-Replies to other messages that arrive first are set aside for `GetMsg`, oldest first.
+Replies to other messages that arrive first are set aside for `GetMsg`, oldest first, up to `MSGPORT_STASH` (32) of them. They are kept in the `MsgPort`, in the caller's own memory, never linked through the arena.
 
 **INPUTS**
 - `mp` -- the client's end.
@@ -192,13 +195,15 @@ Replies to other messages that arrive first are set aside for `GetMsg`, oldest f
 
 **RESULT**
 0 once replied, or:
-- `ERR_PORT_DIED` -- the server went first. `m->mn_Error` is set to it too.
-- `ERR_FULL` -- the request ring is full. Nothing was sent.
+- `ERR_PORT_DIED` -- the server went first, or the connection broke. If that happened while `DoMsg` waited, `m->mn_Error` is set to it too; if it had already happened, nothing was sent and `mn_Error` is left alone.
+- `ERR_FULL` -- either the request ring is full, and nothing was sent; or `m` was sent but 32 other replies are already set aside and more are waiting. Then `m`'s reply is still to come: take the set-aside replies with `GetMsg` and collect it the same way. `m` reaches the server even if it was asleep: `DoMsg` wakes it before returning (`conformance/stasher.c`).
 - `ERR_BADADDR` -- `m` isn't in the arena's heap. Nothing was sent.
 
 **NOTES**
 - A server that replied just before it went still counts as a reply.
 - Whatever the server put in `mn_Error` is left there. 0 from `DoMsg` means "it came back", not "the server succeeded".
+- To tell the two `ERR_FULL`s apart, don't mix `DoMsg` with more than 32 replies outstanding from `PutMsg`.
+- Replies are checked as for `GetMsg`, header only. A reply that fails the check breaks the connection.
 
 **BUGS**
 None known.
@@ -249,18 +254,62 @@ struct Message *GetMsg(struct MsgPort *mp);
 **FUNCTION**
 Returns the next message (on the server's end) or reply (on the client's), or `nullptr` if there's none. Replies `DoMsg` set aside come first. Doesn't trap.
 
+`GetMsg(mp)` is `GetMsgSized(mp, sizeof(struct Message))`.
+
 **RESULT**
 The message, or `nullptr`.
 
 **NOTES**
-- The library has checked only that the header lies in the arena's heap and is 8-byte aligned. A server copies the fields it needs before trusting them.
-- `nullptr` may also mean the peer wrote nonsense into the ring. `PortGone` is then true.
+- The library has checked only that the header lies in the arena's heap and is 8-byte aligned. A server that reads or writes past the header uses `GetMsgSized` instead.
+- A server copies the fields it needs before trusting them.
+- `nullptr` may also mean the peer wrote nonsense into the ring, or sent a message that failed the check. The connection is then broken and `PortGone` is true.
 
 **BUGS**
 None known.
 
 **SEE ALSO**
-[WaitPort](#execwaitport), [PortGone](#execportgone)
+[GetMsgSized](#execgetmsgsized), [WaitPort](#execwaitport), [PortGone](#execportgone)
+
+---
+
+## exec/GetMsgSized
+
+**NAME**
+GetMsgSized -- take the next message, checking its size
+
+**SYNOPSIS**
+```c
+#include <planar/msg.h>
+struct Message *GetMsgSized(struct MsgPort *mp, uint64_t size);
+```
+
+**FUNCTION**
+`GetMsg`, except that the library checks that `size` bytes of the message, not just its header, lie in the arena's heap. A server can then read and write that much of it without reaching outside the arena. Doesn't trap.
+
+For a server whose messages are all one type:
+
+```c
+while ((m = GetMsgSized(mp, sizeof(struct EchoMsg))))
+    ((struct EchoMsg *)m)->em_Value++;
+```
+
+**INPUTS**
+- `mp` -- either end.
+- `size` -- the bytes the caller will touch. Anything less than `sizeof(struct Message)` is taken as that.
+
+**RESULT**
+The message, or `nullptr` if there's none, or if it failed the check.
+
+**NOTES**
+- A message that fails the check has been taken off the ring and is lost. The connection is broken: `PortGone` is true, and later calls on `mp` fail. A server closes it and goes on serving others, as `conformance/echo.c` does.
+- The check is against `size`, not against `mn_Length`, which the peer could change after the check. Check `mn_Length` too if the message's size varies, on a copy.
+- Replies `DoMsg` set aside are checked against `size` as they come out.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[GetMsg](#execgetmsg), [PortGone](#execportgone), [Libraries ch. 4](../libraries/04-messages.md)
 
 ---
 
@@ -276,7 +325,7 @@ bool PortGone(const struct MsgPort *mp);
 ```
 
 **FUNCTION**
-True if the other end has closed (by `ClosePort`, by its task ending or by its process dying), if this end was closed, or if the connection broke because a ring held nonsense. Doesn't trap.
+True if the other end has closed (by `ClosePort`, by its task ending or by its process dying), if this end was closed, or if the connection broke: a ring held nonsense, or a message failed `GetMsg`'s or `GetMsgSized`'s check. Doesn't trap.
 
 **NOTES**
 Messages already in the ring can still be taken with `GetMsg` after the peer has gone.

@@ -12,7 +12,7 @@ Facts are cited to where they were measured. *(verify)* marks anything that hasn
 | Entry level | S-mode (OpenSBI 1.3, SBI 1.0) | EL2 likely *(verify)* | EL2, VHE | **EL1 under Qualcomm hyp** |
 | Firmware → OS | U-Boot `booti` + FDT | TF-A + U-Boot `booti` + FDT | UEFI, **ACPI only** | UEFI, ACPI + DTB |
 | IRQ | PLIC (159 sources, 7 prio) + CLINT | GICv3 (GIC-600) + 2 ITS | GICv3/4.1 + ITS, 512 SPI | GICv3 |
-| Timer | `rdtime` 24 MHz, Sstc | Generic timer | Generic timer; per-core stops in deep idle, use CIX GPT | Generic timer; per-core not always-on, use MMIO timer |
+| Timer | `rdtime` 24 MHz, Sstc | Generic timer | Generic timer, 1 GHz; per-core stops only in power-down idle (`_LPI` 1–2), so WFI-only idle needs no CIX GPT | Generic timer; per-core not always-on, use MMIO timer |
 | GPU | IMG BXE-2-32 | Mali-G610 (CSF) | Immortalis-G720 MC10 (CSF) | Adreno 690 |
 | NPU | In-core AI ISA *(verify)* | RKNN ×3 | Zhouyi X2, 30 TOPS | Hexagon v68 HTP |
 | Display | K1 DPU (Omega A2: flips, sprite) | VOP2 + HDMI-QP | Linlon DP ×5 (komeda) | MDSS DPU |
@@ -43,7 +43,10 @@ Facts are cited to where they were measured. *(verify)* marks anything that hasn
 - The SBSA watchdog refresh frame is broken; refresh through `WOR`.
 - GPU power-on order (§5.3).
 - Reported SMMUv3 event-queue IRQ storm.
-- Arm erratum 2941627.
+- Arm erratum 2941627: the GIC is a GIC-700 r0/r1 (IIDR `0x0400043b`); Linux's workaround deactivates an SPI routed elsewhere through `GICD_ICACTIVER`.
+- No SPCR: DBG2 names UART2 (PL011, `0x40d0000`, 3.3 V header pins 1/3/5).
+- ACPI lists the CPUs in a different order from the mainline DT; take MPIDRs from the MADT. Eight A720s at four clock grades, four A520s.
+- Source for these: `AbyssBSD/docs/boards/orangepi-6-plus/README.md`, gathered for docs/v3-plan.md.
 
 **Q8B**
 - The hypervisor resets the SoC on bad CBAR or SMR writes, or a bad GMU mask.

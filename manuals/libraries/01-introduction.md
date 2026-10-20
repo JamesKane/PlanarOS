@@ -32,8 +32,8 @@ When a process ends, for any reason, everything it held goes: its tasks, its han
 ## Handles
 
 The kernel names its objects (tasks, Areas, ports, connections) with **handles**: 32-bit values of type `Handle`, defined in `planar/exec.h`.
-- A handle is valid **system-wide**. A task's handle, for instance, can be given to another process, which can then `Signal` it or share an Area with it.
-- Some calls also check **ownership**: only the process that allocated an Area can free or share it, and only a port's owner can accept on it. The autodoc for each call says which.
+- A handle names the same object **system-wide**, but what another process can do with it is limited. A task's handle given to another process lets that process share an Area with it, and only while the two are connected (chapter 4). `Signal` reaches only tasks in the caller's own process; across processes, a connection's `SignalConn` reaches its peer.
+- Most calls also check **ownership**: only the process that allocated an Area can free or share it, and only a port's owner can accept on it. The autodoc for each call says which.
 - A handle is never 0. A handle that has been freed is not reused for a long time: each slot carries a generation number, so a stale handle fails with `ERR_BADHANDLE` rather than reaching a new object.
 
 ## Kernel calls and errors
@@ -47,29 +47,43 @@ Errors are small negative numbers, the `ERR_*` constants in `planar/syscalls.h`:
 | `ERR_NOSYS` | -1 | No such kernel call |
 | `ERR_BADADDR` | -2 | A pointer argument isn't mapped, or isn't writable |
 | `ERR_BADHANDLE` | -3 | Not a live handle, the wrong kind, or not yours |
-| `ERR_NOMEM` | -4 | Out of memory or out of handles |
+| `ERR_NOMEM` | -4 | Out of memory, or the system's handle table is full |
 | `ERR_NOTFOUND` | -5 | No such name or object; or nothing waiting |
 | `ERR_BADARG` | -6 | An argument out of range |
 | `ERR_EXISTS` | -7 | The name or mapping already exists |
-| `ERR_RIGHTS` | -8 | Rights an Area's flags don't allow |
-| `ERR_FULL` | -9 | A ring is full |
+| `ERR_RIGHTS` | -8 | Rights an Area's flags or W^X don't allow; or sharing with a process the caller isn't connected to |
+| `ERR_FULL` | -9 | A ring is full, or a port's queue of waiting connections |
 | `ERR_PORT_DIED` | -10 | The other end of a connection has gone |
+| `ERR_LIMIT` | -11 | A per-process limit: handles, tasks or connections (below) |
 
-Most calls return `int64_t`: 0 or a handle on success, a negative error on failure.
-
-**Watch out for calls declared to return `Handle`** (`AllocArea`, `CreateTask`, `FindTask`). `Handle` is unsigned 32-bit, so an error comes back as the error converted to `Handle`. Test it like this:
+Most calls return `int64_t`: 0 or a handle on success, a negative error on failure. A call that makes a handle returns it as a positive `int64_t`, so keep the result in an `int64_t`, test it with `< 0`, and cast it to `Handle` once it's known to be one:
 
 ```c
-Handle a = AllocArea(size, 0, &p);
-if (a == (Handle)ERR_NOMEM || a == (Handle)ERR_BADARG)
-    ...
+int64_t a = AllocArea(size, 0, &p);
+if (a < 0)
+    return a;                   /* ERR_NOMEM, ERR_LIMIT, ... */
+FreeArea((Handle)a);
 ```
 
-A valid handle's low 16 bits are below 4096, and an error's are above 0xFFF0, so the two never collide. Testing `(int64_t)a > 0` does **not** catch errors. See BUGS under each of those calls.
+**One call still returns `Handle`**: `FindTask`. `Handle` is unsigned 32-bit, so its error comes back as `(Handle)ERR_NOTFOUND`, and `(int64_t)h > 0` does **not** catch it. `FindTask(nullptr)` can't fail.
+
+## Limits
+
+So that no one process can use up what every process shares, each has limits. Going past one gives `ERR_LIMIT`.
+
+| Limit | Per process | Counts |
+|---|---|---|
+| Handles | 256 | Every handle the process holds: its tasks, Areas, ports and connection ends |
+| Tasks | 64 | Including the one running `main()` |
+| Connections | 32 | Connection ends, client and server, open or still waiting to be accepted |
+
+A port also queues at most 32 connections waiting to be accepted. Past that, `OpenPort` and `ConnectPort` fail with `ERR_FULL`: the server isn't keeping up, so try later.
+
+The limits are the kernel's (`kernel/process.h`, `kernel/port.c`), not in a public header. There is no limit yet on the memory a process allocates, other than what is free ([docs §10](../../docs/10-code-review.md), M11). `conformance/limits.c` runs into each of the three.
 
 ## Logging
 
-Until there is a console device, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name. The conformance programs format numbers into a buffer first (`conformance/log.h`).
+Until there is a console device, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
 
 ## Names in this volume
 

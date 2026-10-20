@@ -31,6 +31,7 @@
 | FreeArea | [exec](exec.md#execfreearea) | kernel |
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
+| GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
 | KLog | [exec](exec.md#execklog) | kernel |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
 | PortGone | [msg](msg.md#execportgone) | library |
@@ -52,8 +53,9 @@
 ## Known problems found while writing these
 
 Each is under BUGS in its entry.
-- `AllocArea`, `CreateTask` and `FindTask` return `Handle`, so errors come back as large unsigned values. `conformance/tasks.c` checks `CreateTask` with `!`, which misses them.
+- `FindTask` still returns `Handle`, so its error comes back as a large unsigned value. (`AllocArea` and `CreateTask` now return `int64_t`.)
 - `ExitTask`'s code goes nowhere.
 - `SignalWaitConn` returns 0 at once for a bad handle, the same as for a closed peer.
 - An over-long port name gives `ERR_BADADDR` rather than `ERR_BADARG`.
-- If `OpenPort`'s `arena` pointer stops being writable mid-call, the connection is made but its handle is lost.
+- If `OpenPort`'s or `AcceptConn`'s `arena` pointer stops being writable mid-call, the connection is made but its handle is lost.
+- `KLog` drops lines over its rate limit and still returns 0, and the console is still polled.
