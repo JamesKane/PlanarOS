@@ -1,6 +1,6 @@
 # V3 plan: the first Arm board, ACPI
 
-**Status: in progress (2026-10-20).** Step 1 done. The open decisions are at the end.
+**Status: in progress (2026-10-20).** Step 1 done. All three decisions are made (end of this plan).
 
 **Goal (§8):** the AArch64 port on real hardware. The board is the Orange Pi 6 Plus (CIX P1). It boots through UEFI and describes itself only through ACPI.
 
@@ -87,7 +87,7 @@ Each step ends with `make test-all` green and a `V3.n done` line in the transcri
 
 ## 3. The board
 
-**One image for every UEFI Arm board.** The CIX gets quirk entries, not a platform of its own (proposed; see the decisions below). The order of bring-up:
+**One image for every UEFI Arm board.** The CIX gets quirk entries, not a platform of its own (decision 2). The order of bring-up:
 
 1. A line from the stub, through UEFI's console.
 2. The kernel's banner on UART2: a PL011, `ARMH0011`, at 3.3 V on the 10-pin header (pin 1 TX, pin 3 RX, pin 5 GND). UEFI leaves it programmed at 115200 (seen on the board), so the kernel writes to it without changing the baud rate.
@@ -167,5 +167,5 @@ While the cable is on the CIX, the RV2 has no console and no serial boot. Step 6
 
    Any of them wants a 3.3 V USB-serial adapter on UART2 for the console, and a way to cut power on a hang: a smart plug, or the watchdog left armed by us.
    **Decided (2026-10-20): (a), from FreeBSD rather than Ubuntu.** The board boots AbyssBSD's FreeBSD first (Boot0005), with root over ssh. A test copies the image to the EFI partition (`nda0p1`), sets `BootNext` with `efibootmgr -n`, and reboots; the next boot falls back to FreeBSD. Serial works on UART2 (step 3). Whether this firmware honours `BootNext` is still to be checked.
-2. **One UEFI image, or a CIX platform.** *Proposed:* one `uefi-a64` image, with board differences as quirk data keyed by ACPI IDs. This is the point of ACPI. The RK3588 will still use `booti` and the FDT.
-3. **What VQ3's decision does to the losing layout:** keep it behind `layout=` as an option, or delete it. *Proposed:* delete it, after V3, in its own commit, so the decision shows in the history.
+2. **One UEFI image, or a CIX platform.** **Decided (2026-10-20): one `uefi-a64` image**, with board differences as quirk data keyed by ACPI IDs. This is the point of ACPI. The RK3588 will still use `booti` and the FDT.
+3. **What VQ3's decision does to the losing layout:** keep it behind `layout=` as an option, or delete it. **Decided (2026-10-20): delete it**, after V3, in its own commit, so the decision shows in the history.

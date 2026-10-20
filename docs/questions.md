@@ -24,6 +24,8 @@ No commitment until V1 has numbers from the RV2 and at least one Arm board. Both
 - Global leaves physical memory about 2.8× more fragmented.
 - Page tables and allocation time are about the same.
 
+Once it's decided (V3 step 6), the losing layout is deleted after V3, in a commit of its own (v3-plan decision 3, 2026-10-20).
+
 V1 measures:
 - Largest free run per zone after a soak test that creates and destroys processes and grows and shrinks heaps.
 - How often allocations fail even though enough total memory is free.
