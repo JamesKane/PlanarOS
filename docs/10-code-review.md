@@ -1,5 +1,7 @@
 # 10. Adversarial review of the code through V2
 
+**Status (2026-10-20, V2.5):** every critical, high and medium finding has been fixed or, where noted, changed in the docs. Each fix came with a test that fails without it, except M1 (no SVE in QEMU) and M9 (a one-instruction window). The "Now" column gives the commit. Of the low findings, three are fixed and one in part (§10.8); the rest are open.
+
 This document reviews the tree as of `f03eea2` plus the uncommitted changes on 2026-10-20. That covers V0, V1 and V2 steps 1–4 plus the round-trip work. The review assumed a hostile user process, a hostile peer on a connection, and a skeptical reading of the boot inputs. Six passes covered IPC, scheduling/SMP, memory and processes, the rv64 arch layer, the aarch64 and hosted arch layers, and boot plus the syscall boundary. Every critical and high finding was then checked against the code a second time.
 
 Each finding gets a severity and a status:
@@ -19,33 +21,33 @@ Nothing in the repo was changed during the review. `kernel/sched.c` and `kernel/
 
 ## 10.1 Summary
 
-| # | Sev. | Area | Finding | Status |
-|---|---|---|---|---|
-| C1 | Critical | Areas | ShareArea racing FreeArea maps freed physical pages into the caller | Plausible |
-| H1 | High | aarch64 | EL0 can execute any RAM through the kernel direct map (no UXN/PXN) | Reproduced |
-| H2 | High | rv64 | `arch_map` changes a live PTE with only a local `sfence.vma` | Confirmed |
-| H3 | High | rv64 | Vector save and load ignore `vstart`, so another task's v-registers get corrupted | Confirmed |
-| H4 | High | IPC lib | `in_heap` checks only the header, so a rogue client kills echo | Reproduced |
-| H5 | High | IPC lib | DoMsg's stash is linked through memory the server can write | Confirmed |
-| H6 | High | rv64 | Vector FP instructions kill the task when FP isn't loaded | Confirmed |
-| H7 | High | Sched | An idle CPU is never told about ready work it could steal | Confirmed |
-| M1 | Medium | aarch64 | SVE traps to EL2 (CPTR_EL2.TZ in RES1); CPACR_EL1 only partly set | Reproduced* |
-| M2 | Medium | aarch64 | EL0 can write the PMU (`PMUSERENR_EL0.EN`) | Reproduced |
-| M3 | Medium | aarch64 | `TPIDR_EL0` is never switched and leaks between processes | Reproduced |
-| M4 | Medium | Areas | W^X is enforced per mapping, not per Area | Confirmed |
-| M5 | Medium | Areas | `back_global` leaks the page list on partial failure | Confirmed |
-| M6 | Medium | aarch64 | ProtectArea's break-before-make window kills sibling tasks | Confirmed |
-| M7 | Medium | Sched/IPC | Priority inheritance only on the sleep→wake edge; no chains | Confirmed |
-| M8 | Medium | Sched | Lowering a running task's priority never starts the quantum | Confirmed |
-| M9 | Medium | Sched | `task_self()` can be read on one CPU and used on another | Plausible |
-| M10 | Medium | Syscalls | Signal and ShareArea reach any task in any process | Confirmed |
-| M11 | Medium | Resources | No per-process limits on handles, tasks, connections or arena bytes | Confirmed |
-| M12 | Medium | Syscalls | `KLog` keeps interrupts off for ~19 ms per call | Confirmed |
-| M13 | Medium | Boot | RAM above the direct map is handed to the allocator | Confirmed |
-| M14 | Medium | FDT | Length wrap hangs boot; negative depth writes below `stack[]`; header offsets unchecked | Reproduced |
-| M15 | Medium | Boot | The pmm bitmap is written after the kernel before any reservation check | Plausible |
-| M16 | Medium | Build | User runtime objects don't depend on the headers they include | Confirmed |
-| M17 | Medium | Tests | `make test` passes when boot skipped every test | Confirmed |
+| # | Sev. | Area | Finding | Status | Now |
+|---|---|---|---|---|---|
+| C1 | Critical | Areas | ShareArea racing FreeArea maps freed physical pages into the caller | Plausible | Fixed `bf60913` |
+| H1 | High | aarch64 | EL0 can execute any RAM through the kernel direct map (no UXN/PXN) | Reproduced | Fixed `37d9307` |
+| H2 | High | rv64 | `arch_map` changes a live PTE with only a local `sfence.vma` | Confirmed | Fixed `37d9307` |
+| H3 | High | rv64 | Vector save and load ignore `vstart`, so another task's v-registers get corrupted | Confirmed | Fixed `8d45cec` |
+| H4 | High | IPC lib | `in_heap` checks only the header, so a rogue client kills echo | Reproduced | Fixed `f733561` |
+| H5 | High | IPC lib | DoMsg's stash is linked through memory the server can write | Confirmed | Fixed `f733561` |
+| H6 | High | rv64 | Vector FP instructions kill the task when FP isn't loaded | Confirmed | Fixed `8d45cec` |
+| H7 | High | Sched | An idle CPU is never told about ready work it could steal | Confirmed | Fixed `8c33239` |
+| M1 | Medium | aarch64 | SVE traps to EL2 (CPTR_EL2.TZ in RES1); CPACR_EL1 only partly set | Reproduced* | Fixed `8d45cec` (not exercised: no SVE in QEMU) |
+| M2 | Medium | aarch64 | EL0 can write the PMU (`PMUSERENR_EL0.EN`) | Reproduced | Fixed `8d45cec` |
+| M3 | Medium | aarch64 | `TPIDR_EL0` is never switched and leaks between processes | Reproduced | Fixed `8d45cec` |
+| M4 | Medium | Areas | W^X is enforced per mapping, not per Area | Confirmed | Fixed `37d9307` |
+| M5 | Medium | Areas | `back_global` leaks the page list on partial failure | Confirmed | Fixed `20ed799` |
+| M6 | Medium | aarch64 | ProtectArea's break-before-make window kills sibling tasks | Confirmed | Fixed `b78f6ff` |
+| M7 | Medium | Sched/IPC | Priority inheritance only on the sleep→wake edge; no chains | Confirmed | Docs say "handoff boosting" `5233209` |
+| M8 | Medium | Sched | Lowering a running task's priority never starts the quantum | Confirmed | Fixed `8c33239` |
+| M9 | Medium | Sched | `task_self()` can be read on one CPU and used on another | Plausible | Fixed `8c33239`, `66ac684` (untested: one-instruction window) |
+| M10 | Medium | Syscalls | Signal and ShareArea reach any task in any process | Confirmed | Fixed `bf60913` |
+| M11 | Medium | Resources | No per-process limits on handles, tasks, connections or arena bytes | Confirmed | Fixed `5233209` (no memory quota yet) |
+| M12 | Medium | Syscalls | `KLog` keeps interrupts off for ~19 ms per call | Confirmed | In part `13e9e1b`: filtered, rate-limited; still polled |
+| M13 | Medium | Boot | RAM above the direct map is handed to the allocator | Confirmed | Fixed `6326b81` (clip untested by a boot) |
+| M14 | Medium | FDT | Length wrap hangs boot; negative depth writes below `stack[]`; header offsets unchecked | Reproduced | Fixed `0f9e38b` |
+| M15 | Medium | Boot | The pmm bitmap is written after the kernel before any reservation check | Plausible | Fixed `218f209` |
+| M16 | Medium | Build | User runtime objects don't depend on the headers they include | Confirmed | Fixed `b9a17f3` |
+| M17 | Medium | Tests | `make test` passes when boot skipped every test | Confirmed | Fixed `b9a17f3` |
 
 \* Reproduced in QEMU with ZEN forced on to stand in for firmware; whether it happens on the CIX board depends on its firmware.
 
@@ -262,10 +264,10 @@ All of OP-V (0x57) is classed `EXT_VEC`, but OPFVV/OPFVF (funct3 1 and 5, e.g. `
 
 | Area | Finding | Where |
 |---|---|---|
-| Processes | `return t->handle` after `launch()`: the new task may already have exited and freed its stack | `process.c:262-264` |
+| Processes | **Fixed** `5233209`: `return t->handle` after `launch()`: the new task may already have exited and freed its stack | `process.c:262-264` |
 | Areas | No I-cache sync when sharing EXEC rights, and in protect the sync runs after the RX mapping is live | `area.c:463, 502-504` |
 | Areas | Oversized AllocArea scans the whole bitmap bit by bit with the pmm lock held and IRQs off | `pmm.c:133-164` |
-| Areas | `AREAF_LARGE` + `AREAF_CONTIG` in the global layout: VA 2 MiB-aligned, PA only page-aligned | `area.c:117-118` |
+| Areas | **Fixed** `20ed799`: `AREAF_LARGE` + `AREAF_CONTIG` in the global layout: VA 2 MiB-aligned, PA only page-aligned | `area.c:117-118` |
 | Areas | No ASID rollover (doc §3.6); 8-bit-ASID parts fail process creation after 255 domains | `aarch64/mmu.c:49-66` |
 | rv64 | `sstatus.SUM` (and FS/VS) carries over to another task on preemption inside a user copy | `rv64/trap.c:172-187` |
 | rv64 | `sscratch` never zeroed at boot; firmware garbage makes the first kernel trap look like a user trap | `rv64/entry.S:42, 94` |
@@ -277,9 +279,9 @@ All of OP-V (0x57) is classed `EXT_VEC`, but OPFVV/OPFVF (funct3 1 and 5, e.g. `
 | aarch64 | No kernel stack guard; overflow silently overwrites `struct task` at the stack base | `vectors.S:18`, `sched.h:34` |
 | aarch64 | SGI 0 reads as "nothing pending", so it is never EOI'd | `gicv3.c:170`, `irq.c:31` |
 | Host | IRQ ops are no-ops, copies always fail, one CPU: hides contract violations | `arch/host/arch.c:55-74, 185-203` |
-| Sched | `set_pri` races the enqueue of a migrating task, so the queue level is wrong (selftest-only today) | `sched.c:481-511, 229-239` |
+| Sched | **Fixed** `e8055d8`: `set_pri` races the enqueue of a migrating task, so the queue level is wrong (selftest-only today) | `sched.c:481-511, 229-239` |
 | Sched | Affinity to no online CPU loses a migrating task, and its stack leaks | `sched.c:230-239` |
-| Sched | `ktimer_stop` doesn't wait for a handler already running, so it can use a freed task (latent) | `ktime.c:105-141` |
+| Sched | **In part** `e8055d8` (sleep timer stopped when woken early): `ktimer_stop` doesn't wait for a handler already running, so it can use a freed task (latent) | `ktime.c:105-141` |
 | Sched | A woken task can run once outside its affinity | `sched.c:622-623` |
 | Sched | `cpu_count` with interrupts on, and the global `taken`, lose updates; this loosens the V2.2/V2.3 call-count bounds | `syscall.c:78`, `irq.c` |
 | Sched | `time_to_us` overflows (`ticks * 1e6`), and selftest passes it an absolute time | `ktime.c:58-61`, `selftest.c:738` |

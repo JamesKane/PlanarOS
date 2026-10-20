@@ -37,6 +37,12 @@ On QEMU, about 98% of `DoMsg` round trips hand off. Each round trip costs the cl
 
 Step 1 also serialises `kprintf` across CPUs. Lines from different CPUs used to interleave mid-line.
 
+**V2.5: hardening (2026-10-20).** An adversarial review (docs/10-code-review.md) found 1 critical, 7 high and 17 medium problems. All are now fixed, or (M7) the docs changed to match the code. Each fix has a test that fails without it, except M1 and M9. The tests that can't pass by skipping (M16, M17) went in first. New conformance programs: `arearace`, `kexec`, `protrace`, `protflip`, `stashserver`/`stasher`, `vecfp`, `ctrwrite`, `limits`, `logflood`, plus a fourth rogue case. The kernel tests the device-tree parser against broken blobs, a part-way Area failure by fault injection, stranding and lowering in the scheduler, and handoff ahead of a ready peer.
+
+The hunt for the soak failures that came before the review found three SMP races: a cross-CPU handoff deadlock, and two `finish_switch` races, one reading state and one reading the task's own page after letting go of it. 4,000 QEMU boots were clean afterwards.
+
+Correct, then fast. On the RV2 the hardening first cost 252 cycles per kernel call, mostly from reading the current task with interrupts off. A single load through `tp` gets that back. `DoMsg` is 3,492 cycles in the global layout, and 3,475 in identity before the hardening. Omega's 3,361 is still 3–4% away. The next speedup is saving fewer registers on a kernel call.
+
 ## Design
 
 This follows docs/04-ipc.md. Where V2 settles something that doc leaves open, the doc is updated too.
