@@ -6,6 +6,8 @@
  * lives just after the kernel image. Allocation is next-fit, a 64-bit word
  * at a time, under one lock.
  */
+#include <stdatomic.h>
+
 #include "arch.h"
 #include "kprintf.h"
 #include "kstring.h"
@@ -13,6 +15,7 @@
 #include "pmm.h"
 #include "spinlock.h"
 
+static atomic_uint bad_frees;
 static uint64_t *bitmap;            /* bit n: page base_pfn + n is taken */
 static uint64_t base_pfn, npages;   /* the span the bitmap covers */
 static uint64_t nwords, next_word;
@@ -172,11 +175,17 @@ void pmm_free(uint64_t page)
         spin_unlock_irqrestore(&lock, was);
         kprintf("planar: pmm_free of a page not allocated: %p (from %p)\n", (void *)page,
                 __builtin_return_address(0));
+        atomic_fetch_add(&bad_frees, 1);
         return;
     }
     bitmap[n / 64] &= ~(1ULL << (n % 64));
     nfree++;
     spin_unlock_irqrestore(&lock, was);
+}
+
+unsigned pmm_bad_frees(void)
+{
+    return atomic_load(&bad_frees);
 }
 
 uint64_t pmm_total(void)

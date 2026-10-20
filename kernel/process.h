@@ -49,6 +49,8 @@ struct process {
     atomic_uint unfinished;         /* tasks not yet switched away for good */
     struct mapping *maps;           /* the Areas it maps (kernel/area.c's lock) */
     atomic_bool dying;
+    bool maps_closed;               /* being reclaimed: nothing maps in (area.c's lock) */
+    atomic_uint refs;               /* the watcher's, and calls using the record */
     atomic_bool dead;               /* reclaimed: only the record is left */
     int64_t exit_code;
     enum fault fault;
@@ -70,8 +72,12 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
  * when it's dead. */
 void process_kill(struct process *p);
 
-/* Free the record of a dead process. */
+/* The watcher's last word on a dead process: its record goes once no
+ * kernel call is using it either. process_get/process_put are for those
+ * calls (a process found through a task handle). */
 void process_free(struct process *p);
+void process_get(struct process *p);
+void process_put(struct process *p);
 
 /* Kernel calls the process's tasks have made, for the self-tests. */
 uint64_t process_calls(struct process *p);

@@ -193,6 +193,21 @@ void ipc_task_gone(struct task *t)
     kick_all(kicks);
 }
 
+bool ipc_connected(const struct process *a, const struct process *b)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    bool found = false;
+
+    for (struct conn *c = conns; c && !found; c = c->next) {
+        const struct end *x = &c->end[CLIENT], *y = &c->end[SERVER];
+
+        found = x->open && y->open &&
+                ((x->proc == a && y->proc == b) || (x->proc == b && y->proc == a));
+    }
+    spin_unlock_irqrestore(&lock, was);
+    return found;
+}
+
 /* --- The kernel calls. --- */
 
 static bool user_sigbit(int64_t bit)

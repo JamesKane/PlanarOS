@@ -1,7 +1,8 @@
 /*
  * conformance/conn.c -- ports and connections with the raw kernel calls
  *
- * Run twice: arg 0 is the server, arg 1 the client. The server makes the
+ * Run twice: arg 0 is the server; otherwise the client, with arg the
+ * handle of a task in a third process it has no connection with. The server makes the
  * port "conn", accepts one connection and answers the client's signals;
  * the client checks the arena, writes into it for the server to read,
  * and trades signals. Then the server closes and the client must hear
@@ -71,6 +72,7 @@ static int server(void)
     CHECK(a->ca_Slots == 16 && a->ca_HeapSize >= 8192);
     CHECK(DeletePort(port) == 0);
     CHECK(DeletePort(port) == ERR_BADHANDLE);
+    heap_word(a)[1] = FindTask(nullptr);       /* for the client's rights checks */
 
     /* The client's writes, through the same arena. */
     for (unsigned i = 0; i < ROUNDS; i++) {
@@ -83,12 +85,12 @@ static int server(void)
     return 0;
 }
 
-static int client(void)
+static int client(Handle stranger)
 {
     int64_t sig = AllocSignal(-1);
     struct ConnArena *a = nullptr, *a2 = nullptr;
     struct AreaInfo info;
-    Handle conn;
+    Handle conn, server = 0;
     int64_t r;
 
     role = "conn client";
@@ -111,6 +113,16 @@ static int client(void)
         Wait(1ULL << sig);
         /* Accepted, so shared by both (until the server's last answer). */
         if (i == 0) {
+            void *mine;
+            int64_t area = AllocArea(4096, 0, &mine);
+
+            /* Another process's task: no Signal, but ShareArea while
+             * there's a connection (docs/10-code-review.md M10). */
+            server = (Handle)heap_word(a)[1];
+            CHECK(area > 0 && server);
+            CHECK(Signal(server, 1ULL << 20) == ERR_BADHANDLE);
+            CHECK(ShareArea((Handle)area, server, AREAR_READ) == 0);
+            CHECK(FreeArea((Handle)area) == 0);
             CHECK(QueryArea(a, &info) == 0 && info.ai_Sharers == 2);
             CHECK(OpenPort("conn2", sig, 0, 0, &a2) > 0);
             CHECK(a2->ca_Closed == 0);
@@ -126,6 +138,16 @@ static int client(void)
     CHECK(QueryArea(a, &info) == 0 && info.ai_Sharers == 1);
     CHECK(CloseConn(conn) == 0);
     CHECK(QueryArea(a, &info) == ERR_NOTFOUND);
+    {
+        /* No connection with that process: no sharing with it either. */
+        void *mine;
+        int64_t area = AllocArea(4096, 0, &mine);
+
+        CHECK(area > 0);
+        CHECK(ShareArea((Handle)area, stranger, AREAR_READ) == ERR_RIGHTS);
+        CHECK(Signal(stranger, 1ULL << 20) == ERR_BADHANDLE);
+        CHECK(FreeArea((Handle)area) == 0);
+    }
 
     /* The server's exit dropped "conn2", unaccepted. Exit with it open. */
     while (!(a2->ca_Closed & CONNF_SERVER_GONE))
@@ -136,5 +158,5 @@ static int client(void)
 
 int main(uint64_t arg)
 {
-    return arg ? client() : server();
+    return arg ? client((Handle)arg) : server();
 }

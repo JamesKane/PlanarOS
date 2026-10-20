@@ -45,15 +45,28 @@ static int64_t sys_klog(struct task *self, uint64_t text)
     return 0;
 }
 
+struct signal_args {
+    struct process *from;
+    uint64_t mask;
+    bool ok;
+};
+
+/* Only within the caller's own process: across processes there's
+ * SignalConn, to a peer (docs/10-code-review.md M10). */
 static void signal_fn(void *obj, void *arg)
 {
-    task_signal(obj, *(uint64_t *)arg);
+    struct signal_args *s = arg;
+    struct task *t = obj;
+
+    if ((s->ok = t->process == s->from))
+        task_signal(t, s->mask);
 }
 
-static int64_t sys_signal(Handle h, uint64_t mask)
+static int64_t sys_signal(struct task *self, Handle h, uint64_t mask)
 {
-    mask &= ~SIGF_KERNEL;
-    return handle_with(h, HANDLE_TASK, signal_fn, &mask) ? 0 : ERR_BADHANDLE;
+    struct signal_args s = { .from = self->process, .mask = mask & ~SIGF_KERNEL };
+
+    return handle_with(h, HANDLE_TASK, signal_fn, &s) && s.ok ? 0 : ERR_BADHANDLE;
 }
 
 /* Exec's AllocSignal: a specific bit, or any free one with -1. */
@@ -87,7 +100,7 @@ int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
     case SYS_WAIT:
         return (int64_t)task_wait(a[0] & ~SIGF_KERNEL);
     case SYS_SIGNAL:
-        return sys_signal((Handle)a[0], a[1]);
+        return sys_signal(self, (Handle)a[0], a[1]);
     case SYS_FIND_TASK:
         return a[0] ? ERR_NOTFOUND : self->handle;
     case SYS_CREATE_TASK:

@@ -687,8 +687,11 @@ static void expect_exit(const char *name, int64_t code)
 
     if (!atomic_load(&p->dead))
         fail("V1.4 user", "process never ended");
-    if (p->fault != FAULT_NONE || p->exit_code != code)
+    if (p->fault != FAULT_NONE || p->exit_code != code) {
+        kprintf("%s: exit %lld, fault %d; wanted exit %lld\n", name, (long long)p->exit_code,
+                p->fault, (long long)code);
         fail("V1.4 user", "wrong exit");
+    }
     process_free(p);
 }
 
@@ -810,6 +813,8 @@ void selftest_user(void)
     task_sleep_until(time_now() + time_us(5000));
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V1.4 reclaim", "pages leaked");
+    if (pmm_bad_frees())
+        fail("V1.4 reclaim", "a page was freed that wasn\'t allocated");
     if (handle_count() != handles_before)
         fail("V1.4 reclaim", "handles leaked");
     if (arch_domains_live() != domains_before)
@@ -894,9 +899,15 @@ void selftest_areas(void)
 
     test_share();
 
+    expect_exit("arearace", 0);
+    kprintf("V1.5 race ok: 3000 FreeAreas raced ShareArea and ProtectArea on the same handle; "
+            "nothing mapped a freed Area\n");
+
     task_sleep_until(time_now() + time_us(5000));
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V1.5 reclaim", "pages leaked");
+    if (pmm_bad_frees())
+        fail("V1.5 reclaim", "a page was freed that wasn\'t allocated");
     if (area_count() != 0)
         fail("V1.5 reclaim", "Areas leaked");
     if (va_free_bytes() != va_before)
@@ -1128,13 +1139,25 @@ void selftest_ipc(void)
         kprintf("V2.1 conn skipped: no user programs\n");
         return;
     }
-    expect_pair("V2.1 conn", "conn", 0, "conn", 1);
+    /* A third process, connected to neither, for the rights checks. */
+    task_set_signal(0, SIGF_DEAD);
+    struct process *stranger = process_create("waiter", 5, 0, task_self(), SIGF_DEAD);
+
+    if (!stranger)
+        fail("V2.1 conn", "process_create failed");
+    expect_pair("V2.1 conn", "conn", 0, "conn", stranger->tasks->handle);
+    process_kill(stranger);
+    while (!atomic_load(&stranger->dead))
+        wait_test_dead();
+    process_free(stranger);
     kprintf("V2.1 conn ok: a port, a connection, its arena in both, signals both ways, "
             "the close heard\n");
 
     task_sleep_until(time_now() + time_us(5000));
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V2.1 reclaim", "pages leaked");
+    if (pmm_bad_frees())
+        fail("V2.1 reclaim", "a page was freed that wasn\'t allocated");
     if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0)
         fail("V2.1 reclaim", "handles, ports, connections or Areas leaked");
     kprintf("V2.1 reclaim ok\n");
@@ -1219,6 +1242,8 @@ void selftest_rings(void)
     task_sleep_until(time_now() + time_us(5000));
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V2.2 reclaim", "pages leaked");
+    if (pmm_bad_frees())
+        fail("V2.2 reclaim", "a page was freed that wasn\'t allocated");
     if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0)
         fail("V2.2 reclaim", "handles, ports, connections or Areas leaked");
     kprintf("V2.2 reclaim ok\n");
@@ -1571,6 +1596,8 @@ void selftest_death(void)
     task_sleep_until(time_now() + time_us(5000));
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V2.4 reclaim", "pages leaked");
+    if (pmm_bad_frees())
+        fail("V2.4 reclaim", "a page was freed that wasn\'t allocated");
     if (handle_count() != handles_before || ipc_count() != 0 || area_count() != 0 ||
         process_count() != 0)
         fail("V2.4 reclaim", "handles, ports, connections, Areas or processes leaked");

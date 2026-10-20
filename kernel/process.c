@@ -129,7 +129,7 @@ struct process *process_create(const char *name, int pri, uint64_t arg,
         return nullptr;
     p = phys_to_virt(page);
     *p = (struct process){ .name = img->name, .pri = pri, .watcher = watcher,
-                           .watch_sig = sig };
+                           .watch_sig = sig, .refs = 1 };
     if (!arch_domain_create(&p->domain)) {
         pmm_free(page);
         return nullptr;
@@ -282,9 +282,10 @@ void user_return(void)
  */
 static void reclaim(struct process *p)
 {
+    /* Handles first: once its Areas go, no handle may still find them. */
+    handle_free_owner(p);
     area_process_died(p);
     arch_domain_destroy(&p->domain);
-    handle_free_owner(p);
     atomic_store(&p->dead, true);
     if (p->watcher)
         task_signal(p->watcher, p->watch_sig);
@@ -296,10 +297,22 @@ void process_task_finished(struct process *p)
         reclaim(p);
 }
 
+void process_get(struct process *p)
+{
+    atomic_fetch_add(&p->refs, 1);
+}
+
+void process_put(struct process *p)
+{
+    if (atomic_fetch_sub(&p->refs, 1) == 1) {
+        pmm_free(virt_to_phys(p));
+        atomic_fetch_sub(&live_records, 1);
+    }
+}
+
 void process_free(struct process *p)
 {
-    pmm_free(virt_to_phys(p));
-    atomic_fetch_sub(&live_records, 1);
+    process_put(p);
 }
 
 uint64_t process_calls(struct process *p)

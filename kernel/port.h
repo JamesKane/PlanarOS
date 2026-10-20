@@ -30,6 +30,9 @@ int64_t conn_close_call(uint32_t conn);
 /* 't' is leaving its process: close its ports and connection ends. */
 void ipc_task_gone(struct task *t);
 
+/* Is there an open connection between 'a' and 'b' (either way)? */
+bool ipc_connected(const struct process *a, const struct process *b);
+
 /* Ports and connections in existence, for leak checks. */
 unsigned ipc_count(void);
 

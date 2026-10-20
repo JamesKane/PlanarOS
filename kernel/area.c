@@ -10,9 +10,12 @@
  * them; mapping a page may allocate page-table pages, which the page
  * allocator gives with interrupts off.
  *
- * Not yet safe: two tasks of one process using and freeing the same Area
- * handle at once (the calls look the Area up, then act on it). Handles
- * will hold references when IPC needs them (V2).
+ * A call that finds an Area by its handle holds a reference until it's
+ * done, so the Area outlives a FreeArea racing it; an Area goes when
+ * nothing maps it, no handle names it and nobody holds a reference.
+ * Mapping re-checks, under the lock, that the handle still names the
+ * Area and that the process isn't being reclaimed (docs/10-code-review.md
+ * C1).
  */
 #include <planar/exec.h>
 #include <planar/syscalls.h>
@@ -22,6 +25,7 @@
 #include "kmalloc.h"
 #include "kstring.h"
 #include "pmm.h"
+#include "port.h"
 #include "process.h"
 #include "sched.h"
 #include "va.h"
@@ -49,6 +53,7 @@ struct area {
     uint64_t pages_pa;              /* where 'pages' lives, if it took whole pages */
     uint64_t run_pa, run_pages;     /* identity: the whole run, guard included */
     unsigned sharers;
+    unsigned refs;                  /* calls using it (lock held) */
     uint32_t handle;                /* 0 if the kernel owns it, or once freed */
     struct process *owner;
     struct mapping *maps;
@@ -56,6 +61,12 @@ struct area {
 
 static spinlock_t lock;
 static atomic_uint live;
+
+/* Nothing maps it, names it or uses it: free it. Lock held. */
+static bool unused(const struct area *a)
+{
+    return a->sharers == 0 && a->handle == 0 && a->refs == 0;
+}
 
 static uint64_t npages(const struct area *a)
 {
@@ -247,13 +258,22 @@ static void unlink_mapping(struct mapping *m)
     m->area->sharers--;
 }
 
-static int64_t map_into(struct area *a, struct process *p, uint32_t rights, uint64_t exec_bytes)
+/* Map 'a' into 'p'. With 'handle', only while that handle still names
+ * 'a' (a racing FreeArea makes it ERR_BADHANDLE). Never into a process
+ * being reclaimed. */
+static int64_t map_into(struct area *a, struct process *p, uint32_t rights, uint64_t exec_bytes,
+                        uint32_t handle)
 {
     struct mapping *m = kmalloc(sizeof *m);
 
     if (!m)
         return ERR_NOMEM;
     unsigned long was = spin_lock_irqsave(&lock);
+    if ((handle && a->handle != handle) || p->maps_closed) {
+        spin_unlock_irqrestore(&lock, was);
+        kfree(m);
+        return handle && a->handle != handle ? ERR_BADHANDLE : ERR_NOTFOUND;
+    }
     if (find(a, p)) {
         spin_unlock_irqrestore(&lock, was);
         kfree(m);
@@ -277,12 +297,12 @@ static int64_t map_into(struct area *a, struct process *p, uint32_t rights, uint
 
 bool area_map(struct area *a, struct process *p, uint32_t rights, uint64_t exec_bytes)
 {
-    return map_into(a, p, rights, exec_bytes) == 0;
+    return map_into(a, p, rights, exec_bytes, 0) == 0;
 }
 
 int64_t area_share(struct area *a, struct process *p, uint32_t rights)
 {
-    return map_into(a, p, rights, 0);
+    return map_into(a, p, rights, 0, 0);
 }
 
 void area_release(struct area *a, struct process *p)
@@ -297,7 +317,7 @@ void area_release(struct area *a, struct process *p)
     }
     unmap_pages(a, p);
     unlink_mapping(m);
-    last = a->sharers == 0 && a->handle == 0;
+    last = unused(a);
     spin_unlock_irqrestore(&lock, was);
     kfree(m);
     if (last)
@@ -306,6 +326,10 @@ void area_release(struct area *a, struct process *p)
 
 void area_process_died(struct process *p)
 {
+    unsigned long w = spin_lock_irqsave(&lock);
+
+    p->maps_closed = true;          /* nothing maps into it from now on */
+    spin_unlock_irqrestore(&lock, w);
     for (;;) {
         unsigned long was = spin_lock_irqsave(&lock);
         struct mapping *m = p->maps;
@@ -320,7 +344,7 @@ void area_process_died(struct process *p)
         unlink_mapping(m);
         if (a->owner == p)
             a->handle = 0;          /* its handle goes with the process */
-        last = a->sharers == 0 && a->handle == 0;
+        last = unused(a);
         spin_unlock_irqrestore(&lock, was);
         kfree(m);
         if (last)
@@ -360,11 +384,18 @@ void area_copy_in(struct area *a, uint64_t offset, const void *src, uint64_t len
 
 /* --- The kernel calls. --- */
 
+/* Under the handle table's lock, so the Area can't go first. */
 static void get_area(void *obj, void *arg)
 {
-    *(struct area **)arg = obj;
+    struct area *a = obj;
+    unsigned long was = spin_lock_irqsave(&lock);
+
+    a->refs++;
+    spin_unlock_irqrestore(&lock, was);
+    *(struct area **)arg = a;
 }
 
+/* The Area 'h' names, with a reference for put_area(); nullptr if none. */
 static struct area *area_of(uint32_t h)
 {
     struct area *a = nullptr;
@@ -373,9 +404,25 @@ static struct area *area_of(uint32_t h)
     return a;
 }
 
+static void put_area(struct area *a)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    bool last = --a->refs == 0 && unused(a);
+
+    spin_unlock_irqrestore(&lock, was);
+    if (last)
+        area_destroy(a);
+}
+
+/* A task handle names a live task, so its process is still there; the
+ * reference keeps the record (process_put). */
 static void get_process(void *obj, void *arg)
 {
-    *(struct process **)arg = ((struct task *)obj)->process;
+    struct process *p = ((struct task *)obj)->process;
+
+    if (p)
+        process_get(p);
+    *(struct process **)arg = p;
 }
 
 static struct process *process_of(uint32_t task)
@@ -403,28 +450,34 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out)
 {
     struct process *p = task_self()->process;
     struct area *a;
+    uint32_t h;
     uint64_t va;
+    int64_t err;
 
     if (size == 0 || size > (VA_WINDOW_TOP - VA_WINDOW_BASE) / 2 || (flags & ~AREAF_ALL))
         return ERR_BADARG;
     if (!(a = area_new(layout_boot(), (size + PAGE_SIZE - 1) / PAGE_SIZE, flags, false)))
         return ERR_NOMEM;
-    if (!(a->handle = handle_new(HANDLE_AREA, a, p))) {
+    a->owner = p;
+    a->refs = 1;                    /* ours, until the call is done */
+    if (!(h = a->handle = handle_new(HANDLE_AREA, a, p))) {
         area_destroy(a);
         return ERR_NOMEM;
     }
-    a->owner = p;
-    if (map_into(a, p, AREAR_READ | AREAR_WRITE, 0) != 0) {
-        handle_free(a->handle);
-        area_destroy(a);
-        return ERR_NOMEM;
+    /* From here a sibling task may FreeArea(h) under us. */
+    if ((err = map_into(a, p, AREAR_READ | AREAR_WRITE, 0, h)) != 0) {
+        if (err != ERR_BADHANDLE)
+            area_free_call(h);
+        put_area(a);
+        return err;
     }
     va = a->va;
+    put_area(a);
     if (!arch_copy_to_user(addr_out, &va, sizeof va)) {
-        area_free_call(a->handle);
+        area_free_call(h);
         return ERR_BADADDR;
     }
-    return a->handle;
+    return h;
 }
 
 /* The owner gives up its handle and its own mapping; the Area lives on
@@ -433,75 +486,98 @@ int64_t area_free_call(uint32_t h)
 {
     struct process *p = task_self()->process;
     struct area *a = area_of(h);
+    bool mine;
 
-    if (!a || a->owner != p)
+    if (!a)
         return ERR_BADHANDLE;
-    handle_free(h);
     unsigned long was = spin_lock_irqsave(&lock);
-    a->handle = 0;
-    bool unmapped = a->sharers == 0;
+    if ((mine = a->owner == p && a->handle == h))
+        a->handle = 0;              /* only one FreeArea gets here */
     spin_unlock_irqrestore(&lock, was);
-    if (unmapped)
-        area_destroy(a);
-    else
+    if (mine) {
+        handle_free(h);
         area_release(a, p);
-    return 0;
+    }
+    put_area(a);
+    return mine ? 0 : ERR_BADHANDLE;
 }
 
 int64_t area_share_call(uint32_t h, uint32_t task, uint32_t rights)
 {
+    struct process *self = task_self()->process;
     struct area *a = area_of(h);
     struct process *target = process_of(task);
     int64_t err;
 
-    if (!a || a->owner != task_self()->process)
-        return ERR_BADHANDLE;
-    if (!target)
-        return ERR_NOTFOUND;
-    if ((err = check_rights(a, rights)))
-        return err;
-    return map_into(a, target, rights, 0);
+    if (!a || a->owner != self)
+        err = ERR_BADHANDLE;
+    else if (!target)
+        err = ERR_NOTFOUND;
+    else if (target != self && !ipc_connected(self, target))
+        err = ERR_RIGHTS;           /* only to a peer: review M10 */
+    else if (!(err = check_rights(a, rights)))
+        err = map_into(a, target, rights, 0, h);
+    if (a)
+        put_area(a);
+    if (target)
+        process_put(target);
+    return err;
 }
 
 int64_t area_unshare_call(uint32_t h, uint32_t task)
 {
     struct area *a = area_of(h);
     struct process *target = process_of(task);
-    bool mapped;
+    int64_t err = 0;
 
-    if (!a || a->owner != task_self()->process)
-        return ERR_BADHANDLE;
-    if (!target || target == a->owner)
-        return ERR_NOTFOUND;
-    unsigned long was = spin_lock_irqsave(&lock);
-    mapped = find(a, target) != nullptr;
-    spin_unlock_irqrestore(&lock, was);
-    if (!mapped)
-        return ERR_NOTFOUND;
-    area_release(a, target);
-    return 0;
+    if (!a || a->owner != task_self()->process) {
+        err = ERR_BADHANDLE;
+    } else if (!target || target == a->owner) {
+        err = ERR_NOTFOUND;
+    } else {
+        unsigned long was = spin_lock_irqsave(&lock);
+        bool mapped = find(a, target) != nullptr;
+
+        spin_unlock_irqrestore(&lock, was);
+        if (mapped)
+            area_release(a, target);
+        else
+            err = ERR_NOTFOUND;
+    }
+    if (a)
+        put_area(a);
+    if (target)
+        process_put(target);
+    return err;
 }
 
 int64_t area_protect_call(uint32_t h, uint32_t rights)
 {
     struct process *p = task_self()->process;
     struct area *a = area_of(h);
-    struct mapping *m;
+    struct mapping *m = nullptr;
     int64_t err;
 
-    if (!a || a->owner != p)
+    if (!a)
         return ERR_BADHANDLE;
-    if ((err = check_rights(a, rights)))
+    if (a->owner != p) {
+        put_area(a);
+        return ERR_BADHANDLE;
+    }
+    if ((err = check_rights(a, rights))) {
+        put_area(a);
         return err;
+    }
     unsigned long was = spin_lock_irqsave(&lock);
-    if ((m = find(a, p))) {
+    if (a->handle == h && (m = find(a, p))) {
         m->rights = rights;
         map_pages(m);               /* remaps every page: arch_map breaks before making */
     }
     spin_unlock_irqrestore(&lock, was);
-    if (rights & AREAR_EXEC)
+    if (m && (rights & AREAR_EXEC))
         for (uint64_t off = 0; off < a->size; off += PAGE_SIZE)
             arch_sync_icache(phys_to_virt(area_pa(a, off)), PAGE_SIZE);
+    put_area(a);
     return m ? 0 : ERR_NOTFOUND;
 }
 

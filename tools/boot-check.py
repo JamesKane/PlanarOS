@@ -58,7 +58,7 @@ def main() -> int:
             transcript += chunk
             found = args.expect.encode() in transcript
             if re.search(rb" FAIL\b|Guru Meditation", transcript):
-                break
+                deadline = min(deadline, time.monotonic() + 1.0)     # the rest of the story
     finally:
         if proc.poll() is None:
             proc.kill()
