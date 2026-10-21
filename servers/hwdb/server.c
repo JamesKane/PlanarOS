@@ -508,6 +508,8 @@ static bool stop(struct unit *u, uint64_t quarantined)
         return stop_sdhci(u);
     if (hw_streq(name, "display"))
         return stop_display(u);
+    if (hw_streq(name, "xhci"))
+        return stop_xhci(u);
     return quarantined == 0;    /* none: only a device that kept no DMA is safe (VQ24) */
 }
 
@@ -731,6 +733,10 @@ static void serve(unsigned c)
         display_serve(&conns[c]);
         return;
     }
+    if (conn_unit[c] == CONN_INPUT) {
+        input_conn_serve(&conns[c]);
+        return;
+    }
     while ((m = (struct HwdbMsg *)GetMsgSized(&conns[c], sizeof *m))) {
         uint32_t op = m->hm_Op, token = m->hm_Token;
         struct unit *u = unit_of(token);
@@ -798,11 +804,14 @@ static void serve_all(void)
     for (unsigned c = 0; c < nconns;) {
         serve(c);
         if (PortGone(&conns[c]) && (conn_unit[c] == UINT32_MAX || conn_unit[c] == CONN_ACPID ||
-                                    conn_unit[c] == CONN_POWER || conn_unit[c] == CONN_DISPLAY)) {
+                                    conn_unit[c] == CONN_POWER || conn_unit[c] == CONN_DISPLAY ||
+                                    conn_unit[c] == CONN_INPUT)) {
             if (conn_unit[c] == CONN_POWER)
                 power_down();
             if (conn_unit[c] == CONN_DISPLAY)
                 display_down();
+            if (conn_unit[c] == CONN_INPUT)
+                input_conn_down();
             ClosePort(&conns[c]);
             conns[c] = conns[--nconns];
             conn_unit[c] = conn_unit[nconns];
@@ -1055,6 +1064,7 @@ int main(uint64_t arg, uint64_t root)
         uint64_t next, got;
 
         pump();
+        input_keep();
         if (hwdb.test)
             test_step();
         else
@@ -1062,6 +1072,8 @@ int main(uint64_t arg, uint64_t root)
         if (hwdb.finished)
             break;
         next = next_deadline();
+        if (input_due() && (!next || input_due() < next))
+            next = input_due();
         ArmTimer(next, next ? SIG_TIMER : 0);
         got = WaitPorts(conns, nconns, 1ULL << SIG_PORT | 1ULL << SIG_CONN | 1ULL << SIG_DEAD |
                                            1ULL << SIG_ACPI_PORT | 1ULL << SIG_TIMER);

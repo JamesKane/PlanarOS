@@ -230,6 +230,10 @@ void drv_log(const struct drv *d, const struct drv_dev *dev, const char *text);
  * (arch/<arch>/user/cache.c); orders only where the machine is coherent. */
 void drv_dma_clean(const void *p, uint64_t n);
 void drv_dma_flush(const void *p, uint64_t n);
+/* Orders memory a device reads or writes, uncached Areas' too, against
+ * its registers: what was written before a doorbell, what the device
+ * wrote before it's read. More than a compiler's fence on both ISAs. */
+void drv_io_barrier(void);
 
 /* For a bus driver's Bind: a message for hwdb, the size of any (one per
  * driver, reused), and DoMsg with it; 0, or the error hwdb or the

@@ -58,6 +58,7 @@
   needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /cpus/cpu@4/interrupt-controller (interrupts); /cpus/cpu@5/interrupt-controller (interrupts); /cpus/cpu@6/interrupt-controller (interrupts); /cpus/cpu@7/interrupt-controller (interrupts); /soc (parent)
 /soc/clock-controller@d4050000 [ky,x1-ccu]: power, bound 8
   mmio 0xd4282800+0x400
+  mmio 0xd4019000+0x800
   needs /clocks/vctcxo_24 (clock); /clocks/vctcxo_3 (clock); /clocks/vctcxo_1 (clock); /clocks/pll1_vco (clock); /clocks/clk_32k (clock); /clocks/clk_dummy (clock); /soc (parent)
 /soc/reset-controller@d4050000 [ky,x1-reset]: power, bound 9
   mmio 0xd4282800+0x400
@@ -73,7 +74,7 @@
   irq 9 on /cpus/cpu@6/interrupt-controller
   irq 9 on /cpus/cpu@7/interrupt-controller
   needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /cpus/cpu@4/interrupt-controller (interrupts); /cpus/cpu@5/interrupt-controller (interrupts); /cpus/cpu@6/interrupt-controller (interrupts); /cpus/cpu@7/interrupt-controller (interrupts); /soc (parent)
-/soc/gpio@d4019000 [ky,x1-gpio]: firmware, U-Boot's, until a GPIO driver
+/soc/gpio@d4019000 [ky,x1-gpio]: no driver; the same device as /soc/clock-controller@d4050000
   mmio 0xd4019000+0x800
   irq 58 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/clock-controller@d4050000 (clock); /soc (parent)
@@ -106,25 +107,30 @@
   mmio 0xc0980100+0x4000
   irq 118 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc/usbphy1@c09c0000 (phy); /usb2hub (supply); /soc (parent)
-/soc/phy@c0b10000 [ky,x1-combphy]: no driver
+/soc/phy@c0b10000 [ky,x1-combphy]: no driver; the same device as /soc/usb3@0
   mmio 0xc0b10000+0x800
+  mmio 0xd4282910+0x400
   needs /soc/reset-controller@d4050000 (reset); /soc (parent)
-/soc/usb2phy@0xc0a30000 [ky,usb2-phy]: no driver
+/soc/usb2phy@0xc0a30000 [ky,usb2-phy]: no driver; the same device as /soc/usb3@0
   mmio 0xc0a30000+0x200
   needs /soc/clock-controller@d4050000 (clock); /soc (parent)
-/soc/usb3@0 [ky,x1-dwc3]: no driver
-  irq 149 on /soc/interrupt-controller@e0000000
+/soc/usb3@0 [ky,x1-dwc3]: xhci, bound 12
+  mmio 0xc0a00000+0x10000
+  mmio 0xc0a30000+0x200
+  mmio 0xc0b10000+0x800
+  irq 125 on /soc/interrupt-controller@e0000000
+  dma below 0x80000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /usb3hub (supply); /soc (parent)
-/soc/usb3@0/dwc3@c0a00000 [snps,dwc3]: no driver
+/soc/usb3@0/dwc3@c0a00000 [snps,dwc3]: no driver; the same device as /soc/usb3@0
   mmio 0xc0a00000+0x10000
   irq 125 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/phy@c0b10000 (phy); /soc/usb2phy@0xc0a30000 (phy); /soc/usb3@0 (parent)
-/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci, bound 12
+/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci, bound 13
   mmio 0xd4280000+0x200
   irq 99 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc/pinctrl@d401e000 (pins); /soc/gpio@d4019000 (gpio); /soc (parent)
 /soc/sdh@d4280800 [ky,x1-sdhci]: disabled
-/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci, bound 13
+/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci, bound 14
   mmio 0xd4281000+0x200
   irq 101 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc (parent)
@@ -160,7 +166,6 @@
   mmio 0x90000000+0x100000
   mmio 0xc0c20000+0x1000
   mmio 0xc0c10000+0x1000
-  mmio 0xc0b10000+0x1000
   irq 142 on /soc/interrupt-controller@e0000000
   irq 146 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/clock-controller@d4050000 (clock); /soc/reset-controller@d4050000 (reset); /soc/pinctrl@d401e000 (pins); /soc (parent)
@@ -198,10 +203,10 @@
 /wdt_reboot [wdt-reboot]: no driver
 /usb2hub [ky,usb-hub]: no driver
   needs /soc/gpio@d4019000 (gpio)
-/usb3hub [ky,usb-hub]: no driver
+/usb3hub [ky,usb-hub]: firmware, power's, in the set "usb"
   needs /soc/gpio@d4019000 (gpio)
 /vcc3v3-pcie-regulator [regulator-fixed]: no driver
   needs /soc/gpio@d4019000 (gpio)
 /gpio-leds [gpio-leds]: no driver
-hwdb: one power for 3 devices sharing 0xd4282000+0x1000: clock-controller@d4050000 reset-controller@d4050000 power-management@0
-hwdb: ky,x1: 20 disabled, 19 kernel, 4 firmware, 25 no driver, 13 bound, 0 broken
+hwdb: one power for 3 devices sharing 0xd4019000+0x1000, 0xd4282000+0x1000: clock-controller@d4050000 reset-controller@d4050000 power-management@0
+hwdb: ky,x1: 20 disabled, 19 kernel, 4 firmware, 24 no driver, 14 bound, 0 broken

@@ -9,17 +9,25 @@
  * found in C: unless it names its volume or directory; the rest of the
  * line is its arguments, and it's given the current directory with them
  * (dos_args). The Shell waits for it and says how it ended if not well.
- * Input is the console's (GrantConsole, by hwdb), polled every 10 ms,
- * echoed, with backspace.
+ * Input is the console's (GrantConsole, by hwdb) and a USB keyboard's,
+ * from input's ring (planar/devices/input.h), which the Shell takes when
+ * input is there and again after it restarts. Both are polled every
+ * 10 ms, echoed, with backspace.
  */
+#include <stddef.h>
+
+#include <planar/devices/input.h>
 #include <planar/dos.h>
 #include <planar/lease.h>
 #include <planar/syscalls.h>
+
+void *memset(void *dst, int c, size_t n);
 
 constexpr int64_t SIG_CON = 16;
 constexpr int64_t SIG_DOS = 17;
 constexpr int64_t SIG_CHILD = 18;
 constexpr int64_t SIG_TICK = 19;
+constexpr int64_t SIG_INPUT = 20;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned LINE = 200;
 
@@ -150,6 +158,72 @@ static int run(const char *line)
     return 1;
 }
 
+/* --- Keys from input. --- */
+
+static struct {
+    bool up;
+    struct MsgPort mp;
+    const struct InputRing *ring;
+    uint64_t tail, retry;
+} keys;
+
+static void keys_take(void)
+{
+    struct InputMsg *m;
+
+    if (CurrentTime() < keys.retry)
+        return;
+    keys.retry = CurrentTime() + 500 * MS;
+    if (ConnectPort(&keys.mp, "input", SIG_INPUT, 2, 2 * sizeof *m) != 0)
+        return;
+    if (!(m = AllocMsg(&keys.mp, sizeof *m))) {
+        ClosePort(&keys.mp);
+        return;
+    }
+    memset(m, 0, sizeof *m);
+    m->im_Msg.mn_Length = sizeof *m;
+    m->im_Op = INPUT_OPEN;
+    m->im_Task = FindTask(nullptr);
+    if (DoMsg(&keys.mp, &m->im_Msg) != 0 || m->im_Msg.mn_Error != 0) {
+        ClosePort(&keys.mp);        /* another has the ring, or input went */
+        return;
+    }
+    keys.ring = (const struct InputRing *)m->im_Ring;
+    keys.tail = keys.ring->ir_Head;
+    keys.up = true;
+}
+
+/* What's been typed on a keyboard since last time: up to 'n' characters. */
+static int64_t keys_read(char *buf, unsigned n)
+{
+    unsigned got = 0;
+
+    if (keys.up && PortGone(&keys.mp)) {
+        ClosePort(&keys.mp);
+        keys.up = false;
+    }
+    if (!keys.up) {
+        keys_take();
+        return 0;
+    }
+    while (got < n) {
+        uint64_t head = __atomic_load_n(&keys.ring->ir_Head, __ATOMIC_ACQUIRE);
+        struct InputEvent e;
+
+        if (head - keys.tail > INPUT_RING)
+            keys.tail = head - INPUT_RING;
+        if (keys.tail == head)
+            break;
+        e = keys.ring->ir_Event[keys.tail % INPUT_RING];
+        if (__atomic_load_n(&keys.ring->ir_Head, __ATOMIC_ACQUIRE) - keys.tail > INPUT_RING)
+            continue;               /* overwritten as it was read */
+        keys.tail++;
+        if (e.ie_Class == IECLASS_KEY && !(e.ie_Flags & IEF_UP) && e.ie_Char && e.ie_Char < 128)
+            buf[got++] = (char)e.ie_Char;
+    }
+    return got;
+}
+
 static void prompt(void)
 {
     con_dec(&con, number);
@@ -165,6 +239,7 @@ static int interactive(void)
     unsigned n = 0;
 
     say("Planar Shell. Type Help for help.\n");
+    keys_take();
     prompt();
     for (;;) {
         char got[64];
@@ -174,6 +249,8 @@ static int interactive(void)
             say("Shell: the console isn't mine\n");
             return 1;
         }
+        if (r == 0)
+            r = keys_read(got, sizeof got);
         if (r == 0) {
             nap(10);
             continue;

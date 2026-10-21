@@ -104,6 +104,15 @@ static const struct hw_match power[] = {
     { nullptr, 0 },
 };
 
+/* V5 step 4: USB host controllers (drv/xhci): QEMU's on PCI, the K1's
+ * DWC3 in host mode, and the CIX's ten (quirks.c). */
+static const struct hw_match xhci[] = {
+    { "pciclass,0c0330",        HW_GENERIC },   /* any xHCI */
+    { "ky,x1-dwc3",             HW_SPECIFIC },  /* the K1's DWC3, by its glue (quirks.c) */
+    { "CIXH2031",               HW_SPECIFIC },  /* the CIX's Cadence CDNSP */
+    { nullptr, 0 },
+};
+
 const struct hw_driver hw_drivers[] = {
     { "kernel",         HW_DRV_KERNEL,      kernel },
     { "firmware",       HW_DRV_FIRMWARE,    firmware },
@@ -116,6 +125,7 @@ const struct hw_driver hw_drivers[] = {
     { "sdhci",          HW_DRV_PROCESS,     sdhci },
     { "display",        HW_DRV_PROCESS,     display },
     { "power",          HW_DRV_PROCESS,     power },
+    { "xhci",           HW_DRV_PROCESS,     xhci },
 };
 
 const unsigned hw_ndrivers = sizeof hw_drivers / sizeof hw_drivers[0];

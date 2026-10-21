@@ -15,7 +15,12 @@
  * reset numbers are Linux's; its domain numbers are mainline's (Linux's
  * vendor table minus one, BUS gone), as its LCD and HDMI nodes show.
  * The GPU has no node in U-Boot's tree, so its clock's number (0xbd) is
- * by that rule, and the set "gpu" names its resources directly.
+ * by that rule, and the set "gpu" names its resources directly. The set
+ * "usb" is what the DWC3's tree leaves out: the combo PHY's mode and
+ * reset, which xhci votes for before starting that PHY itself, and the
+ * onboard hub's power and its ports' VBUS, GPIO 123 (Linux's tree; U-Boot's
+ * says 79 and leaves it low). The GPIOs' registers are leased with the
+ * APMU's page (servers/hwdb/quirks.c).
  *
  * Domains: each has a control register (bit 0 auto power-on, 1 isolation
  * released, 2 and 3 the two sleep switches, 4 hardware mode) and a bit
@@ -29,6 +34,8 @@
 #include "power.h"
 
 constexpr uint64_t APMU = 0xd4282800;
+constexpr uint64_t GPIO = 0xd4019000;
+enum : uint32_t { GPLR = 0x0, GPDR = 0xc, GPSR = 0x18, GPCR = 0x24, GSDR = 0x54 };
 constexpr uint32_t PWR_STATUS = 0xf0;
 constexpr uint32_t PD_AUTO = 1u << 0, PD_ISO = 1u << 1, PD_SLEEP1 = 1u << 2, PD_SLEEP2 = 1u << 3,
                    PD_HW = 1u << 4;
@@ -37,7 +44,11 @@ constexpr uint64_t PD_US = 60000;   /* the vendor's 10001 tries, at 5 us */
 enum : uint32_t { SW, HW };
 
 struct domain { uint32_t cell; const char *name; uint32_t ctrl, stat, mode; };
-struct gate { uint32_t id; const char *name; uint32_t reg, mask; };
+/* A gate is on with 'mask' set and 'inv' clear. A clock with no cell
+ * (NOCELL) is a set's alone: no reference names it. */
+struct gate { uint32_t id; const char *name; uint32_t reg, mask, inv; };
+
+constexpr uint32_t NOCELL = UINT32_MAX;
 
 static const struct domain domains[] = {
     { 0, "k1.pd.vpu",   0x0a8, 1,  SW },
@@ -50,38 +61,52 @@ static const struct domain domains[] = {
 };
 
 static const struct gate clocks[] = {
-    { 0xa5, "k1.clk.dpu-mclk",  0x04c, 1u << 0 },
-    { 0xa6, "k1.clk.dpu-esc",   0x044, 1u << 2 },
-    { 0xa7, "k1.clk.dpu-bit",   0x044, 1u << 16 },
-    { 0xa8, "k1.clk.dpu-pxclk", 0x04c, 1u << 16 },
-    { 0xa9, "k1.clk.dpu-hclk",  0x044, 1u << 5 },
-    { 0xb1, "k1.clk.sdh-axi",   0x054, 1u << 3 },
-    { 0xb2, "k1.clk.sdh0",      0x054, 1u << 4 },
-    { 0xb3, "k1.clk.sdh1",      0x058, 1u << 4 },
-    { 0xb4, "k1.clk.sdh2",      0x0e0, 1u << 4 },
-    { 0xb7, "k1.clk.usb30",     0x05c, 1u << 8 },
-    { 0xbd, "k1.clk.gpu",       0x0cc, 1u << 4 },
-    { 0xc1, "k1.clk.hdmi",      0x1b8, 1u << 0 },
+    { 0xa5, "k1.clk.dpu-mclk",  0x04c, 1u << 0, 0 },
+    { 0xa6, "k1.clk.dpu-esc",   0x044, 1u << 2, 0 },
+    { 0xa7, "k1.clk.dpu-bit",   0x044, 1u << 16, 0 },
+    { 0xa8, "k1.clk.dpu-pxclk", 0x04c, 1u << 16, 0 },
+    { 0xa9, "k1.clk.dpu-hclk",  0x044, 1u << 5, 0 },
+    { 0xb1, "k1.clk.sdh-axi",   0x054, 1u << 3, 0 },
+    { 0xb2, "k1.clk.sdh0",      0x054, 1u << 4, 0 },
+    { 0xb3, "k1.clk.sdh1",      0x058, 1u << 4, 0 },
+    { 0xb4, "k1.clk.sdh2",      0x0e0, 1u << 4, 0 },
+    { 0xb7, "k1.clk.usb30",     0x05c, 1u << 8, 0 },
+    { 0xbd, "k1.clk.gpu",       0x0cc, 1u << 4, 0 },
+    { 0xc1, "k1.clk.hdmi",      0x1b8, 1u << 0, 0 },
+    /* The combo PHY's port A to USB 3, not PCIe (PCIE_PHY_SEL's MODE_SEL;
+     * the vendor's phy-ky-x1-combphy.c). */
+    { NOCELL, "k1.sel.usb3",    0x110, 1u << 3, 0 },
 };
 
 static const struct gate resets[] = {
-    { 0x3d, "k1.rst.lcd",       0x044, 1u << 4 },
-    { 0x3e, "k1.rst.dsi-esc",   0x044, 1u << 3 },
-    { 0x40, "k1.rst.mipi",      0x044, 1u << 15 },
-    { 0x44, "k1.rst.lcd-mclk",  0x04c, 1u << 9 },
-    { 0x47, "k1.rst.sdh-axi",   0x054, 1u << 0 },
-    { 0x48, "k1.rst.sdh0",      0x054, 1u << 1 },
-    { 0x4c, "k1.rst.usb3",      0x05c, 7u << 9 },
-    { 0x52, "k1.rst.gpu",       0x0cc, 1u << 1 },
-    { 0x53, "k1.rst.sdh2",      0x0e0, 1u << 1 },
-    { 0x58, "k1.rst.hdmi",      0x1b8, 1u << 9 },
+    { 0x3d, "k1.rst.lcd",       0x044, 1u << 4, 0 },
+    { 0x3e, "k1.rst.dsi-esc",   0x044, 1u << 3, 0 },
+    { 0x40, "k1.rst.mipi",      0x044, 1u << 15, 0 },
+    { 0x44, "k1.rst.lcd-mclk",  0x04c, 1u << 9, 0 },
+    { 0x47, "k1.rst.sdh-axi",   0x054, 1u << 0, 0 },
+    { 0x48, "k1.rst.sdh0",      0x054, 1u << 1, 0 },
+    { 0x4c, "k1.rst.usb3",      0x05c, 7u << 9, 0 },
+    { 0x52, "k1.rst.gpu",       0x0cc, 1u << 1, 0 },
+    { 0x53, "k1.rst.sdh2",      0x0e0, 1u << 1, 0 },
+    { 0x58, "k1.rst.hdmi",      0x1b8, 1u << 9, 0 },
+    /* The combo PHY's: bit 8 is its global reset. */
+    { 0x59, "k1.rst.pcie0",     0x3cc, 7u << 3, 1u << 8 },
+};
+
+/* Supplies that are a GPIO driven high (the vendor's gpio-x1.c): 32 to a
+ * bank, banks at 0, 4, 8 and 0x100. */
+struct supply { const char *name; uint32_t gpio; };
+
+static const struct supply supplies[] = {
+    { "k1.gpio.usb-vbus", 123 },
 };
 
 constexpr unsigned NDOM = sizeof domains / sizeof domains[0];
 constexpr unsigned NCLK = sizeof clocks / sizeof clocks[0];
 constexpr unsigned NRST = sizeof resets / sizeof resets[0];
+constexpr unsigned NSUP = sizeof supplies / sizeof supplies[0];
 
-static volatile uint8_t *apmu;
+static volatile uint8_t *apmu, *gpio;
 static int first = -1;              /* pw_res index of domains[0]; clocks, then resets, follow */
 
 static volatile uint32_t *reg(uint32_t off)
@@ -114,6 +139,10 @@ static bool init(void)
     for (unsigned i = 0; i < NRST; i++)
         if (pw_add(&pw_k1, resets[i].name, POWER_RESET, i, 0, 0) < 0)
             return false;
+    if ((gpio = pw_map(GPIO, 0x200)))
+        for (unsigned i = 0; i < NSUP; i++)
+            if (pw_add(&pw_k1, supplies[i].name, POWER_SUPPLY, i, 0, 0) < 0)
+                return false;
     return true;
 }
 
@@ -170,14 +199,30 @@ static int64_t domain_set(const struct domain *d, bool on)
     return pw_poll32(reg(PWR_STATUS), bit, on ? bit : 0, PD_US) ? 0 : ERR_TIMEOUT;
 }
 
+static volatile uint32_t *bank(uint32_t n, uint32_t off)
+{
+    static const uint32_t at[] = { 0x0, 0x4, 0x8, 0x100 };
+
+    return (volatile uint32_t *)(gpio + at[n / 32 % 4] + off);
+}
+
 static int64_t set(struct pw_res *r, bool on)
 {
     const struct gate *g;
 
+    if (r->kind == POWER_SUPPLY) {
+        uint32_t n = supplies[r->a].gpio;
+
+        *bank(n, on ? GPSR : GPCR) = 1u << n % 32;
+        *bank(n, GSDR) = 1u << n % 32;      /* an output */
+        if (on)
+            pw_delay_us(10000);             /* the vendor's vbus_delay_ms */
+        return 0;
+    }
     if (r->kind == POWER_DOMAIN)
         return domain_set(&domains[r->a], on);
     g = r->kind == POWER_CLOCK ? &clocks[r->a] : &resets[r->a];
-    rmw(g->reg, on ? 0 : g->mask, on ? g->mask : 0);
+    rmw(g->reg, on ? g->inv : g->mask, on ? g->mask : g->inv);
     return 0;
 }
 
@@ -185,15 +230,25 @@ static int64_t get(struct pw_res *r)
 {
     const struct gate *g;
 
+    if (r->kind == POWER_SUPPLY) {
+        uint32_t n = supplies[r->a].gpio;
+
+        return (*bank(n, GPDR) & *bank(n, GPLR)) >> n % 32 & 1;
+    }
+
     if (r->kind == POWER_DOMAIN)
         return *reg(PWR_STATUS) >> domains[r->a].stat & 1;
     g = r->kind == POWER_CLOCK ? &clocks[r->a] : &resets[r->a];
-    return (*reg(g->reg) & g->mask) == g->mask;
+    return (*reg(g->reg) & (g->mask | g->inv)) == g->mask;
 }
 
 static const char *const keys[] = { "ky,x1-pm-domain", "ky,x1-ccu", "ky,x1-reset", nullptr };
 static const char *const gpu[] = { "gpu", "k1.pd.gpu", "k1.clk.gpu", "k1.rst.gpu", nullptr };
-static const char *const *const sets[] = { gpu, nullptr };
+/* For xhci's DWC3: the USB 3 PHY's port mode and reset, the hub's VBUS. */
+static const char *const usb[] = {
+    "usb", "k1.sel.usb3", "k1.rst.pcie0", "k1.gpio.usb-vbus", nullptr,
+};
+static const char *const *const sets[] = { gpu, usb, nullptr };
 
 const struct pw_backend pw_k1 = {
     .name = "k1", .keys = keys, .init = init, .xlate = xlate, .set = set, .get = get,

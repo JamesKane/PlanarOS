@@ -189,12 +189,46 @@ The kill test also kills display as the console's driver, and uses it for the gi
 
 ## 4. USB input
 
-- **xHCI** with control and interrupt endpoints, and no isochronous or bulk streams: about 1,500 to 2,000 lines (9front's `usbxhci.c` is 1,944).
-- **Hubs from the start.** Both boards put one in the path: the RV2's onboard GL3523, and on the CIX a full-speed keyboard was seen behind a hub on `USB1` (`0x9298000`, USB 2 only). That needs the transaction translator's fields in the slot context.
-- **HID boot protocol** for keyboard and mouse, with no report-descriptor parser: about 300 lines.
-- **The RV2** sets its DWC3 to host mode (`GCTL`, `0xC110`) and powers its USB 2 PHY (the vendor kernel's `phy-k1-usb2.c`). VBUS is a GPIO, and U-Boot's tree and mainline name different ones (79 and 123). Try both, and record which.
-- **The CIX** has ten xHCI controllers. hwdb leaves three of them disabled, since their `_STA` reads GNVA (VQ42). Which connector is which controller is still to be found.
-- **`input`** is a server: it turns reports into `InputEvent`s on a ring to one client, the Shell now and `intuition` in V6. `GrantConsole` stays for the serial console.
+**Done (2026-10-21), on QEMU and both boards.** A USB keyboard drives the Shell, and keys and the mouse reach an `input` client on a ring it maps.
+
+- **The class** (`planar/devices/input.h`, [Devices ch. 7](../manuals/devices/07-input.md)). `input` (`servers/input`) is one server for every keyboard and mouse, with no device of its own. hwdb starts it before the drivers, in both modes, and again whenever it ends.
+  - Drivers connect to "input" and send `INPUT_ATTACH`, `INPUT_REPORT` (raw boot-protocol reports) and `INPUT_DETACH`.
+  - A driver's connection going takes its devices with it, and lets go of every key they held.
+  - One client takes the ring (`INPUT_OPEN`): a page mapped read-only, whose `ir_Head` counts every event and is woken with `WakeAddr`. Another client meanwhile gets `ERR_BUSY`.
+  - Events are keys (HID usages, with what each types on a US layout), buttons and moves, with the modifiers held. `input` repeats a held key, and keeps Caps Lock itself.
+- **`xhci`** (`drv/xhci`, xHCI 1.2, about 1,600 lines): one process for every controller it's given.
+  - Bind takes a controller from the firmware (USB Legacy Support), resets it and starts it. Its rings, contexts and buffers are in uncached DMA Areas below 4 GiB.
+  - From the loop, each USB 2 port with something on it is reset, and its device addressed and configured. Hubs (USB 2.0 ch. 11) have their ports powered and looked at every 250 ms. A full- or low-speed device behind a high-speed hub goes through its single TT.
+  - A boot-subclass keyboard or mouse is put in the boot protocol, with 8 transfers queued on its interrupt endpoint. Each report goes to `input`.
+  - SuperSpeed ports aren't walked.
+  - Interrupts come on the line, or MSI-X vector 0. QEMU's RISC-V PCI is polled.
+  - hwdb's stop method halts each controller (`servers/hwdb/input.c`).
+- **The Shell** reads keys from `input`'s ring as well as the serial console, and takes the ring again after `input` restarts.
+- **QEMU**: `qemu-xhci` with a hub, a keyboard and a mouse behind it (`QEMU_USB`). `tools/boot-check.py` types through QMP what the test asks for.
+- **hwdb**:
+  - `HW_Q_NOIRQ` drops a node's lines through a controller (the CIX's PDC0), or one line (the K1's DWC3 glue's wakeup line).
+  - A reference to a node described twice is to the device it aliases.
+- **power**: a fourth kind, `POWER_SUPPLY` (a GPIO driven high). On the K1, the set `"usb"` holds the combo PHY's mode and reset and the hub's VBUS. Resets may have bits that clear to release.
+- **drv.library**: `drv_io_barrier`, ordering memory a device uses against its registers on both ISAs. A compiler's fence doesn't order I/O on RISC-V.
+
+**Tested by** the kill test's `T_INPUT` phase (`servers/hwdb/input.c`, with `conformance/inputtest.c`), on every QEMU boot and both boards:
+- the keyboard and mouse found, then a client checks what's typed ("Hi 5" and Enter, Shift held over the H), a move of (10, −5) and a click;
+- again after every xhci was killed and came back;
+- again across `input`'s own death, the client reconnecting to a new ring.
+
+On the boards nobody types for the test, which says so ("typing not exercised"); the Shell was typed in by hand.
+
+**On QEMU**: everything passes on all ten boots, with MSI-X on AArch64 and polling on RISC-V.
+
+**On the CIX** (2026-10-21):
+- All ten controllers start: Cadence CDNSP, xHCI 1.10, 64-byte contexts. hwdb gives xhci their `CIXH2031` descriptions, whose `_STA` doesn't read GNVA, so VQ42 no longer keeps three of them off.
+- The keyboard and mouse are on `USB1`, behind a single-TT hub (1a40:0101) at high speed, as FreeBSD saw them. Every key typed in the Shell came through.
+
+**On the RV2** (2026-10-21):
+- The USB-A ports are behind the onboard Genesys hub, on the DWC3. The core needs the combo PHY's pipe clock for an xHCI reset to end, even with only USB 2 walked, so xhci starts that PHY. The hub's ports get VBUS from GPIO 123, which U-Boot's tree gets wrong (79) and U-Boot leaves low.
+- A low-speed keyboard and mouse work through the hub's TT.
+- With one transfer queued at a time, keys were lost: the endpoint went unpolled while the driver was late. 8 queued fixed that.
+- The board's other USB-A port is the OTG controller's (an EHCI, VBUS GPIO 126), which isn't driven.
 
 ## 5. `gpu-panthor` on the CIX
 
@@ -244,7 +278,7 @@ The BXE-2-32 is Rogue core **36.29.52.182**, with a MIPS firmware processor. The
 - **`power`** and the kill test's check of votes (V4 step 7).
 - **Native scanout** (V4 decision 2).
 - **USB keyboards** (V4 decision 1).
-- **VQ42**, GNVA: three of the CIX's xHCI controllers depend on it.
+- **VQ42**, GNVA: three of the CIX's xHCI controllers' `_STA` depend on it. Step 4 reaches them through their other description, CIXH2031.
 
 ## Corrections to the design
 

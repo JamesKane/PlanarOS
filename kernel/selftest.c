@@ -1385,8 +1385,9 @@ void selftest_tasks(void *)
     /* hwdb's test said what it saw of power (servers/hwdb/power.c), and
      * exited 0 only if that held; the firmware calls came with the shares. */
     kprintf("V5.2 done\n");
-    /* And of display (servers/hwdb/display.c). */
+    /* And of display (servers/hwdb/display.c), and of input (input.c). */
     kprintf("V5.3 done\n");
+    kprintf("V5.4 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

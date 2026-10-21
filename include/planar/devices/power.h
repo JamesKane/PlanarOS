@@ -1,7 +1,7 @@
 /*
  * planar/devices/power.h -- the power class (docs §11.5, v5-plan step 2)
  *
- * The power server publishes one port, "power.0". A client connects and
+ * The power server publishes one port, "power". A client connects and
  * votes: POWER_ON names a set of resources (power domains, clocks,
  * resets) and a tag of the client's own; the server turns on whatever
  * in it is off (domains first, then clocks, then resets released) and
@@ -44,7 +44,8 @@ enum : uint32_t {
 };
 
 /* PowerRef.pr_Kind */
-enum : uint32_t { POWER_DOMAIN = 1, POWER_CLOCK = 2, POWER_RESET = 3 };
+enum : uint32_t { POWER_DOMAIN = 1, POWER_CLOCK = 2, POWER_RESET = 3,
+                  POWER_SUPPLY = 4 };   /* a supply's: a set's alone so far, not a reference's */
 
 struct PowerRef {
     uint32_t pr_Kind;

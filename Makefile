@@ -73,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V5.3 done
+EXPECT := V5.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -101,6 +101,16 @@ QEMU_DISK = -drive if=none,id=disk,file=$(DISK),format=raw,snapshot=on \
 	-device nvme,serial=planar0,drive=disk \
 	-drive if=none,id=sd,file=$(SDCARD),format=raw,snapshot=on \
 	-device sdhci-pci -device sd-card,drive=sd
+
+# USB (v5-plan step 4): an xHCI with a hub, a keyboard and a mouse behind
+# it, and QMP's socket, through which the boot check types what the
+# input test asks for (tools/boot-check.py).
+QMP_SOCK = $(BUILD)/qmp.sock
+QEMU_USB = -device qemu-xhci,id=xhci -device usb-hub,bus=xhci.0,port=1 \
+	-device usb-kbd,bus=xhci.0,port=1.1 -device usb-mouse,bus=xhci.0,port=1.2 \
+	-qmp unix:$(QMP_SOCK),server=on,wait=off
+QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercised' \
+	--forbid 'typing not exercised'
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
@@ -223,7 +233,8 @@ HWDB_BUILD := build/hwdb
 ACPID_BUILD := build/acpid
 # The graph: what the server and the host share (not the server's loop).
 HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c servers/hwdb/server.c \
-	servers/hwdb/killtest.c servers/hwdb/acpid.c servers/hwdb/pci.c servers/hwdb/power.c servers/hwdb/display.c,\
+	servers/hwdb/killtest.c servers/hwdb/acpid.c servers/hwdb/pci.c servers/hwdb/power.c \
+	servers/hwdb/display.c servers/hwdb/input.c,\
 	$(wildcard servers/hwdb/*.c))
 HWDB_HOST := $(HWDB_BUILD)/hwdb-host
 HWDB_TEST := $(HWDB_BUILD)/hwdb-test

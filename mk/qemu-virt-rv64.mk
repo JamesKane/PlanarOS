@@ -10,7 +10,7 @@ PLAT_SRCS := \
 QEMU ?= qemu-system-riscv64
 
 RUN_CMD := $(QEMU) -machine virt -cpu rv64,v=true,vlen=256,svpbmt=true -smp 4 -m $(QEMU_MEM) \
-	-global virtio-mmio.force-legacy=false -device virtio-rng-device $(QEMU_DISK) \
+	-global virtio-mmio.force-legacy=false -device virtio-rng-device $(QEMU_DISK) $(QEMU_USB) \
 	-nographic -bios default -kernel $(IMAGE) -append '$(BOOTARGS)'
 
 TEST_DEPS := $(DISK) $(SDCARD)
@@ -18,4 +18,4 @@ TEST_DEPS := $(DISK) $(SDCARD)
 run: $(IMAGE) $(DISK) $(SDCARD)
 	$(RUN_CMD)
 
-CHECK_FLAGS := $(FULL_CHECK)
+CHECK_FLAGS := $(FULL_CHECK) $(QEMU_INPUT_CHECK)

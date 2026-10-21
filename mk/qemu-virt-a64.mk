@@ -44,7 +44,7 @@ HW_CHECK := --forbid '^V3.2 acpi ok: described by (?!$(HW_NAME))' \
 	--facts $(BUILD)/facts-$(HOW).txt --hwdb-facts $(BUILD)/hwdb-facts-$(HOW).txt
 
 RUN_CMD := $(QEMU) -machine $(QEMU_MACHINE) -cpu cortex-a76 -smp 4 -m $(QEMU_MEM) \
-	-global virtio-mmio.force-legacy=false -device virtio-rng-device $(QEMU_DISK) \
+	-global virtio-mmio.force-legacy=false -device virtio-rng-device $(QEMU_DISK) $(QEMU_USB) \
 	-nographic $(QEMU_FIRMWARE) -kernel $(IMAGE) -append 'qemu $(BOOTARGS)'
 
 TEST_DEPS := $(DISK) $(SDCARD)
@@ -52,4 +52,4 @@ TEST_DEPS := $(DISK) $(SDCARD)
 run: $(IMAGE) $(DISK) $(SDCARD)
 	$(RUN_CMD)
 
-CHECK_FLAGS := $(FULL_CHECK) $(EFI_CHECK) $(HW_CHECK)
+CHECK_FLAGS := $(FULL_CHECK) $(EFI_CHECK) $(HW_CHECK) $(QEMU_INPUT_CHECK)

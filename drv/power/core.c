@@ -2,7 +2,7 @@
  * drv/power/core.c -- resources and votes (planar/devices/power.h)
  *
  * A resource is on while any vote holds it. A vote turns its resources
- * on in kind order (domains, clocks, then resets released), and if one
+ * on in kind order (domains, clocks, resets released, then supplies), and if one
  * fails, turns off again what it had turned on and answers the error:
  * a vote is all of its set or none. Off goes the other way round, and
  * only for what the server itself turned on (pw_res.kept).

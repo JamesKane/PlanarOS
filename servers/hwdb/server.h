@@ -130,6 +130,7 @@ void acpid_stop(void);              /* at the end: kill it, take its leases back
 
 constexpr uint32_t CONN_POWER = UINT32_MAX - 2;     /* conn_unit's mark for power's */
 constexpr uint32_t CONN_DISPLAY = UINT32_MAX - 3;   /* and display's, in test mode */
+constexpr uint32_t CONN_INPUT = UINT32_MAX - 4;     /* and input's, in test mode */
 bool server_add_conn(const struct MsgPort *mp, uint32_t mark);
 struct MsgPort *server_conn(uint32_t mark);         /* nullptr if there's none */
 
@@ -166,6 +167,14 @@ void display_up(void);              /* its unit is running: connect (test mode) 
 void display_down(void);
 void display_serve(struct MsgPort *mp);
 bool display_test(void);            /* the kill test's display step: true when it's over */
+
+/* --- input (input.c): the server kept going; xhci's stop method; the test. --- */
+void input_keep(void);              /* started, and again when it ends; ended when stopping */
+uint64_t input_due(void);           /* when it's to start again; 0 if running */
+bool stop_xhci(struct unit *u);     /* every controller halted */
+void input_conn_down(void);
+void input_conn_serve(struct MsgPort *mp);
+bool input_test(void);              /* the kill test's input step: true when it's over */
 
 /* --- pci (pci.c): a host bridge's driver, while it binds. --- */
 

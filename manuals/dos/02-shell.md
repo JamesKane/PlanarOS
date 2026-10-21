@@ -1,10 +1,10 @@
 # The Shell
 
-*Checked against V4.*
+*Checked against V4; its input against V5 step 4.*
 
 ## What it's for
 
-Typing commands. The Shell (`cmd/shell.c`) is itself a program on the disk, `C:shell`. It reads lines from the serial console, runs each as a command loaded from `C:`, and its output, and the commands', goes to the console: the screen and the serial line both.
+Typing commands. The Shell (`cmd/shell.c`) is itself a program on the disk, `C:shell`. It reads lines from the serial console and from a USB keyboard, runs each as a command loaded from `C:`, and its output, and the commands', goes to the console: the screen and the serial line both.
 
 ## Booting to it
 
@@ -80,7 +80,7 @@ int main(uint64_t arg)
 
 ## Rules
 
-- Input is polled every 10 ms. There's no keyboard yet: the serial console is the input (v4-plan decision 1; USB in V5).
+- Input is polled every 10 ms: the serial console's (`ReadConsole`), and the keys typed on a USB keyboard, from `input`'s ring ([Devices ch. 7](../devices/07-input.md)), which the Shell takes when `input` is there and again after it restarts. Another client holding the ring keeps it: the Shell then has the serial console alone.
 - A command owns nothing the Shell needs: it ends, and the Shell carries on.
 
 ## Differences from AmigaDOS

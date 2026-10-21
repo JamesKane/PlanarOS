@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers) and step 3's (two ports a device, `DRVF_AGAIN`).*
+*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers) step 3's (two ports a device, `DRVF_AGAIN`) and step 4's (`drv_io_barrier`).*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 
@@ -19,9 +19,9 @@ void drv_dma_flush(const void *p, uint64_t n);
 ```
 
 **FUNCTION**
-For a device that doesn't snoop the CPU's caches (the K1's). `drv_dma_clean` writes the cached lines of `p` to `p + n` back to memory: call it before the device reads them (descriptors, data to write). `drv_dma_flush` writes them back and drops them: call it before the device writes a buffer and again before reading what it wrote. Whole cache blocks are done, so keep a device's buffers from sharing a block with anything else.
+For a device that doesn't snoop the CPU's caches (the K1's, and the CIX's display and USB controllers). `drv_dma_clean` writes the cached lines of `p` to `p + n` back to memory: call it before the device reads them (descriptors, data to write). `drv_dma_flush` writes them back and drops them: call it before the device writes a buffer and again before reading what it wrote. Whole cache blocks are done, so keep a device's buffers from sharing a block with anything else.
 
-On RISC-V they're Zicbom's `cbo.clean` and `cbo.flush`, which the kernel lets user mode run. On Arm they only order the writes before them, since Planar's Arm machines (QEMU, the CIX) are coherent.
+On RISC-V they're Zicbom's `cbo.clean` and `cbo.flush`, which the kernel lets user mode run. On Arm they're `dc cvac` and `dc civac` by the cache's line (`CTR_EL0`), which the kernel lets EL0 run too (`SCTLR_EL1.UCI` and `UCT`). Where the device snoops they cost a little and change nothing.
 
 **SEE ALSO**
 `drv/sdhci/main.c`, `drv/display/main.c`; [Devices ch. 5](../devices/05-drivers.md)
@@ -81,6 +81,27 @@ True if `size` bytes at `addr` lie in client `c`'s connection heap, the only mem
 
 **BUGS**
 None known.
+
+---
+
+## drv/drv_io_barrier
+
+**NAME**
+drv_io_barrier -- memory a device uses, ordered against its registers
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+void drv_io_barrier(void);
+```
+
+**FUNCTION**
+Every memory access before it, cached or uncached (`AREAF_NC`), is done before any device register access after it, and the other way round. Call it between writing what a device will read (a ring's entries) and the register that tells it to (a doorbell), and between seeing in memory that the device wrote something (an event's cycle bit) and reading the rest. A compiler's `__atomic_thread_fence` isn't enough for either: on RISC-V it doesn't order I/O, and on Arm it orders only within the inner shareable domain.
+
+It's `fence iorw, iorw` on RISC-V and `dsb sy` on Arm.
+
+**SEE ALSO**
+`drv/xhci/hc.c`; [drv_dma_clean](#drvdrv_dma_clean)
 
 ---
 

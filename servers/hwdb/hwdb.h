@@ -282,6 +282,7 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_CALL,          /* its driver may make the firmware call 'arg' (SetLeaseCall) */
     HW_Q_IRQ,           /* a line the firmware doesn't list: 'arg' is "line controller-path" */
     HW_Q_SCANOUT,       /* it scans out the firmware's framebuffer: leased with it, to one process */
+    HW_Q_NOIRQ,         /* its lines through the controller at 'arg' ("[line] path") aren't used */
 };
 
 struct hw_quirk {

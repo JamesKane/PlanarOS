@@ -88,3 +88,8 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
   - TF-A by SMC `0xc2000001`, through `0x84380000`, with x1 = x2 = 0: power domains, version 2.1.
 - The EFI map has `0x84380000` reserved.
 - Of the G720's set (domain 21, `gpu_clk_core`, `gpu_clk_stacks`), one is on at boot.
+
+**USB** (V5 step 4):
+- Ten Cadence CDNSP controllers, xHCI 1.10 with 64-byte contexts, not coherent (`_CCA` 0). UEFI leaves them in host mode, so an xHCI reset is all they need. XHC0–5 have two ports (USB 2 port 1, USB 3 port 2), USB0–3 one (USB 2).
+- hwdb gives xhci their `CIXH2031` descriptions (`CUBn`), on their xHCI windows and host lines alone. The `PNP0D10` ones are aliases. Three of the latter are disabled by VQ42, but the CIXH2031s' `_STA` isn't, so all ten run.
+- The rig's keyboard and mouse are on `USB1` (`/_SB_/HUB1/CUB1`, `0x9298000`, xhci's unit 7), behind a single-TT high-speed hub (1a40:0101). On it are a full-speed Sonix keyboard (0c45:0133) on port 3, and a Corsair mouse (1b1c:1bac) on port 2, which also has a keyboard interface. That's where FreeBSD saw them. Which other connector is which controller is still unknown.

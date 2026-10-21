@@ -20,15 +20,86 @@ kernel took from its firmware description (kernel/hw.h), for comparing
 two boots of one machine (make compare-hw). --hwdb-facts writes hwdb's
 ("[hwdb] hw: " lines, without the "[hwdb] "): what each driver bound,
 declined or failed, by its registers (servers/hwdb/server.c).
+
+--qmp PATH is QEMU's QMP socket (-qmp unix:PATH,server=on,wait=off).
+A test that wants USB input asks for it on the console, and gets it
+through QMP's input-send-event: "inputtest: send keys shift-h i ret"
+types those keys (QEMU's qcodes, a "shift-" prefix held over the key),
+"inputtest: send mouse 10 -5 left" moves the mouse and clicks a button
+(conformance/inputtest.c).
 """
 
 import argparse
+import json
 import os
 import re
 import selectors
+import socket
 import subprocess
 import sys
 import time
+
+SEND = re.compile(rb"inputtest: send (keys|mouse) ([^\r\n]*)")
+
+
+class Qmp:
+    """QEMU's monitor, for input: connected when first needed."""
+
+    def __init__(self, path):
+        self.path = path
+        self.sock = None
+        self.buf = b""
+
+    def _line(self):
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise OSError("QMP closed")
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        return json.loads(line)
+
+    def _call(self, cmd, args=None):
+        msg = {"execute": cmd}
+        if args is not None:
+            msg["arguments"] = args
+        self.sock.sendall(json.dumps(msg).encode() + b"\n")
+        while True:
+            r = self._line()
+            if "return" in r or "error" in r:
+                return r
+
+    def _connect(self):
+        if self.sock:
+            return
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(5)
+        self.sock.connect(self.path)
+        self._line()                                    # the greeting
+        self._call("qmp_capabilities")
+
+    def _events(self, events):
+        self._call("input-send-event", {"events": events})
+        time.sleep(0.03)            # a report each: QEMU's keyboard takes one key a poll
+
+    def keys(self, words):
+        self._connect()
+        for w in words.split():
+            held = w.split("-")
+            key = lambda k, down: {"type": "key", "data": {
+                "down": down, "key": {"type": "qcode", "data": k}}}
+            for k in held:
+                self._events([key(k, True)])
+            for k in reversed(held):
+                self._events([key(k, False)])
+
+    def mouse(self, words):
+        self._connect()
+        dx, dy, button = words.split()
+        self._events([{"type": "rel", "data": {"axis": "x", "value": int(dx)}},
+                      {"type": "rel", "data": {"axis": "y", "value": int(dy)}}])
+        for down in (True, False):
+            self._events([{"type": "btn", "data": {"down": down, "button": button}}])
 
 
 def main() -> int:
@@ -41,6 +112,7 @@ def main() -> int:
     ap.add_argument("--require-lines", help="a file of lines the transcript must have")
     ap.add_argument("--facts", help="write the transcript's 'hw: ' lines here")
     ap.add_argument("--hwdb-facts", help="write hwdb's 'hw: ' lines here")
+    ap.add_argument("--qmp", help="QEMU's QMP socket, for typing what a test asks for")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
@@ -54,6 +126,8 @@ def main() -> int:
     deadline = time.monotonic() + args.timeout
     transcript = b""
     found = False
+    qmp = Qmp(args.qmp) if args.qmp else None
+    asked = 0                       # of the transcript, looked at for requests
 
     try:
         while not found:
@@ -69,6 +143,14 @@ def main() -> int:
             sys.stdout.flush()
             transcript += chunk
             found = args.expect.encode() in transcript
+            if qmp:
+                done = transcript.rfind(b"\n") + 1
+                for m in SEND.finditer(transcript, asked, done):
+                    try:
+                        (qmp.keys if m.group(1) == b"keys" else qmp.mouse)(m.group(2).decode())
+                    except (OSError, ValueError) as e:
+                        print(f"\nboot-check: QMP: {e}")
+                asked = max(asked, done)
             if re.search(rb" FAIL\b|Guru Meditation", transcript):
                 deadline = min(deadline, time.monotonic() + 1.0)     # the rest of the story
     finally:

@@ -61,7 +61,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 | `dos` + handlers | Namespace and assigns. The FAT32 handler is needed for the EFI system partition. Later a modern native filesystem: journaled or CoW metadata, extents and checksums, but no snapshots or encryption (**VQ14**, **VQ14a**). | RV2 |
 | `blk` drivers | SDHCI, eMMC, NVMe (PCIe), and later UFS. | RV2 / RK3588 |
 | `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. Built for the K1 and the CIX on the firmware's mode (V5 step 3). | RV2 (Omega A2 already has flips and a sprite plane) |
-| `input` | USB HID through an xHCI/DWC3 driver. | CIX |
+| `input` | Keys and the mouse to one client, on a ring it maps; USB HID boot keyboards and mice from `xhci`, which drives xHCI (the CIX's Cadence, the K1's DWC3, QEMU's) and hubs. Built in V5 step 4. | CIX |
 | `audio` | Real-time SIMD voice/stream mixer, Paula-style precedence and exclusive DMA leases over HDA (CIX ALC269), I²S (RK3588/K1) and `virtio-snd` ([§15](15-audio-dsp.md), proposed). | QEMU / CIX |
 | `net` | RTL8125 (PCIe), the K1 EMAC, and a TCP/IP stack (**VQ15**). | later |
 | `gpu-*` | One per GPU family, granting queue leases (§5). | CIX (Panthor, G720), then RK3588 |

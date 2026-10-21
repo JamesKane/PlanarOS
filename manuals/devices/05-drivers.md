@@ -1,6 +1,6 @@
 # The drivers
 
-*Checked against V4; display against V5 step 3.*
+*Checked against V4; display against V5 step 3, xhci against step 4.*
 
 The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`). Their match tables are in `servers/hwdb/drivers.c`; their stop methods in `servers/hwdb/server.c`.
 
@@ -12,6 +12,7 @@ The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`
 | [pci](04-pci.md) | `pci-host-ecam-generic`, `PNP0A08` | None | None | None needed |
 | [virtio-mmio](#virtio-mmio) | `virtio,mmio`, `LNRO0005` | `rng.N` | Its line | Status register to 0 |
 | [rtc-pl031](#rtcs), [rtc-goldfish](#rtcs) | `arm,pl031`, `ARMH0031`; `google,goldfish-rtc` | `rtc.N` | None | None needed |
+| [xhci](#xhci) | `pciclass,0c0330`, `ky,x1-dwc3`, `CIXH2031` | None: a client of `input` | Its line or MSI-X, else polled | USBCMD.R/S to 0, until halted |
 
 ## nvme
 
@@ -34,6 +35,10 @@ The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`
 `drv/display`: the screen the firmware left lit, never set up again. hwdb leases it the firmware's framebuffer, and with it the controller scanning it out, where a quirk names one (`HW_Q_SCANOUT`): the K1's HDMI DPU, the CIX's DPU4. It takes over the firmware's mode, draws the text console on plane 0, and gives clients an overlay and a cursor plane above it ([chapter 10](10-display.md)). Where there's no controller it knows, or the controller isn't lit, it composes the planes itself on the framebuffer, as on QEMU. Formats RGBX and BGRX for the console, XRGB8888 and ARGB8888 for the planes. See also [chapter 3](03-console.md).
 
 Its stop method is in `servers/hwdb/display.c`, since a reset would blank the screen (and on the CIX lose the DisplayPort link for good): every plane off but the one on the firmware's framebuffer, then a wait for the latch. A restarted display finds the console as it was and goes on below its last line.
+
+## xhci
+
+`drv/xhci`: USB host controllers (xHCI 1.2), their hubs, and the boot keyboards and mice behind them, whose reports it sends to `input` ([chapter 7](07-input.md)). It publishes nothing. QEMU's is found by `pci`; the K1's DWC3 it makes a host first, with its USB 2 PHY; the CIX's ten UEFI left in host mode. Its stop method, in `servers/hwdb/input.c`, halts each controller.
 
 ## virtio-mmio
 

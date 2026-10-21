@@ -33,3 +33,10 @@ void drv_dma_flush(const void *p, uint64_t n)
 {
     each(p, n, 2);
 }
+
+/* Memory writes, cached or not, before a device register's after (a
+ * doorbell); and a device's, seen in memory, before what's read after. */
+void drv_io_barrier(void)
+{
+    __asm__ volatile("fence iorw, iorw" : : : "memory");
+}

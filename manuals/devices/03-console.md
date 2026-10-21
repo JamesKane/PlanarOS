@@ -6,7 +6,7 @@
 
 Text to the screen. The display driver (`drv/display`) draws a text console on the framebuffer the firmware left set up, which is its output's plane 0, and publishes it as "con.0" (the planes above it are [chapter 10](10-display.md)'s). Every line it draws also goes to the kernel's log, and so to the serial console: the console is both (v4-plan decision 1).
 
-Input is the serial console's, given to one process by the device root's holder: `GrantConsole` and `ReadConsole` ([lease](../autodocs/lease.md#leasegrantconsole)). hwdb gives it to the Shell.
+Input is the serial console's, given to one process by the device root's holder: `GrantConsole` and `ReadConsole` ([lease](../autodocs/lease.md#leasegrantconsole)). hwdb gives it to the Shell, which reads a USB keyboard's keys too, from `input` ([chapter 7](07-input.md)).
 
 ## Concepts
 

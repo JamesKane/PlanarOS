@@ -468,176 +468,146 @@
   mmio 0x70b0000+0x10000
   irq 260 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/XHC0 [PNP0D10]: disabled
-/_SB_/XHC1 [PNP0D10]: no driver
+/_SB_/XHC0 [PNP0D10]: disabled; the same device as /_SB_/SUB0/CUB0
+/_SB_/XHC1 [PNP0D10]: no driver; the same device as /_SB_/SUB1/CUB1
   mmio 0x9088000+0x8000
   irq 300 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/XHC2 [PNP0D10]: no driver
+/_SB_/XHC2 [PNP0D10]: no driver; the same device as /_SB_/SUB2/CUB2
   mmio 0x90f8000+0x8000
   irq 306 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/XHC3 [PNP0D10]: no driver
+/_SB_/XHC3 [PNP0D10]: no driver; the same device as /_SB_/SUB3/CUB3
   mmio 0x9168000+0x8000
   irq 312 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/XHC4 [PNP0D10]: disabled
-/_SB_/XHC5 [PNP0D10]: disabled
-/_SB_/USB0 [PNP0D10]: no driver
+/_SB_/XHC4 [PNP0D10]: disabled; the same device as /_SB_/SUB4/CUB4
+/_SB_/XHC5 [PNP0D10]: disabled; the same device as /_SB_/SUB5/CUB5
+/_SB_/USB0 [PNP0D10]: no driver; the same device as /_SB_/HUB0/CUB0
   mmio 0x9268000+0x8000
   irq 272 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/USB1 [PNP0D10]: no driver
+/_SB_/USB1 [PNP0D10]: no driver; the same device as /_SB_/HUB1/CUB1
   mmio 0x9298000+0x8000
   irq 275 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/USB2 [PNP0D10]: no driver
+/_SB_/USB2 [PNP0D10]: no driver; the same device as /_SB_/HUB2/CUB2
   mmio 0x92c8000+0x8000
   irq 278 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/USB3 [PNP0D10]: no driver
+/_SB_/USB3 [PNP0D10]: no driver; the same device as /_SB_/HUB3/CUB3
   mmio 0x92f8000+0x8000
   irq 281 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/SUB0 [CIXH2030]: no driver
+/_SB_/SUB0 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x9000310+0x4
   mmio 0x9000400+0x4
-/_SB_/SUB0/CUB0 [CIXH2031]: no driver
-  mmio 0x9010000+0x4000
-  mmio 0x9014000+0x4000
+/_SB_/SUB0/CUB0 [CIXH2031]: xhci, bound 10
   mmio 0x9018000+0x8000
   irq 294 on /MADT/gicd@e010000
   irq 294 on /MADT/gicd@e010000
   irq 295 on /MADT/gicd@e010000
-  irq <0x126> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/SUB0 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/SUB0 (parent)
 /_SB_/U2P4 [CIXH2032]: no driver
 /_SB_/UCP0 [CIXH2033]: no driver
   mmio 0x9030000+0x40000
-/_SB_/SUB1 [CIXH2030]: no driver
+/_SB_/SUB1 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x9070310+0x4
   mmio 0x9070400+0x4
-/_SB_/SUB1/CUB1 [CIXH2031]: no driver
-  mmio 0x9080000+0x4000
-  mmio 0x9084000+0x4000
+/_SB_/SUB1/CUB1 [CIXH2031]: xhci, bound 11
   mmio 0x9088000+0x8000
   irq 300 on /MADT/gicd@e010000
   irq 300 on /MADT/gicd@e010000
   irq 301 on /MADT/gicd@e010000
-  irq <0x12c> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/SUB1 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/SUB1 (parent)
 /_SB_/U2P5 [CIXH2032]: no driver
 /_SB_/UCP1 [CIXH2033]: no driver
   mmio 0x90a0000+0x40000
-/_SB_/SUB2 [CIXH2030]: no driver
+/_SB_/SUB2 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x90e0310+0x4
   mmio 0x90e0400+0x4
-/_SB_/SUB2/CUB2 [CIXH2031]: no driver
-  mmio 0x90f0000+0x4000
-  mmio 0x90f4000+0x4000
+/_SB_/SUB2/CUB2 [CIXH2031]: xhci, bound 12
   mmio 0x90f8000+0x8000
   irq 306 on /MADT/gicd@e010000
   irq 306 on /MADT/gicd@e010000
   irq 307 on /MADT/gicd@e010000
-  irq <0x132> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/SUB2 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/SUB2 (parent)
 /_SB_/U2P8 [CIXH2032]: no driver
 /_SB_/UCP2 [CIXH2033]: no driver
   mmio 0x9110000+0x40000
-/_SB_/SUB3 [CIXH2030]: no driver
+/_SB_/SUB3 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x9150310+0x4
   mmio 0x9150400+0x4
-/_SB_/SUB3/CUB3 [CIXH2031]: no driver
-  mmio 0x9160000+0x4000
-  mmio 0x9164000+0x4000
+/_SB_/SUB3/CUB3 [CIXH2031]: xhci, bound 13
   mmio 0x9168000+0x8000
   irq 312 on /MADT/gicd@e010000
   irq 312 on /MADT/gicd@e010000
   irq 313 on /MADT/gicd@e010000
-  irq <0x138> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/SUB3 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/SUB3 (parent)
 /_SB_/U2P9 [CIXH2032]: no driver
 /_SB_/UCP3 [CIXH2033]: no driver
   mmio 0x9180000+0x40000
-/_SB_/SUB4 [CIXH2030]: no driver
+/_SB_/SUB4 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x91c0314+0x4
   mmio 0x91c0400+0x4
-/_SB_/SUB4/CUB4 [CIXH2031]: no driver
-  mmio 0x91d0000+0x4000
-  mmio 0x91d4000+0x4000
+/_SB_/SUB4/CUB4 [CIXH2031]: xhci, bound 14
   mmio 0x91d8000+0x8000
   irq 284 on /MADT/gicd@e010000
   irq 284 on /MADT/gicd@e010000
   irq 285 on /MADT/gicd@e010000
-  irq <0x11c> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/SUB4 (parent)
-/_SB_/SUB5 [CIXH2030]: no driver
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/SUB4 (parent)
+/_SB_/SUB5 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x91c0324+0x4
   mmio 0x91c0410+0x4
-/_SB_/SUB5/CUB5 [CIXH2031]: no driver
-  mmio 0x91e0000+0x4000
-  mmio 0x91e4000+0x4000
+/_SB_/SUB5/CUB5 [CIXH2031]: xhci, bound 15
   mmio 0x91e8000+0x8000
   irq 289 on /MADT/gicd@e010000
   irq 289 on /MADT/gicd@e010000
   irq 290 on /MADT/gicd@e010000
-  irq <0x121> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/SUB5 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/SUB5 (parent)
 /_SB_/U2P6 [CIXH2032]: no driver
 /_SB_/U2P7 [CIXH2032]: no driver
 /_SB_/U3P4 [CIXH2034]: no driver
   mmio 0x9210000+0x40000
-/_SB_/HUB0 [CIXH2030]: no driver
+/_SB_/HUB0 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x9250310+0x4
   mmio 0x9250400+0x4
-/_SB_/HUB0/CUB0 [CIXH2031]: no driver
-  mmio 0x9260000+0x4000
-  mmio 0x9264000+0x4000
+/_SB_/HUB0/CUB0 [CIXH2031]: xhci, bound 16
   mmio 0x9268000+0x8000
   irq 272 on /MADT/gicd@e010000
   irq 272 on /MADT/gicd@e010000
   irq 273 on /MADT/gicd@e010000
-  irq <0x110> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/HUB0 (parent)
-/_SB_/HUB1 [CIXH2030]: no driver
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/HUB0 (parent)
+/_SB_/HUB1 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x9280310+0x4
   mmio 0x9280400+0x4
-/_SB_/HUB1/CUB1 [CIXH2031]: no driver
-  mmio 0x9290000+0x4000
-  mmio 0x9294000+0x4000
+/_SB_/HUB1/CUB1 [CIXH2031]: xhci, bound 17
   mmio 0x9298000+0x8000
   irq 275 on /MADT/gicd@e010000
   irq 275 on /MADT/gicd@e010000
   irq 276 on /MADT/gicd@e010000
-  irq <0x113> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/HUB1 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/HUB1 (parent)
 /_SB_/U2P0 [CIXH2032]: no driver
 /_SB_/U2P1 [CIXH2032]: no driver
-/_SB_/HUB2 [CIXH2030]: no driver
+/_SB_/HUB2 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x92b0310+0x4
   mmio 0x92b0400+0x4
-/_SB_/HUB2/CUB2 [CIXH2031]: no driver
-  mmio 0x92c0000+0x4000
-  mmio 0x92c4000+0x4000
+/_SB_/HUB2/CUB2 [CIXH2031]: xhci, bound 18
   mmio 0x92c8000+0x8000
   irq 278 on /MADT/gicd@e010000
   irq 278 on /MADT/gicd@e010000
   irq 279 on /MADT/gicd@e010000
-  irq <0x116> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/HUB2 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/HUB2 (parent)
 /_SB_/U2P2 [CIXH2032]: no driver
-/_SB_/HUB3 [CIXH2030]: no driver
+/_SB_/HUB3 [CIXH2030]: firmware, UEFI's: host mode
   mmio 0x92e0310+0x4
   mmio 0x92e0400+0x4
-/_SB_/HUB3/CUB3 [CIXH2031]: no driver
-  mmio 0x92f0000+0x4000
-  mmio 0x92f4000+0x4000
+/_SB_/HUB3/CUB3 [CIXH2031]: xhci, bound 19
   mmio 0x92f8000+0x8000
   irq 281 on /MADT/gicd@e010000
   irq 281 on /MADT/gicd@e010000
   irq 282 on /MADT/gicd@e010000
-  irq <0x119> on /_SB_/PDC0
-  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts); /_SB_/HUB3 (parent)
+  needs /MADT/gicd@e010000 (interrupts); /_SB_/PDC0 (interrupts dropped); /_SB_/HUB3 (parent)
 /_SB_/U2P3 [CIXH2032]: no driver
 /_SB_/V4L2 [CIXH3020]: no driver
   irq 360 on /MADT/gicd@e010000
@@ -757,4 +727,4 @@
 /_SB_/C000/C005/CPUB [ACPI0007]: kernel, a CPU
   needs /_SB_/C000/C005 (parent)
 hwdb: one power for 2 devices sharing 0x6590000+0x10000, 0x84380000+0x1000: MBX6 SHM0
-hwdb: CIXTEK SKY1EDK2: 54 disabled, 17 kernel, 174 no driver, 9 bound, 0 broken
+hwdb: CIXTEK SKY1EDK2: 54 disabled, 17 kernel, 10 firmware, 154 no driver, 19 bound, 0 broken

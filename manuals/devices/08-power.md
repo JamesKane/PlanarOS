@@ -1,6 +1,6 @@
 # The power class
 
-*Checked against V5 step 2.*
+*Checked against V5 step 2; the K1's `"usb"` set against step 4.*
 
 ## What it's for
 
@@ -15,7 +15,7 @@ It drives:
 
 - **One port, "power".** A client connects and sends `struct PowerMsg` messages (`planar/devices/power.h`).
 - **A vote.** `POWER_ON` names a set and a tag of the client's own choosing. The server turns on what in the set is off and keeps it on while the vote stands. `POWER_OFF` with the tag takes it back. A tag is used once at a time (`ERR_EXISTS`).
-- **A set** is either up to 24 firmware references, or a name. Each reference (`struct PowerRef`) is a kind (`POWER_DOMAIN`, `POWER_CLOCK` or `POWER_RESET`), which of power's devices provides it (in the order hwdb gave power them), and the specifier's cells as the firmware wrote them. A name is a set the server knows for a device the firmware doesn't describe well enough. `"gpu"` is the one now, on every machine.
+- **A set** is either up to 24 firmware references, or a name. Each reference (`struct PowerRef`) is a kind (`POWER_DOMAIN`, `POWER_CLOCK` or `POWER_RESET`), which of power's devices provides it (in the order hwdb gave power them), and the specifier's cells as the firmware wrote them. A name is a set the server knows for a device the firmware doesn't describe well enough: `"gpu"` on every machine, and `"usb"` on the K1 (below). A set may hold a fourth kind, `POWER_SUPPLY`, which no reference names yet.
 - **Order.** On, a vote turns domains on first, then clocks, then releases resets. Off goes the other way round.
 - **All or nothing.** If one resource of a vote fails (a domain that doesn't say it's on in time: `ERR_TIMEOUT`), the ones the vote turned on go off again, and the vote isn't held.
 - **Shared.** A resource is on while any vote holds it. It goes off when its last vote goes.
@@ -52,7 +52,7 @@ DoMsg(&mp, &m->pm_Msg);
 
 ## The machines
 
-**The K1** (`drv/power/k1.c`, from the vendor kernel's `x1-pm_domain.c`, `ccu-ky-x1.c` and `reset-ky-x1.c`). U-Boot's tree has the clock controller, the reset controller and the power domains each list the same eight register blocks. Everything power drives is in one of them, the APMU at `0xd4282800`, and hwdb leases power that page alone; the rest stay as U-Boot set them. U-Boot's cell numbers: clocks are Linux's plus 41, resets are Linux's, domains are mainline's (VPU 0, GPU 1, LCD 2, ISP 3, audio 4, GNSS 5, HDMI 6). The display's, audio's and HDMI's domains are switched by the hardware, the rest by the vendor's software sequence: sleep switches, then isolation released, then the status bit within 60 ms. `"gpu"` is the GPU's domain, its clock (APMU `0xcc` bit 4) and its reset (bit 1).
+**The K1** (`drv/power/k1.c`, from the vendor kernel's `x1-pm_domain.c`, `ccu-ky-x1.c` and `reset-ky-x1.c`). U-Boot's tree has the clock controller, the reset controller and the power domains each list the same eight register blocks. Everything power drives is in one of them, the APMU at `0xd4282800`, and hwdb leases power that page alone; the rest stay as U-Boot set them. U-Boot's cell numbers: clocks are Linux's plus 41, resets are Linux's, domains are mainline's (VPU 0, GPU 1, LCD 2, ISP 3, audio 4, GNSS 5, HDMI 6). The display's, audio's and HDMI's domains are switched by the hardware, the rest by the vendor's software sequence: sleep switches, then isolation released, then the status bit within 60 ms. `"gpu"` is the GPU's domain, its clock (APMU `0xcc` bit 4) and its reset (bit 1). `"usb"`, which xhci votes for itself, is what U-Boot's tree leaves out of the DWC3's: the combo PHY's port A set to USB 3 (APMU `0x110` bit 3), its reset (`0x3cc`, released by setting bits 3 to 5 and clearing bit 8), and the onboard hub's power and its ports' VBUS, GPIO 123 driven high (U-Boot's tree says 79, and leaves both low). For that, hwdb leases power the GPIO controller's page with the APMU's: it is the GPIO's only owner (`servers/hwdb/quirks.c`).
 
 **The CIX** (`drv/power/scmi.c`). Two SCMI channels in the SMT layout, each polled:
 - clocks (protocol `0x14`) to the SCP, through SHM0, the first `0x80` bytes of mailbox 6's page at `0x6590000`, rung at `+0x80`. The rest of the page is the CPPC's and the PCC's, and power never touches it;

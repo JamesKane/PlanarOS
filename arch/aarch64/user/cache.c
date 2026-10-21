@@ -38,3 +38,10 @@ void drv_dma_flush(const void *p, uint64_t n)
         __asm__ volatile("dc civac, %0" : : "r"(a) : "memory");
     __asm__ volatile("dsb sy" : : : "memory");
 }
+
+/* Memory writes, cached or not, before a device register's after (a
+ * doorbell); and a device's, seen in memory, before what's read after. */
+void drv_io_barrier(void)
+{
+    __asm__ volatile("dsb sy" : : : "memory");
+}

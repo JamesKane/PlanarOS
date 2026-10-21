@@ -16,18 +16,21 @@ const struct hw_quirk hw_quirk_table[] = {
      * one of them, the APMU (drv/power/k1.c): power is leased its page
      * alone, and the other blocks stay as U-Boot set them. PCIe's and
      * the USB3/PCIe combo PHY's words in that page are PHY controls that
-     * power will drive for them when they have drivers (step 4).
+     * power will drive for them when they have drivers (step 4). The
+     * combo PHY is USB's (below): PCIe0 isn't driven, and port A's
+     * calibration by a PCIe driver would reset it.
      */
     { "ky,x1", HW_Q_REGS, "/soc/clock-controller@d4050000", "0xd4282800" },
     { "ky,x1", HW_Q_REGS, "/soc/reset-controller@d4050000", "0xd4282800" },
     { "ky,x1", HW_Q_REGS, "/soc/power-management@0", "0xd4282800" },
-    { "ky,x1", HW_Q_REGS, "/soc/phy@c0b10000", "0xc0b10000" },
     { "ky,x1", HW_Q_REGS, "/soc/pcie@ca400000",
-      "0xca400000 0xca700000 0x90000000 0xc0c20000 0xc0c10000 0xc0b10000" },
+      "0xca400000 0xca700000 0x90000000 0xc0c20000 0xc0c10000" },
     { "ky,x1", HW_Q_FIRMWARE, "/soc/pinctrl@d401e000", "U-Boot's pins" },
-    /* Its GPIOs: the SD slot's card detect is one, which sdhci does
-     * without (it asks the card). */
-    { "ky,x1", HW_Q_FIRMWARE, "/soc/gpio@d4019000", "U-Boot's, until a GPIO driver" },
+    /* Its GPIOs are power's, for the supplies that are GPIOs (the USB
+     * hub's VBUS): leased with the APMU. The SD slot's card detect is one
+     * too, which sdhci does without (it asks the card). */
+    { "ky,x1", HW_Q_MMIO, "/soc/clock-controller@d4050000", "0xd4019000 0x800" },
+    { "ky,x1", HW_Q_ALIAS, "/soc/gpio@d4019000", "/soc/clock-controller@d4050000" },
     /* The display sits behind dram_range1 (Linux's k1.dtsi), where memory
      * above 4 GiB is seen 2 GiB lower and only the first 2 GiB where it
      * is; U-Boot's tree has no dram_range buses to say so. */
@@ -39,6 +42,23 @@ const struct hw_quirk hw_quirk_table[] = {
     { "ky,x1", HW_Q_REGS, "/soc/dpu@c0340000", "0xc0440000" },
     { "ky,x1", HW_Q_IRQ, "/soc/dpu@c0340000", "0x8b /soc/interrupt-controller@e0000000" },
     { "ky,x1", HW_Q_SCANOUT, "/soc/dpu@c0340000", nullptr },
+    /* The USB-A ports' DWC3 (drv/xhci): its glue node holds the clock
+     * and reset power votes for, and xhci drives it with its child's
+     * registers and line, and its PHYs (the vendor's dwc3-ky.c); its own
+     * line is a wakeup's. The USB 3 PHY's mode and reset, and the hub's
+     * VBUS, are power's: the set "usb", which xhci votes for. */
+    { "ky,x1", HW_Q_MMIO, "/soc/usb3@0", "0xc0a00000 0x10000" },
+    { "ky,x1", HW_Q_MMIO, "/soc/usb3@0", "0xc0a30000 0x200" },
+    { "ky,x1", HW_Q_MMIO, "/soc/usb3@0", "0xc0b10000 0x800" },
+    { "ky,x1", HW_Q_NOIRQ, "/soc/usb3@0", "0x95 /soc/interrupt-controller@e0000000" },
+    { "ky,x1", HW_Q_IRQ, "/soc/usb3@0", "0x7d /soc/interrupt-controller@e0000000" },
+    { "ky,x1", HW_Q_ALIAS, "/soc/usb3@0/dwc3@c0a00000", "/soc/usb3@0" },
+    { "ky,x1", HW_Q_ALIAS, "/soc/usb2phy@0xc0a30000", "/soc/usb3@0" },
+    { "ky,x1", HW_Q_ALIAS, "/soc/phy@c0b10000", "/soc/usb3@0" },
+    { "ky,x1", HW_Q_DMA_LIMIT, "/soc/usb3@0", "0x80000000" },     /* dram_range0 */
+    /* Its hub's power and VBUS: GPIO 123 (Linux's tree; U-Boot's says 79),
+     * which power drives in the set "usb". */
+    { "ky,x1", HW_Q_FIRMWARE, "/usb3hub", "power's, in the set \"usb\"" },
 
     /*
      * The CIX's SCMI (drv/power/scmi.c): `power` drives mailbox 6 and its
@@ -79,6 +99,58 @@ const struct hw_quirk hw_quirk_table[] = {
     { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/PRC2", "/_SB_/PCI2" },
     { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/PRC3", "/_SB_/PCI3" },
     { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/PRC4", "/_SB_/PCI4" },
+
+    /*
+     * The CIX's ten USB controllers (Cadence's CDNSP, xhci), each
+     * described twice: as PNP0D10, with its xHCI registers, and as
+     * CIXH2031 under the vendor's CIXH2030, with its OTG and device
+     * registers too and its wakeup line through PDC0. UEFI leaves them
+     * all in host mode. Three PNP0D10s' _STA read GNVA, which acpid
+     * can't (VQ42), and they come out disabled; the CIXH2031s' don't,
+     * so xhci drives those, on their xHCI window and host line alone.
+     * Their CIXH2030 parents are the wrappers' straps and resets, which
+     * UEFI set.
+     */
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/SUB0", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/SUB0/CUB0", "0x9018000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/SUB0/CUB0", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/XHC0", "/_SB_/SUB0/CUB0" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/SUB1", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/SUB1/CUB1", "0x9088000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/SUB1/CUB1", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/XHC1", "/_SB_/SUB1/CUB1" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/SUB2", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/SUB2/CUB2", "0x90f8000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/SUB2/CUB2", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/XHC2", "/_SB_/SUB2/CUB2" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/SUB3", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/SUB3/CUB3", "0x9168000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/SUB3/CUB3", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/XHC3", "/_SB_/SUB3/CUB3" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/SUB4", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/SUB4/CUB4", "0x91d8000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/SUB4/CUB4", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/XHC4", "/_SB_/SUB4/CUB4" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/SUB5", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/SUB5/CUB5", "0x91e8000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/SUB5/CUB5", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/XHC5", "/_SB_/SUB5/CUB5" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/HUB0", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/HUB0/CUB0", "0x9268000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/HUB0/CUB0", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/USB0", "/_SB_/HUB0/CUB0" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/HUB1", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/HUB1/CUB1", "0x9298000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/HUB1/CUB1", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/USB1", "/_SB_/HUB1/CUB1" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/HUB2", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/HUB2/CUB2", "0x92c8000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/HUB2/CUB2", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/USB2", "/_SB_/HUB2/CUB2" },
+    { "CIXTEK SKY1EDK2", HW_Q_FIRMWARE, "/_SB_/HUB3", "UEFI's: host mode" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/HUB3/CUB3", "0x92f8000" },
+    { "CIXTEK SKY1EDK2", HW_Q_NOIRQ, "/_SB_/HUB3/CUB3", "/_SB_/PDC0" },
+    { "CIXTEK SKY1EDK2", HW_Q_ALIAS, "/_SB_/USB3", "/_SB_/HUB3/CUB3" },
 };
 
 const unsigned hw_nquirks = sizeof hw_quirk_table / sizeof hw_quirk_table[0];
@@ -215,6 +287,33 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
             if (fb == HW_NONE)
                 continue;
             g->nodes[id].with = fb;
+            break;
+        }
+        case HW_Q_NOIRQ: {
+            /* All its lines on the controller, references and all; or
+             * one line, when the arg names it, the rest kept. */
+            struct hw_node *d = &g->nodes[id];
+            const char *c = q->arg;
+            bool one = c[0] == '0' && (c[1] | 0x20) == 'x';
+            uint64_t line = one ? hex(&c) : 0;
+            hw_id ctlr = hw_find_path(g, c, hw_strlen(c));
+            unsigned kept = 0;
+
+            if (ctlr == HW_NONE) {
+                g->broken++;
+                continue;
+            }
+            for (unsigned k = 0; k < d->nres; k++)
+                if (d->res[k].kind != HW_IRQ || d->res[k].ctlr != ctlr ||
+                    (one && d->res[k].base != line))
+                    d->res[kept++] = d->res[k];
+            d->nres = (uint16_t)kept;
+            for (unsigned k = 0; k < d->nrefs && !one; k++)
+                if (d->refs[k].kind == HW_REF_IRQ &&
+                    (d->refs[k].target == ctlr || d->refs[k].supplier == ctlr)) {
+                    d->refs[k].required = false;
+                    d->refs[k].dropped = true;
+                }
             break;
         }
         case HW_Q_ALIAS: {

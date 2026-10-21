@@ -21,7 +21,7 @@ constexpr unsigned PW_DEVICES = 8;      /* of the server's, a backend's */
 
 struct pw_res {
     const char *name;
-    uint8_t kind;                   /* POWER_DOMAIN, POWER_CLOCK, POWER_RESET */
+    uint8_t kind;                   /* POWER_DOMAIN, POWER_CLOCK, POWER_RESET, POWER_SUPPLY */
     bool on;                        /* a reset is on when released */
     bool kept;                      /* on when the server started: the firmware's */
     uint16_t votes;

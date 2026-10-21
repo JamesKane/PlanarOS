@@ -103,6 +103,12 @@ def main() -> int:
         print("serial-boot: no U-Boot prompt", flush=True)
         return 1
 
+    # U-Boot polls a USB keyboard it found as console input, and loadx
+    # crawls while it does (a reset leaves the hub's VBUS on, so it finds
+    # one): serial alone, and USB stopped.
+    for line in ("setenv stdin serial", "usb stop"):
+        board.command(line, 5)
+
     if args.sd:
         print("serial-boot: loading EFI/planar/planar.bin from the SD card", flush=True)
         got = board.command(f"load mmc 0:1 {LOAD_ADDR} EFI/planar/planar.bin", 20)

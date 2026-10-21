@@ -14,8 +14,15 @@
  */
 #include "hwdb.h"
 
+/* A supplier described twice is the device it's the same as. */
+static hw_id device(const struct hw_graph *g, hw_id s)
+{
+    return s != HW_NONE && g->nodes[s].alias != HW_NONE ? g->nodes[s].alias : s;
+}
+
 static bool met(const struct hw_graph *g, hw_id s)
 {
+    s = device(g, s);
     if (s == HW_NONE)
         return false;
     switch (g->nodes[s].state) {
@@ -30,6 +37,7 @@ static bool met(const struct hw_graph *g, hw_id s)
 
 static bool hopeless(const struct hw_graph *g, hw_id s)
 {
+    s = device(g, s);
     if (s == HW_NONE)
         return true;
     switch (g->nodes[s].state) {
@@ -102,7 +110,7 @@ static void order_one(struct hw_graph *g, hw_id id)
         if (!r->required && hopeless(g, r->supplier))
             r->dropped = true;
         if (r->supplier != HW_NONE)
-            add_consumer(g, r->supplier, id);
+            add_consumer(g, device(g, r->supplier), id);
     }
 }
 
