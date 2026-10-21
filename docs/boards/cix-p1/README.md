@@ -76,3 +76,10 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 - The EFI partition is `nda0p1`, shared by FreeBSD (Boot0005, first) and Ubuntu (Boot0004). `efibootmgr` works as root.
 - `make PLATFORM=uefi-a64 test` runs one boot (`tools/efi-boot.py`): the image goes to `\EFI\planar\planar.efi`, Planar's entry is `Boot0050`, and `BootNext` points to it. FreeBSD's `efivar -w` takes a value on stdin only. Its `-f` isn't implemented for writes.
 - The serial port must be free while a run is in progress.
+
+**Power** (V5 step 2):
+- SCMI answers on both channels:
+  - the SCP, through mailbox 6's first 0x80 bytes, rung at `+0x80`: clocks, protocol version 2.0;
+  - TF-A by SMC `0xc2000001`, through `0x84380000`, with x1 = x2 = 0: power domains, version 2.1.
+- The EFI map has `0x84380000` reserved.
+- Of the G720's set (domain 21, `gpu_clk_core`, `gpu_clk_stacks`), one is on at boot.

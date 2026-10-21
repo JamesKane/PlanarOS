@@ -318,6 +318,7 @@ void power_model(void)
     if ((m = hw_node_new(g, 0, "power-model")) == HW_NONE || !hw_key_add(g, m, "planar,power-model"))
         return;
     g->nodes[m].enabled = true;
+    g->nodes[m].bare = true;
     power.model = true;
     for (unsigned k = 0; k < sizeof users / sizeof users[0] && !power.consumer; k++)
         for (hw_id i = 1; i < g->count && !power.consumer; i++)

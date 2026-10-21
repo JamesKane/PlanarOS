@@ -267,15 +267,17 @@ void hw_leases(struct hw_graph *g)
     lease_bare(g);
 }
 
-/* A device with no registers at all (QEMU's power model, which hwdb's
- * test mode adds) is leased nothing: its driver gets no ranges. */
+/* A device hwdb made with no registers (QEMU's power model, which its
+ * test mode adds) is leased nothing: its driver gets no ranges. Any
+ * other device without registers fails, as it did: a host bridge whose
+ * ECAM the firmware doesn't give (two of the CIX's) has nothing to drive. */
 static void lease_bare(struct hw_graph *g)
 {
     for (hw_id i = 1; i < g->count; i++) {
         struct hw_node *d = &g->nodes[i];
         bool regs = false;
 
-        if (!leased(g, d) || d->lease != HW_NOLEASE)
+        if (!leased(g, d) || d->lease != HW_NOLEASE || !d->bare)
             continue;
         for (unsigned k = 0; k < d->nres; k++)
             regs |= (d->res[k].kind == HW_MMIO || d->res[k].kind == HW_ECAM) && d->res[k].size;

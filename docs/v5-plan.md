@@ -60,7 +60,7 @@ hwdb's own tests check `dma-ranges` on a hand-built tree of the K1's shape, and 
 
 ## 2. `power`
 
-**Done on QEMU and the RV2 (2026-10-21); the CIX is untried.** `drv/power` is a driver like the others, with a backend per kind of hardware, and hwdb votes through it before granting a lease.
+**Done (2026-10-21), on QEMU and both boards.** `drv/power` is a driver like the others, with a backend per kind of hardware, and hwdb votes through it before granting a lease.
 
 - **The class** (`planar/devices/power.h`). One port, `power`. `POWER_ON` names a set and a tag of the client's own. A set is either the firmware references of a node (kind, which of power's devices, and the cells) or a name such as `"gpu"`. `POWER_OFF` takes a vote back, and `POWER_QUERY` reads a set from the hardware. A vote turns domains on first, then clocks, then releases resets. It is all or nothing: if one resource fails, the ones it turned on go off again. A resource goes off when its last vote goes, in reverse order, and only if power turned it on: whatever was on when power started is kept. A reference power doesn't drive is left as the firmware set it and counted (`pm_Untouched`); it isn't an error.
 - **Votes are per connection** (§11.5). When a client's connection goes, its votes go. The driver library gained a `gone` callback for this.
@@ -83,7 +83,7 @@ hwdb's own tests check `dma-ranges` on a hand-built tree of the K1's shape, and 
   - `CallLease(lease, x[4])` makes that call by SMCCC, through the conduit PSCI uses.
   - `QueryLease` gives the function as `li_Call`.
   - RISC-V answers `ERR_NOSYS`.
-- **A device with no registers** gets a lease of no ranges (`lease_bare`), and the driver library accepts one.
+- **A device hwdb makes with no registers** (the model, below) gets a lease of no ranges (`lease_bare`), and the driver library accepts one. Any other device without registers still fails, as it did: two of the CIX's host bridges have no ECAM. The first board run gave every such device a lease, and their `pci` failed until given up.
 - **QEMU's model.** QEMU has nothing to power, so hwdb's test mode adds a node, `planar,power-model`, with no registers, and has the RTC need its domain 1. Under edk2, which keeps the RTC, the display needs it instead. The model's resources are bits in memory. Domain 0 starts on, and domain 3 never comes on, to exercise the error path.
 
 **Tested by** `make power-test` on the host (62 checks):
@@ -116,7 +116,13 @@ In the system, on every QEMU boot, hwdb's kill test:
 
 No restart turned anything on again, as expected: SD's clocks and resets were U-Boot's, so they're kept. The same run confirmed step 1's Svpbmt probe: uncached Areas work on the X60.
 
-**Not yet on the CIX:** both transports are untried, and so is whether TF-A wants the channel's page in x1 (FreeBSD) or zeros (Linux, which this follows).
+**On the CIX** (2026-10-21, `make PLATFORM=uefi-a64 test`):
+- Both transports answer. The SCP gives clocks at SCMI 2.0 through mailbox 6, and TF-A gives power domains at 2.1 by SMC with zeros in x1 and x2, as Linux passes them.
+- The kernel leased the SMC channel's page.
+- A client's vote for `"gpu"` turned on domain 21 and the one GPU clock that was off. One of the three was already on, so it's kept. Its death turned them off.
+- Power was killed and came back.
+
+No CIX driver references power: ACPI names no SCMI resource, so hwdb votes for nobody there.
 
 ## 3. Native scanout
 

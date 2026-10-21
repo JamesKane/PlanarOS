@@ -131,6 +131,8 @@ struct hw_node {
     uint64_t dma_limit;             /* its DMA sees memory where the CPU does only below this
                                      * (dma-ranges, or a quirk); 0: everywhere */
     uint32_t call;                  /* a firmware call its driver may make (a quirk); 0: none */
+    bool bare;                      /* hwdb's own, with no registers: leased nothing (QEMU's
+                                     * power model); any other such node can't be leased */
 };
 
 constexpr uint16_t HW_NODRV = UINT16_MAX;
