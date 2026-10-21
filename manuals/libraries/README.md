@@ -6,10 +6,10 @@
 
 | # | Chapter | State |
 |---|---|---|
-| 1 | [Introduction to Planar programming](01-introduction.md): the single address space, processes and tasks, handles, kernel calls and errors | Written, V3 |
-| 2 | [Exec: tasks and signals](02-tasks-and-signals.md) | Written, V3 |
-| 3 | [Exec: memory and Areas](03-areas.md) | Written, V3 |
-| 4 | [Exec: ports, connections and messages](04-messages.md) | Written, V3 |
+| 1 | [Introduction to Planar programming](01-introduction.md): the single address space, processes and tasks, handles, kernel calls and errors | Written, V4 |
+| 2 | [Exec: tasks and signals](02-tasks-and-signals.md) | Written, V4 |
+| 3 | [Exec: memory and Areas](03-areas.md) | Written, V4 |
+| 4 | [Exec: ports, connections and messages](04-messages.md) | Written, V4 |
 | 5 | Exec: interrupts and driver tasks | Built in V4 as leases' lines (`BindIrq`, `AckWaitIrq`): see [Devices ch. 1](../devices/01-drivers.md) |
 | 6 | Exec: lending memory with a request (`IOF_LEND`) | **Planned** ([docs §4.2](../../docs/04-ipc.md)). Meanwhile the block class passes buffers in the connection's heap ([Devices ch. 2](../devices/02-block.md)) |
 | 7 | Exec: futexes (`WaitAddr`, `WakeAddr`) | **Planned** ([docs §4.1](../../docs/04-ipc.md)) |

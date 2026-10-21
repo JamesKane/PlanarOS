@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 4.* The public headers, `include/planar/`. They are the system's C ABI ([docs §7.2](../../docs/07-language-toolchain.md)): any other language binds to Planar through them.
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 | Header | Contents | Used by |
 |---|---|---|

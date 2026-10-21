@@ -1,6 +1,6 @@
 # 4. Exec: ports, connections and messages
 
-*Checked against V3.*
+*Checked against V4.*
 
 Programs talk by sending **messages**: structures in shared memory, passed by address and replied to in place, as on the Amiga. What Planar adds is protection. Two programs can exchange messages only over a **connection**, and a connection's memory is mapped into those two programs and no others.
 
@@ -22,7 +22,7 @@ The flow:
 4. The client allocates messages from the arena's heap and sends them with `PutMsg` or `DoMsg`. The server takes them with `GetMsgSized` (or `GetMsg`) and answers with `ReplyMsg`. A reply goes back on the connection the message came in on. There is no reply port.
 5. Either side closes with `ClosePort`. If one side ends, by closing, exiting or crashing, the other side's calls fail with `ERR_PORT_DIED`, and `PortGone` says so.
 
-Messages carry their own data in the fields after the header. A message can also point to data elsewhere with `mn_Payload`, but that memory must be mapped by both sides: in V2 that means elsewhere in the same arena.
+Messages carry their own data in the fields after the header. A message can also point to data elsewhere with `mn_Payload`, but that memory must be mapped by both sides: today that means elsewhere in the same arena. The block class passes its buffers this way ([Devices ch. 2](../devices/02-block.md)).
 
 ## Using it
 
@@ -129,6 +129,7 @@ When the server is asleep, `DoMsg` wakes it and hands it the CPU. A round trip w
 - **`DoMsg` sets aside at most 32 other replies.** Replies to earlier `PutMsg`s that arrive while `DoMsg` waits are kept for `GetMsg`, up to `MSGPORT_STASH`. Beyond that `DoMsg` returns `ERR_FULL` with its own message sent but unanswered. Collect replies before calling `DoMsg` with many messages in flight.
 - **A port queues at most 32 connections.** Past that, `ConnectPort` fails with `ERR_FULL` until the server accepts some. A process holds at most 32 connection ends, client and server together; past that, `ERR_LIMIT`.
 - **A connection belongs to the task that opened or accepted it.** It closes when that task ends, so don't hand a `MsgPort` to another task in the same process and then end the first one.
+- **A server can come back.** A driver that dies is restarted by hwdb and creates its port again. Its clients see `PortGone`, close, and connect again by name, as `lib/blk` does.
 - **A process can't connect to its own port.** That fails with `ERR_BADARG`.
 - **Anything off a ring is checked.** A connection whose peer has written nonsense into the rings, or sent a message that fails the check, is broken: it acts as if the peer had gone (`PortGone` is true). The message that failed is lost.
 

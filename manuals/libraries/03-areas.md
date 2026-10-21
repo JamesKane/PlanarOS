@@ -1,6 +1,6 @@
 # 3. Exec: memory and Areas
 
-*Checked against V3.*
+*Checked against V4.*
 
 An **Area** is Planar's unit of memory a program can ask for, give to another process, or make executable. Areas are page-rounded and fairly expensive to make, so a program allocates a few large ones and divides them up itself. (A `malloc`-style allocator over Areas is **planned** as part of the C runtime.)
 
@@ -25,7 +25,7 @@ An **Area** is Planar's unit of memory a program can ask for, give to another pr
 | `AREAF_LARGE` | Aligned to 2 MiB, so the kernel can map it with large pages. |
 | `AREAF_DMA32` | Below 4 GiB, for memory a device with 32-bit DMA addresses must reach (V4: SDHCI's ADMA2). |
 
-The flags for device memory, non-cacheable and write-combining memory, and DMA below 4 GiB are **planned** with drivers ([docs §3.3](../../docs/03-memory.md)).
+A driver gets device memory differently: a device's registers by `MapLease`, and memory the device reads and writes by `AllocDmaArea`, which takes these flags too ([Devices ch. 1](../devices/01-drivers.md)). DMA Areas are ordinary cacheable memory; on a board whose DMA doesn't snoop the caches (the RV2), the driver cleans and flushes around each transfer. Non-cacheable and write-combining Areas are **planned** ([docs §3.3](../../docs/03-memory.md)).
 
 ### Rights
 
@@ -69,7 +69,7 @@ ShareArea((Handle)a, peer_task, AREAR_READ);   /* peer sees it at 'buf', read-on
 UnshareArea((Handle)a, peer_task);             /* when it's done */
 ```
 
-The peer receives `buf` as a plain pointer. In V2 the usual way to move data between processes is a connection's arena (chapter 4), which both ends already share. Lending an Area for the length of one request (`IOF_LEND`) is **planned**.
+The peer receives `buf` as a plain pointer. The usual way to move data between processes is a connection's arena (chapter 4), which both ends already share. Lending an Area for the length of one request (`IOF_LEND`) is **planned**.
 
 ## Rules
 

@@ -9,7 +9,7 @@ Planar is an operating system for one person and one machine. It turns a modern 
 - **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
 - **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
 
-Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its first user-mode drivers are two RTCs and virtio-mmio on QEMU: hwdb starts them in its device graph's order, and restarts them when they're killed. Under ACPI, acpid runs ACPICA in user mode to describe the namespace, and the same drivers bind as through the device tree. Storage, a filesystem and a display are still to come in V4 ([V4](docs/v4-plan.md)).
+Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its drivers run in user mode: hwdb starts them in its device graph's order and restarts them when they're killed, and under ACPI, acpid runs ACPICA in user mode to describe the namespace, so the same drivers bind as through the device tree. Each board boots from its own storage (NVMe on the CIX, the SD card on the RV2) through FAT32 to a Shell on its screen ([V4](docs/v4-plan.md)).
 
 The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
@@ -85,7 +85,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 14. [OpenType and TrueType font engine](docs/14-font-engine.md): clean-room `font.library` from the spec for English layouts, stubbed non-English/colour features, and host-side FreeType/HarfBuzz test oracle (proposed).
 15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
-17. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers; proposed).
+17. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers, storage, the Shell).
 18. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
 19. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
 20. [Open questions](docs/questions.md): the question register.
@@ -98,6 +98,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 | V1. Single address space, SMP, tasks, signals, Areas (QEMU and the RV2) | 2026-10-19 |
 | V2. IPC: connections, rings, `DoMsg`, death notices; then hardening (V2.5) | 2026-10-20 |
 | V3. The CIX P1 through UEFI and ACPI, 12 cores in two classes, Arm costs, VQ3 | 2026-10-20 |
+| V4. User-mode drivers under hwdb and acpid, the kill test, NVMe and SD, FAT32, a Shell on the framebuffer | 2026-10-20 |
 
 Decided so far (the full register is [questions.md](docs/questions.md)):
 - Copy what we can from omega (VQ1).
@@ -110,4 +111,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V4, the hardware model, drivers and servers ([plan](docs/v4-plan.md), proposed): boot from storage to a shell on the framebuffer, on the RV2 and the CIX.
+Next: V5, queue leases: a CSF job on the CIX's Mali G720 with no kernel or server in the data path, then native scanout and `power`, moved from V4 ([roadmap](docs/08-roadmap.md)).

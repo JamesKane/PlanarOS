@@ -1,6 +1,6 @@
 # 2. Exec: tasks and signals
 
-*Checked against V3.*
+*Checked against V4.*
 
 Tasks are how a Planar program does several things at once. Signals are how a task sleeps until something happens, and how other tasks, the kernel and the IPC library wake it. Every way of blocking in Planar comes down to `Wait()` on a signal mask.
 
@@ -32,6 +32,13 @@ The calls:
 - `Wait(mask)` returns at once if any bit in `mask` is set. Otherwise it sleeps until one is. It returns the bits of `mask` that were set, and clears them.
 - `SetSignal(bits, mask)` reads this task's signals and changes the ones in `mask` without sleeping. `SetSignal(0, 0)` just reads them.
 - `AllocSignal(-1)` takes the lowest free bit from 16–63, clears it, and returns its number. `AllocSignal(n)` takes bit `n`. `FreeSignal(n)` gives it back.
+
+### Time
+
+- `CurrentTime()` is nanoseconds since boot.
+- `ArmTimer(deadline, sigbit)` is the calling task's **one alarm**: it sets `sigbit` once `CurrentTime()` reaches `deadline`. The deadline is absolute. Arming again replaces the alarm, and a deadline of 0 disarms it.
+
+So a timeout is a signal like any other: wait for the alarm's bit along with the bits you're waiting for, and see which came.
 
 ## Using it
 
@@ -77,11 +84,26 @@ while (!(SetSignal(0, 0) & SIGBREAKF_CTRL_C))
 
 To consume the break as well, use `SetSignal(0, SIGBREAKF_CTRL_C)`: it clears the bit and returns the old signals.
 
+### Sleeping
+
+From `conformance/dostest.c`:
+
+```c
+static void nap(uint64_t ms)
+{
+    ArmTimer(CurrentTime() + ms * MS, SIG_NAP);
+    Wait(1ULL << SIG_NAP);
+}
+```
+
+For a wait with a timeout, arm the alarm, `Wait` for both bits, and disarm it with `ArmTimer(0, 0)` if the other came first. An alarm that fired meanwhile leaves its bit set: clear it with `SetSignal(0, 1ULL << bit)` before the next wait.
+
 ## Rules
 
 - **Allocate the bits you use.** Libraries allocate theirs with `AllocSignal(-1)` too, so a fixed bit number can collide with one a library is using.
 - **Signals belong to tasks, not processes.** A bit allocated in one task means nothing in another. Waking "the process" means signalling a particular task.
 - **`Signal` stays inside the process.** Another process's task handle gets `ERR_BADHANDLE`. Between processes, use a connection.
+- **The alarm is the task's, not the library's.** A library that arms it takes it from its caller, so a task that has its own alarm armed shouldn't call one that sleeps.
 - **Wait for every bit you might need.** A signal that arrives while you're waiting for something else stays set until you look for it.
 - **`Wait(0)` never returns** unless the process is killed.
 - **Signals carry no data.** To send data, send a message (chapter 4) and use the signal only to say one is there.
@@ -94,12 +116,15 @@ To consume the break as well, use `SetSignal(0, SIGBREAKF_CTRL_C)`: it clears th
 | `FindTask(name)` finds any task by name | Only `FindTask(nullptr)` works; a name returns an error (**Planned**: a task name table) |
 | `Signal(struct Task *, …)` to any task | `Signal(Handle, …)`, only to a task in the caller's own process; across processes, `SignalConn` to a connection's peer |
 | `AllocSignal` returns -1 when none is free | The same |
+| `timer.device`, with an `IORequest` per delay | `ArmTimer`, one alarm per task, which sets a signal bit |
 | `SetTaskPri`, `Forbid`, `Disable` | None. There is no way to stop other tasks running: use a message or, when it comes, a futex. |
 
 ## Functions used
 
 [AllocSignal](../autodocs/exec.md#execallocsignal),
+[ArmTimer](../autodocs/exec.md#execarmtimer),
 [CreateTask](../autodocs/exec.md#execcreatetask),
+[CurrentTime](../autodocs/exec.md#execcurrenttime),
 [ExitProcess](../autodocs/exec.md#execexitprocess),
 [ExitTask](../autodocs/exec.md#execexittask),
 [FindTask](../autodocs/exec.md#execfindtask),

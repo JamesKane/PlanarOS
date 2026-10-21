@@ -1,6 +1,6 @@
 # 1. Introduction to Planar programming
 
-*Checked against V3.*
+*Checked against V4.*
 
 Planar is a single-user system in the Amiga tradition: tasks wait on signals, talk by passing pointers to messages, and the system stays small. Unlike AmigaOS, programs run in **protection domains**: a program can only touch the memory it has been given. This chapter is the vocabulary for the rest of the volume.
 
@@ -18,20 +18,24 @@ Planar's layout of the address space is **identity**: an address is the physical
 
 | Object | What it is | Lifetime |
 |---|---|---|
-| **Process** | A protection domain plus the Areas mapped into it, the handles it owns, and one or more tasks. | Ends with `ExitProcess`, when its last task ends, or when it faults. |
+| **Process** | A protection domain plus the Areas mapped into it, the handles it owns, and one or more tasks. | Ends with `ExitProcess`, when its last task ends, when it faults, or when it's killed (`KillProcess`, or its handle closed). |
 | **Task** | A thread of execution in a process: registers, a 16 KiB stack, a priority, 64 signal bits. | Ends with `ExitTask`, or with its process. |
 
 A program is a process. Its first task starts at `main()`, and **returning from `main()` calls `ExitProcess()`** with the return value (`arch/<isa>/user/crt0.S`).
 
-There is no call yet to start a new program. Programs are linked into the kernel image and started by it at boot. A loader and a shell come with storage (V4).
+A process starts another with `CreateProcess`, for a program built into the kernel image, or `CreateProcessImage`, for one its caller has loaded into an Area. `dos.library`'s `dos_run` loads a program from storage that way ([DOS ch. 1](../dos/01-files-and-programs.md)), and the Shell runs commands with it. The new process's handle belongs to the caller's process:
+- The calling task gets the signal it named when the new process is dead, and `QueryProcess` then says how it ended: its exit code, or the fault and where.
+- **A process never outlives its handle.** `CloseHandle` kills it if it's still running, and so does its owner's death.
+- `PROCF_HELD` creates it without starting it, so the caller can give it what it needs first (hwdb grants a driver its leases this way), then `StartProcess`.
 
 When a process ends, for any reason, everything it held goes: its tasks, its handles, its own Areas, its ports and its connections. The other end of each connection is told (chapter 4).
 
 ## Handles
 
-The kernel names its objects (tasks, Areas, ports, connections) with **handles**: 32-bit values of type `Handle`, defined in `planar/exec.h`.
+The kernel names its objects (tasks, Areas, ports, connections, processes and device leases) with **handles**: 32-bit values of type `Handle`, defined in `planar/exec.h`.
 - A handle names the same object **system-wide**, but what another process can do with it is limited. A task's handle given to another process lets that process share an Area with it, and only while the two are connected (chapter 4). `Signal` reaches only tasks in the caller's own process; across processes, a connection's `SignalConn` reaches its peer.
 - Most calls also check **ownership**: only the process that allocated an Area can free or share it, and only a port's owner can accept on it. The autodoc for each call says which.
+- Handles aren't passed between processes. A handle's value can be sent in a message to *name* an object, as hwdb names a driver's leases, but only rights the kernel has given the receiver let it use it.
 - A handle is never 0. A handle that has been freed is not reused for a long time: each slot carries a generation number, so a stale handle fails with `ERR_BADHANDLE` rather than reaching a new object.
 
 ## Kernel calls and errors
@@ -72,7 +76,7 @@ So that no one process can use up what every process shares, each has limits. Go
 
 | Limit | Per process | Counts |
 |---|---|---|
-| Handles | 256 | Every handle the process holds: its tasks, Areas, ports and connection ends |
+| Handles | 256 | Every handle the process holds: its tasks, Areas, ports, connection ends, and the processes and leases it made |
 | Tasks | 64 | Including the one running `main()` |
 | Connections | 32 | Connection ends, client and server, open or still waiting to be accepted |
 
@@ -82,7 +86,7 @@ The limits are the kernel's (`kernel/process.h`, `kernel/port.c`), not in a publ
 
 ## Logging
 
-Until there is a console device, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
+A program writes text for the user with `dos.library`'s console calls (`con_open`, `con_puts`), which go to the screen where there is one ([Devices ch. 3](../devices/03-console.md)). Underneath, and for anything that is only for the log, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
 
 ## Names in this volume
 
@@ -90,4 +94,11 @@ Public names follow Exec: `CamelCase` functions, structures with a two-letter fi
 
 ## Functions used
 
-[KLog](../autodocs/exec.md#execklog), [ExitProcess](../autodocs/exec.md#execexitprocess).
+[CloseHandle](../autodocs/exec.md#execclosehandle),
+[CreateProcess](../autodocs/exec.md#execcreateprocess),
+[CreateProcessImage](../autodocs/exec.md#execcreateprocessimage),
+[ExitProcess](../autodocs/exec.md#execexitprocess),
+[KillProcess](../autodocs/exec.md#execkillprocess),
+[KLog](../autodocs/exec.md#execklog),
+[QueryProcess](../autodocs/exec.md#execqueryprocess),
+[StartProcess](../autodocs/exec.md#execstartprocess).

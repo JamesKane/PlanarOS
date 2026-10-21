@@ -1,6 +1,6 @@
 # PCI: a bus driver that describes what it finds
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 ## What it's for
 

@@ -1,6 +1,6 @@
 # The drivers
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`). Their match tables are in `servers/hwdb/drivers.c`; their stop methods in `servers/hwdb/server.c`.
 

@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: steps 1 to 7 done (2026-10-20),** on QEMU, the CIX and the RV2: each board boots from its own storage to a shell on its screen. The four decisions at the end are made, as leaned; `power` moved to V5.
+**Status: done (2026-10-20).** All seven steps, and the exit below, are met on QEMU, the CIX and the RV2: each board boots from its own storage to a shell on its screen. The four decisions at the end are made, as leaned; `power` and native scanout moved to V5. The manuals are current at V4.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 

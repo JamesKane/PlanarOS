@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 2.* How programs do I/O, and how a driver is written.
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 **Differs from the RKM.** The Amiga's devices were libraries in one address space: a program filled an `IORequest` and called `DoIO` or `SendIO`, and the device ran in its own task in the same memory. Planar's drivers are processes, each in its own protection domain (§11). A program reaches one over a connection to the driver's **class port**, and the request is a message: a **class** fixes its layout, as the block class does. There is no `IORequest`, `DoIO`, `SendIO` or `AbortIO`. Synchronous I/O is `DoMsg`; asynchronous is `PutMsg` and waiting for the reply. A class's client library wraps it (`lib/blk`, `con_*` in `dos.library`).
 

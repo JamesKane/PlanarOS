@@ -1,10 +1,10 @@
 # blk: the block class's client library
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 The calls a program uses to read and write a block device, in alphabetical order. The header is `planar/blk.h`; the code is `lib/blk/blk.c`, linked into the programs that need it (hwdb, `dos`, `blk*` conformance programs: `mk/user.mk`). None is a kernel call, but each one that talks to the driver sends messages, which trap when the driver is asleep. The protocol is in [Devices ch. 2](../devices/02-block.md).
 
-A `struct blk` is one connection to a driver's port ("nvme.0", "sd.0"), and a **view** of the device: the whole of it, or a GPT partition. Block numbers given to the calls are the view's.
+A `struct blk` is one connection to a driver's port ("nvme.0", "sd.0"), and a **view** of the device: the whole of it, or a partition (GPT, or MBR on a disk without one). Block numbers given to the calls are the view's.
 
 Buffers:
 - **Heap buffers**, from `blk_alloc`, are in the connection's heap, which the driver hands the device as they are. A transfer with one costs no copy. It can't be retried across a driver restart, since that heap goes with the connection.
@@ -149,7 +149,7 @@ None known.
 ## blk/blk_partition
 
 **NAME**
-blk_partition, blk_partition_range -- a GPT partition
+blk_partition, blk_partition_range -- a partition
 
 **SYNOPSIS**
 ```c
@@ -159,11 +159,11 @@ int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first, uint
 ```
 
 **FUNCTION**
-Reads the GPT (UEFI 2.10 §5.3) from the whole device, checks its header's and entries' CRCs, and finds partition `index` (from 1). `blk_partition` narrows `b`'s view to it. `blk_partition_range` gives where it is, its first block and length, and leaves the view as it was.
+Reads the GPT (UEFI 2.10 §5.3) from the whole device, checks its header's and entries' CRCs, and finds partition `index` (from 1). A device with no GPT is read as an MBR instead, as SD cards often are: its primary partitions are 1 to 4. A protective MBR (type `EE`) without its GPT is no table. `blk_partition` narrows `b`'s view to it. `blk_partition_range` gives where it is, its first block and length, and leaves the view as it was.
 
 **RESULT**
 0, or:
-- `ERR_NOTFOUND` -- no GPT, `index` past the table, or an unused entry.
+- `ERR_NOTFOUND` -- no GPT and no MBR, `index` past the table (past 4 for an MBR), or an unused entry.
 - `ERR_BADARG` -- `index` is 0, a CRC doesn't check, or the table or the partition doesn't fit the device.
 - Any error a read gives.
 

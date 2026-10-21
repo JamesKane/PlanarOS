@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 

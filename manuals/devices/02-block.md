@@ -1,6 +1,6 @@
 # The block class: NVMe, SD and lib/blk
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 ## What it's for
 
@@ -28,7 +28,7 @@ struct blk b;
 
 if (blk_open(&b, "nvme.0", SIG_BLK, 1 << 20) != 0)
     return 1;
-blk_partition(&b, 2);           /* the second GPT partition; block 0 is its first */
+blk_partition(&b, 2);           /* the second partition; block 0 is its first */
 blk_read(&b, 0, 8, buf);
 ```
 
@@ -53,6 +53,7 @@ hwdb's test mode runs `blkbench` on each block port: 4 KiB random reads at depth
 - After `ERR_PORT_DIED` with a heap buffer, allocate again before reusing it.
 - Writes retried after a restart write the same blocks again. Order across a restart isn't promised.
 - Partitions are `lib/blk`'s, not a server's: every client of a disk can reach all of it.
+- A disk's partitions come from its GPT, or from its MBR when it has none (the RV2's SD card: primary partitions 1 to 4).
 
 ## Differences from Exec
 

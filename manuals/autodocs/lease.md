@@ -1,6 +1,6 @@
 # lease: device leases
 
-*Checked against V4 step 7.*
+*Checked against V4.*
 
 The calls a driver and its supervisor use, in alphabetical order, with the serial console's input and MSIs, which the device root also governs. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
