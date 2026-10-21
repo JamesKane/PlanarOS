@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** Steps 1 to 3 are done, and step 4 on QEMU and on the CIX's captured tables; its run on the CIX itself is still to do. The four decisions at the end are made, as leaned.
+**Status: in progress (2026-10-20).** Steps 1 to 4 are done. The four decisions at the end are made, as leaned.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -25,7 +25,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 | **1. The kernel calls drivers need** ✅ | A boot bundle of servers, `CreateProcess`, handle passing, timers, device leases, interrupt binding, DMA Areas with quarantine, and the firmware tables as a read-only Area. |
 | **2. hwdb on the host** ✅ | The device graph from the device tree and from ACPI's static tables, quirks as data, match tables, ordering and the "what blocks whom" report. Tested against the captured trees and the CIX dumps. |
 | **3. hwdb as the first server** ✅ | hwdb starts drivers in graph order, supervises and restarts them. `drv.library`. The first drivers are small ones on QEMU, and the kill test starts here. |
-| **4. `acpid`** ✅ (the CIX board run to do) | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
+| **4. `acpid`** ✅ | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
 | **5. Storage** | The `pci` server (ECAM, MSI-X through the ITS), NVMe on QEMU and the CIX, SDHCI on the RV2, the block class, GPT partitions. The queue-depth measurements. |
 | **6. Files and programs** | FAT32 under `dos`, programs loaded from storage, and the boot moved onto each board's own storage. |
 | **7. A shell on the framebuffer** | The firmware framebuffer leased to `display`, a text console on it, and a shell. Then `power` (the K1 PMU, SCMI on the CIX) and native scanout where the exit needs it. |
@@ -155,7 +155,7 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 - **On QEMU first** (edk2's DSDT is small), then on the CIX. This step also does §9.6's count: how many of the CIX's devices need a method run at all.
 - **The exit's "both ways" is checked here:** on QEMU, the same devices from the device tree and from ACPI, compared as `compare-hw` compares the kernel's facts.
 
-**Done on QEMU (2026-10-20).** acpid runs ACPICA in user mode, describes the namespace to hwdb, and hwdb's drivers bind the same devices through it as through the device tree. `make test-all` passes its 10 boots at `V4.3 done`. The run on the CIX board itself is still to do: the board didn't answer on the network or its console.
+**Done (2026-10-20).** acpid runs ACPICA in user mode, describes the namespace to hwdb, and hwdb's drivers bind the same devices through it as through the device tree. `make test-all` passes its 10 boots at `V4.3 done`, and so does the CIX.
 
 - **ACPICA 20260930**, unchanged, in `third_party/acpica`: upstream's `source/include` and nine of `source/components` (commit `e85aa3b`, the files VectraOS-Odin used, byte for byte). `mk/acpica.mk` builds it for each ISA and for the host. `servers/acpid/acplanar.h` stands in for its `acenv.h`.
 - **acpid** (`servers/acpid/`, about 1,450 lines of C and 300 for the host), split so the host can run the same code:
@@ -186,8 +186,14 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 - The firmware's AML has six unresolved references (`^I2C0.UXC*`). FreeBSD's ACPICA reports the same six.
 - With the namespace, the CIX's graph has 54 devices disabled, 16 the kernel's and 178 with no driver. Three of the five PCIe host bridges fail: each shares its ECAM pages with the root complex's own registers (`CIXH2020`), which is step 5's to sort out.
 
+**On the CIX board:**
+- acpid finds the same 271 devices as on the host, in 162 ms. ACPICA reports the same six unresolved references.
+- Its AML asked for four windows. hwdb leased three: `0x5040000`, the I2C controller at `0x4070000`, and `0x6510000`. The kernel refused the fourth, GNVA at `0xfffe0000`, as reserved memory. The statuses that depend on GNVA therefore come from all ones, as on the host.
+- The probe passed. Of 64 device register pages, 58 were leased and 6 refused, and the GIC's page and acpid's stack were refused.
+- Three PCIe bridges fail because they share pages with the root complexes. The other two fail with no registers to lease: the MCFG has no ECAM for them. Nothing is left for the kill test, so it reports nothing to kill.
+
 **Not as planned:**
-- **No run on the CIX board yet:** it didn't answer on the network or on its console. The count above is from its tables on the host, with the firmware's memory reading as all ones.
+- **GNVA stays unread.** Reading it from FreeBSD through `/dev/mem`, to give the host run real values, dropped FreeBSD into its debugger. That makes mapping firmware-reserved memory a real hazard, not just a policy choice (VQ42).
 - **acpid isn't restarted if it dies.** Its `_INI` methods ran once, and nothing asks it for anything after the namespace yet. The CIX's power resources will be the first.
 - **No `_DSD` properties beyond `PRP0001`'s "compatible"**, no `_DEP`, and no pin functions, FixedDMA or I/O ports: they're counted as not sent.
 - **No AML events.** QEMU's GED (`ACPI0013`) and the power button aren't driven.
