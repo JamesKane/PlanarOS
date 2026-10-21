@@ -1,6 +1,8 @@
 /*
  * arch/aarch64/arch.c -- AArch64 at EL1
  */
+#include <planar/syscalls.h>
+
 #include "aarch64.h"
 #include "acpi.h"
 #include "arch.h"
@@ -161,6 +163,33 @@ static bool psci_ready(void)
         conduit_known = true;
     }
     return true;
+}
+
+/* SMCCC 1.1 lets the callee clobber x4-x17; the caller keeps x18 on. */
+int64_t arch_firmware_call(uint32_t fid, uint64_t x[4])
+{
+    register uint64_t x0 __asm__("x0") = fid;
+    register uint64_t x1 __asm__("x1") = x[1];
+    register uint64_t x2 __asm__("x2") = x[2];
+    register uint64_t x3 __asm__("x3") = x[3];
+
+    if (!psci_ready())
+        return ERR_NOSYS;
+    /* The caller's writes to a shared channel reach memory first. */
+    __asm__ volatile("dsb sy" ::: "memory");
+    if (psci_smc)
+        __asm__ volatile("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) :
+                         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+                           "x14", "x15", "x16", "x17", "memory");
+    else
+        __asm__ volatile("hvc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) :
+                         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+                           "x14", "x15", "x16", "x17", "memory");
+    x[0] = x0;
+    x[1] = x1;
+    x[2] = x2;
+    x[3] = x3;
+    return 0;
 }
 
 bool arch_cpu_start(struct cpu *c)

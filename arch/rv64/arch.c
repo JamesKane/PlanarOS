@@ -1,6 +1,8 @@
 /*
  * arch/rv64/arch.c -- RV64 in S-mode under SBI firmware
  */
+#include <planar/syscalls.h>
+
 #include "arch.h"
 #include "cpu.h"
 #include "fdt.h"
@@ -329,4 +331,10 @@ void arch_tlb_count_read(unsigned n, uint64_t counts[ARCH_TLB_EVENTS])
 
     for (unsigned k = 0; k < n && k < tlb[cpu].n; k++)
         counts[k] = read_hpm(tlb[cpu].csr[k]);
+}
+
+/* SBI is the firmware's interface here, and nothing asks for it yet. */
+int64_t arch_firmware_call(uint32_t, uint64_t[4])
+{
+    return ERR_NOSYS;
 }

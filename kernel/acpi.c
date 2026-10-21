@@ -207,6 +207,7 @@ struct quirk {
     const char *oem_id, *oem_table_id, *name;
     unsigned flags;
     struct { uint64_t base, size; } reserved[4];
+    struct { uint64_t base, size; } shared[2];
 };
 
 static const struct quirk quirks[] = {
@@ -220,6 +221,11 @@ static const struct quirk quirks[] = {
             { 0xd0000000, 0x700000 },
             { 0xd0700000, 0x700000 },
             { 0xcde08000, 0x100000 },
+        },
+        /* TF-A's SCMI channel, by SMC (v5-plan step 2): the device tree's
+         * smc_shmem@84380000. ACPI doesn't say; the EFI map reserves it. */
+        .shared = {
+            { 0x84380000, 0x80000 },
         },
     },
 };
@@ -243,6 +249,16 @@ bool acpi_reserved(unsigned index, uint64_t *base, uint64_t *size)
         return false;
     *base = quirk->reserved[index].base;
     *size = quirk->reserved[index].size;
+    return true;
+}
+
+bool acpi_shared(unsigned index, uint64_t *base, uint64_t *size)
+{
+    if (!quirk || index >= sizeof quirk->shared / sizeof quirk->shared[0] ||
+        !quirk->shared[index].size)
+        return false;
+    *base = quirk->shared[index].base;
+    *size = quirk->shared[index].size;
     return true;
 }
 
@@ -594,6 +610,9 @@ void acpi_report(void)
         kprintf(" reserved");
         for (unsigned i = 0; acpi_reserved(i, &base, &size); i++)
             kprintf(" %p+%llx", (void *)base, (unsigned long long)size);
+        for (unsigned i = 0; acpi_shared(i, &base, &size); i++)
+            kprintf("%s %p+%llx", i ? "" : "; shared with the firmware", (void *)base,
+                    (unsigned long long)size);
         kprintf("\n");
     }
 

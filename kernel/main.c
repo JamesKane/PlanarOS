@@ -148,6 +148,8 @@
         kprintf("V4.7 done\n");
         kprintf("V5.1 queue calls skipped: no tasks\n");
         kprintf("V5.1 done\n");
+        kprintf("V5.2 power skipped: no tasks\n");
+        kprintf("V5.2 done\n");
         arch_halt();
     }
     sched_idle();

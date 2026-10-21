@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 2.* How programs do I/O, and how a driver is written.
 
-*Checked against V4.*
+*Checked against V4; chapter 8 against V5 step 2.*
 
 **Differs from the RKM.** The Amiga's devices were libraries in one address space: a program filled an `IORequest` and called `DoIO` or `SendIO`, and the device ran in its own task in the same memory. Planar's drivers are processes, each in its own protection domain (§11). A program reaches one over a connection to the driver's **class port**, and the request is a message: a **class** fixes its layout, as the block class does. There is no `IORequest`, `DoIO`, `SendIO` or `AbortIO`. Synchronous I/O is `DoMsg`; asynchronous is `PutMsg` and waiting for the reply. A class's client library wraps it (`lib/blk`, `con_*` in `dos.library`).
 
@@ -19,7 +19,7 @@ The design is in [docs §9](../../docs/09-hardware-description.md) and [§11](..
 | 5 | [The drivers](05-drivers.md): nvme, sdhci, display, pci, virtio-mmio, the RTCs | Written, V4 |
 | 6 | Timer as a device | **Planned**: a program has `ArmTimer` ([exec](../autodocs/exec.md#execarmtimer)) |
 | 7 | Input (USB keyboards) | **Planned**, V5 (v4-plan decision 1) |
-| 8 | Power and clocks (`power`, SCMI, the K1 PMU) | **Planned**, V5 |
+| 8 | [The power class: `power`, the K1, SCMI](08-power.md) | Written, V5 step 2 |
 | 9 | GPU and NPU queue leases | **Planned**, V5 ([docs §5](../../docs/05-coprocessors.md)) |
 
 Files are the [DOS](../dos/README.md) volume's.

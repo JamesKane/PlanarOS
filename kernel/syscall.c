@@ -289,6 +289,10 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_unshare_call((uint32_t)a[0], a[1], (uint32_t)a[2]);
     case SYS_LIMIT_LEASE_DMA:
         return lease_limit_dma_call((uint32_t)a[0], a[1]);
+    case SYS_SET_LEASE_CALL:
+        return lease_set_call_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_CALL_LEASE:
+        return lease_call_call((uint32_t)a[0], a[1]);
     case SYS_ALLOC_MSI:
         return lease_msi_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2], a[3]);
     default:

@@ -129,7 +129,7 @@
   mmio 0x70f0000+0x10000
   irq 264 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-/_SB_/MBX6 [CIXHA001]: no driver
+/_SB_/MBX6 [CIXHA001]: power, bound 4
   mmio 0x6590000+0x10000
   irq 395 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
@@ -148,8 +148,10 @@
 /_SB_/GCRU [CIXHA018]: disabled
 /_SB_/MAC0 [CIXH7020]: disabled
 /_SB_/MAC1 [CIXH7020]: disabled
-/_SB_/SHM0 [CIXHA004]: no driver
+/_SB_/SHM0 [CIXHA004]: power, bound 5
   mmio 0x6590000+0x80
+  mmio 0x84380000+0x80
+  firmware call 0xc2000001
 /_SB_/SHM1 [CIXHA005]: no driver
   mmio 0x65a0000+0x80
 /_SB_/SCMI [CIXHA006]: no driver
@@ -289,13 +291,13 @@
 /_SB_/SPI1 [CIXH2001]: disabled
 /_SB_/I3C0 [CIXH200C]: disabled
 /_SB_/I3C1 [CIXH200C]: disabled
-/_SB_/PCI1 [PNP0A08]: pci, bound 4
+/_SB_/PCI1 [PNP0A08]: pci, bound 6
   window mem32 0x50000000+0x10000000
   window mem64 0x1400000000+0x400000000
-/_SB_/PCI4 [PNP0A08]: pci, bound 5
+/_SB_/PCI4 [PNP0A08]: pci, bound 7
   window mem32 0x30000000+0x8000000
   window mem64 0x800000000+0x400000000
-/_SB_/RES0 [PNP0C02]: hwdb, bound 6
+/_SB_/RES0 [PNP0C02]: hwdb, bound 8
   mmio 0x20000000+0x10000000
 /_SB_/PRC0 [CIXH2020]: no driver; the same device as /_SB_/PCI0
   mmio 0xa010000+0x10000
@@ -754,4 +756,5 @@
   needs /_SB_/C000/C005 (parent)
 /_SB_/C000/C005/CPUB [ACPI0007]: kernel, a CPU
   needs /_SB_/C000/C005 (parent)
-hwdb: CIXTEK SKY1EDK2: 54 disabled, 17 kernel, 177 no driver, 6 bound, 0 broken
+hwdb: one power for 2 devices sharing 0x6590000+0x10000, 0x84380000+0x1000: MBX6 SHM0
+hwdb: CIXTEK SKY1EDK2: 54 disabled, 17 kernel, 175 no driver, 8 bound, 0 broken

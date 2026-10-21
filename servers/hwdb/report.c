@@ -186,6 +186,13 @@ static void resources(const struct hw_graph *g, const struct hw_node *n, hw_prin
         hw_put_hex(&l, n->dma_limit);
         out(ctx, l.text);
     }
+    if (n->call) {
+        struct hw_line l = { 0 };
+
+        hw_put(&l, "  firmware call ");
+        hw_put_hex(&l, n->call);
+        out(ctx, l.text);
+    }
 }
 
 /* The leases serving more than one device: the pages they shared. */

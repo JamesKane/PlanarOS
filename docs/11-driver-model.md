@@ -113,9 +113,13 @@ The graph logic (insertion, cycles, order, the "what blocks whom" report) is pur
 
 **Proposed:** the hwdb asks `power` to power the node on *before* it grants the MMIO lease. A driver that holds an MMIO lease can rely on the device being powered. Runtime power management (later) must keep that true: before `power` turns a node off, the hwdb suspends the driver's MMIO grant (or the driver gives it back), and touching it then is a fault in the driver's domain, not a bus error that takes the SoC down.
 
+**Built (V5 step 2):** `servers/hwdb/power.c` sends power the clock, reset and power-domain references a unit's nodes make to power's devices. The unit waits in `U_POWERING` and is leased and started only once power answers. Its vote goes after its leases are revoked, so each restart votes again. Power never turns off what was on when it started, so U-Boot's SD and display clocks stay on through the kill test. `drv/power` and its class are in [docs/v5-plan.md](v5-plan.md) step 2.
+
 ### Provider state is per connection
 
 A driver's power votes, clock enables, GPIO pin claims and interrupt subscriptions are held by servers, not by the kernel. P6 only reclaims them if each provider keys that state to the client's connection and releases it on the death notice. **Proposed rule:** every provider server keeps client state per connection and drops it when `ca_Closed` is set. This is "no state spill" (Theseus, S§9) applied across processes. A conformance test kills a driver that holds a power vote and checks the domain goes off.
+
+**Built (V5 step 2):** `drv.library` calls a driver's `gone` with the client's number when its connection goes, and power drops that client's votes there. hwdb's kill test runs `conformance/powervote.c`, which votes for `"gpu"`. The test kills it and checks `"gpu"` goes off, then kills power and checks every driver is voted for again.
 
 ## 11.6 Binding
 

@@ -87,6 +87,7 @@ struct lease {
     uint64_t lent_pages;
     Handle handle;
     uint64_t dma_limit;             /* LimitLeaseDma's; 0: anywhere */
+    uint32_t call;                  /* SetLeaseCall's firmware function; 0: none */
     struct share share[LEASE_SHARES];
     unsigned nshares;
     struct lease *next;
@@ -399,6 +400,17 @@ static bool is_framebuffer(uint64_t base, uint64_t size)
     return base == lo && base + size == hi;
 }
 
+/* Inside memory the board's quirks say the firmware shares with a driver. */
+static bool is_shared(uint64_t base, uint64_t size)
+{
+    uint64_t b, s;
+
+    for (unsigned i = 0; acpi_shared(i, &b, &s); i++)
+        if (base >= b && base + size <= b + s)
+            return true;
+    return false;
+}
+
 int64_t lease_create_call(uint32_t root_h, uint64_t base, uint64_t size, uint64_t irqs,
                           uint32_t nirqs)
 {
@@ -422,7 +434,8 @@ int64_t lease_create_call(uint32_t root_h, uint64_t base, uint64_t size, uint64_
             if (src[j] == src[i])
                 return ERR_BADARG;
     }
-    if ((overlaps_memory(base, size) && !is_framebuffer(base, size)) || devmem_kernel(base, size))
+    if ((overlaps_memory(base, size) && !is_framebuffer(base, size) && !is_shared(base, size)) ||
+        devmem_kernel(base, size))
         return ERR_RIGHTS;
     if (!(l = kmalloc(sizeof *l)))
         return ERR_NOMEM;
@@ -555,7 +568,8 @@ int64_t lease_query_call(uint32_t h, uint64_t info_out)
                                    .li_DmaPages = l->dma_pages,
                                    .li_QuarantinedPages = l->quarantined_pages,
                                    .li_LentPages = l->lent_pages,
-                                   .li_DmaLimit = l->dma_limit, .li_Shares = l->nshares };
+                                   .li_DmaLimit = l->dma_limit, .li_Shares = l->nshares,
+                                   .li_Call = l->call };
     spin_unlock_irqrestore(&lock, was);
     if (!ok)
         return ERR_BADHANDLE;
@@ -721,6 +735,49 @@ int64_t lease_limit_dma_call(uint32_t h, uint64_t limit)
         l->dma_limit = limit;
     spin_unlock_irqrestore(&lock, was);
     return err;
+}
+
+int64_t lease_set_call_call(uint32_t h, uint32_t fid)
+{
+    struct process *p = task_self()->process;
+    struct lease *l;
+    int64_t err = 0;
+
+    unsigned long was = spin_lock_irqsave(&lock);
+    if (!(l = find(h)) || l->owner != p)
+        err = ERR_BADHANDLE;
+    else if (l->state != LEASES_IDLE)
+        err = ERR_BUSY;
+    else
+        l->call = fid;
+    spin_unlock_irqrestore(&lock, was);
+    return err;
+}
+
+/* The call runs unlocked: the firmware may take its time, and the
+ * function is the lease's for as long as it's granted. */
+int64_t lease_call_call(uint32_t h, uint64_t regs)
+{
+    struct process *p = task_self()->process;
+    uint64_t x[4];
+    struct lease *l;
+    uint32_t fid = 0;
+    bool mine;
+    int64_t err;
+
+    unsigned long was = spin_lock_irqsave(&lock);
+    if ((mine = (l = find(h)) && l->grantee == p))
+        fid = l->call;
+    spin_unlock_irqrestore(&lock, was);
+    if (!mine)
+        return ERR_BADHANDLE;
+    if (!fid)
+        return ERR_RIGHTS;
+    if (!arch_copy_from_user(x, regs, sizeof x))
+        return ERR_BADADDR;
+    if ((err = arch_firmware_call(fid, x)) != 0)
+        return err;
+    return arch_copy_to_user(regs, x, sizeof x) ? 0 : ERR_BADADDR;
 }
 
 /* A task handle names a live task, so its process is still there; the

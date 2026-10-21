@@ -60,13 +60,54 @@ hwdb's own tests check `dma-ranges` on a hand-built tree of the K1's shape, and 
 
 ## 2. `power`
 
-- **The CIX's SCMI has two transports.** Clocks (protocol 0x14) and performance (0x13) go to the CIXHA006 agent: shared memory is the first 0x80 bytes of mailbox 6 at `0x6590000`, rung at +0x80 and polled. Power domains (0x11) go to TF-A by SMC `0xc2000001`, with shared memory at `0x84380000`, an address the device tree has and ACPI doesn't (a quirk). Reference: FreeBSD's `sys/arm64/cix/sky1_scmi.c` and `cix_mbox.c`, about 600 lines.
-- **Mailbox 6's page also holds the CPUs' CPPC fastchannel** (`0x659009c`). `power`'s lease must not hand it on.
-- **The G720's five steps** become one `PowerOn(gpu)`: SCMI domain 21; clocks `0x1F` and `0x20`; the power resource `\_SB.GPUP.PPRS._ON` through acpid, which sets RCSU `0x15000218` and runs memory repair; reset `0x16000400` bit 6, pulsed for 20 µs; then Q-channel gating, RCSU `0x218` bit 0. A GPU register read before the last step is an SError, and the board needs a power cycle. RCSU may be read only at `0x218` and `0x304`.
-- **The K1** has a PMU with a domain per block (GPU domain 2, display domain 6), and the CCU's clocks and resets. The GPU's clock and reset are both in APMU `0xcc`. Reference: the vendor kernel's `drivers/soc/ky/pm_domain/x1-pm_domain.c` and `drivers/clk/ky/ccu-ky-x1.c`.
-- **Votes are per connection** (§11.5): a dead driver's go, and a domain with no votes goes off. That is the kill test's check, moved from V4.
-- **Power before lease.** hwdb asks `power` before granting a node's lease, so a driver never sees an unpowered device.
-- **What isn't touched.** The display controllers and xHCI stay as the firmware left them: neither needs SCMI. CPU and DSU performance domains aren't set in V5.
+**Done on QEMU (2026-10-21).** `drv/power` is a driver like the others, with a backend per kind of hardware, and hwdb votes through it before granting a lease. The boards are untried (below).
+
+- **The class** (`planar/devices/power.h`). One port, `power`. `POWER_ON` names a set and a tag of the client's own. A set is either the firmware references of a node (kind, which of power's devices, and the cells) or a name such as `"gpu"`. `POWER_OFF` takes a vote back, and `POWER_QUERY` reads a set from the hardware. A vote turns domains on first, then clocks, then releases resets. It is all or nothing: if one resource fails, the ones it turned on go off again. A resource goes off when its last vote goes, in reverse order, and only if power turned it on: whatever was on when power started is kept. A reference power doesn't drive is left as the firmware set it and counted (`pm_Untouched`); it isn't an error.
+- **Votes are per connection** (§11.5). When a client's connection goes, its votes go. The driver library gained a `gone` callback for this.
+- **Power before lease** (D3, `servers/hwdb/power.c`). A unit whose nodes reference power's devices waits in `U_POWERING` until power answers its vote, and only then are its leases granted. hwdb never waits (D6). The vote goes once the unit is torn down and its leases revoked, so each restart votes again. If power dies, its votes die with it: once it is back, hwdb connects again and votes for every unit it had voted for.
+- **The K1** (`k1.c`), from the vendor's `x1-pm_domain.c`, `ccu-ky-x1.c` and `reset-ky-x1.c`:
+  - Its seven power domains. The display's and audio's are switched by the hardware; the rest go through the software sequence, with the vendor's delays and its 60 ms limit.
+  - The gates of the clocks and resets V5's devices use: SD, display, HDMI, USB3 and the GPU.
+  - It drives only what is in the APMU (`0xd4282800`), so hwdb leases power that one page (`HW_Q_REGS`). The other seven blocks the clock controller lists stay as U-Boot set them; they hold the kernel's watchdog register, the DDR controller and PCIe. PCIe's and the combo PHY's words in the APMU page are dropped from their nodes too, until step 4 has power drive them.
+  - U-Boot's cells: clock numbers are Linux's plus 41, reset numbers are Linux's, and domain numbers are mainline's.
+  - The GPU has no node, so `"gpu"` names its domain, its clock and its reset.
+  - The clock and reset controllers are no longer the firmware's, so SD now waits for power to bind.
+- **The CIX** (`scmi.c`): native SCMI over both of its transports.
+  - Clocks go to the SCP through SHM0 at `0x6590000`, rung at mailbox 6's `+0x80` and polled. Only `0x00`–`0x80` of that page are touched: the rest is the CPPC's and the PCC's.
+  - Power domains go to TF-A by SMC `0xc2000001`, through the channel at `0x84380000`. Only the device tree names it, so a hwdb quirk adds it to SHM0 (`HW_Q_MMIO`), and a kernel quirk lets that reserved memory be leased.
+  - The mailboxes all say `CIXHA001`, so MBX6 is pinned to power by name.
+  - Every channel access is 32 bits wide.
+  - Domain and clock IDs are the vendor tree's. ACPI names none of them, so only named sets reach them: `"gpu"` is domain 21 and `gpu_clk_core` and `gpu_clk_stacks`.
+- **Two kernel calls, 51 and 52.**
+  - `SetLeaseCall(lease, fid)`: the owner, while the lease is idle, names the one firmware function its grantee may call. hwdb takes it from a quirk (`HW_Q_CALL`).
+  - `CallLease(lease, x[4])` makes that call by SMCCC, through the conduit PSCI uses.
+  - `QueryLease` gives the function as `li_Call`.
+  - RISC-V answers `ERR_NOSYS`.
+- **A device with no registers** gets a lease of no ranges (`lease_bare`), and the driver library accepts one.
+- **QEMU's model.** QEMU has nothing to power, so hwdb's test mode adds a node, `planar,power-model`, with no registers, and has the RTC need its domain 1. Under edk2, which keeps the RTC, the display needs it instead. The model's resources are bits in memory. Domain 0 starts on, and domain 3 never comes on, to exercise the error path.
+
+**Tested by** `make power-test` on the host (62 checks):
+- the core on the model: order, shared votes, tags, refusals, a full table, a vote failing half way, a client going, and the firmware's resources kept;
+- the K1 backend on a made-up APMU whose status follows its control bits;
+- the SCMI backend against a made-up agent on both channels. The agent checks each message's header, token and length, and that the words of mailbox 6's page above the doorbell are untouched.
+
+In the system, on every QEMU boot, hwdb's kill test:
+- votes before the RTC's lease (or the display's), and checks that each restart after a death turned on again what the first vote did, so the death took the vote back (9 to 24 restarts a boot);
+- has `conformance/powervote.c` check its refusals, vote for `"gpu"`, and be killed, then checks that `"gpu"` went off;
+- checks that a vote that can't be met is refused;
+- kills power, and checks that every driver is voted for again.
+
+`leaser.c` and `doorbell.c` test `SetLeaseCall`/`CallLease` with PSCI_VERSION.
+
+**Corrected:**
+- The G720's five steps aren't one `PowerOn(gpu)` in power. Only the first two are SCMI's: domain 21, then the clocks `0x1F` and `0x20`. The other three move to step 5, because they need GPU-side registers and power has no lease on those:
+  - the power resource `GPUP.PPRS._ON` sets bits 2–12 of RCSU `0x15000218` and runs memory repair at `0x15000010`–`0x18`;
+  - the reset pulse at `0x16000400` bit 6 (a register it shares with the DDR controller, the GIC and the NoCs: read-modify-write only; vendor Linux holds it 10–20 ms, FreeBSD 20 µs);
+  - the Q-channel enable, bit 0 of RCSU `0x218`.
+- Power never turns off what the firmware left on, and after a restart that includes what the last power turned on. That wastes power and breaks nothing. Linux's `clk_disable_unused` is the opposite policy, and is known to break boards whose consoles or buses nobody claims.
+- The RV2's GPU domain is probably mainline's 1 under U-Boot's numbering, not the vendor kernel's 2. Its clock's number, `0xbd`, is inferred by the plus-41 rule.
+
+**Not yet on the boards.** On the RV2, power takes over the APMU from U-Boot. SD then waits for it, and the GPU's domain is switched on and off by the test. On the CIX, both transports are untried, and so is whether TF-A wants the channel's page in x1 (FreeBSD) or zeros (Linux, which this follows).
 
 ## 3. Native scanout
 

@@ -3,7 +3,7 @@
 # Each line must appear in the transcript, whole. The facts are in
 # README.md; any change here should be one there too.
 planar: ACPI from CIXTEK SKY1EDK2 (RSDP revision 2): APIC CSRT DBG2 FACP GTDT IORT MCFG PCCT PPTT SDEI SSDT SSDT
-planar: ACPI quirks for the CIX P1: the console from the DBG2; reserved 0x00000000d0000000+700000 0x00000000d0700000+700000 0x00000000cde08000+100000
+planar: ACPI quirks for the CIX P1: the console from the DBG2; reserved 0x00000000d0000000+700000 0x00000000d0700000+700000 0x00000000cde08000+100000; shared with the firmware 0x0000000084380000+80000
 planar: ACPI GICv4: GICD 0x000000000e010000, GICR 0x000000000e090000+300000, ITS 0x000000000e050000
 planar: ACPI 12 CPUs, 12 enabled; UID:MPIDR 0:a00 1:b00 2:0 3:100 4:200 5:300 6:400 7:500 8:600 9:700 10:800 11:900
 planar: ACPI PPTT clusters, by UID: 0,1 2,3,4,5 6,7 8,9 10,11

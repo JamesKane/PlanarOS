@@ -1,10 +1,10 @@
 # lease: device leases
 
-*Checked against V4, with V5 step 1's calls (LimitLeaseDma, ShareLease, UnshareLease).*
+*Checked against V4, with V5 step 1's calls (LimitLeaseDma, ShareLease, UnshareLease) and step 2's (CallLease, SetLeaseCall).*
 
 The calls a driver and its supervisor use, in alphabetical order, with the serial console's input and MSIs, which the device root also governs. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
-A **lease** is one device's registers, whole pages of MMIO, and up to 32 (`LEASE_IRQS`) interrupt lines. Only the holder of the **device root** may create one. The device root is a handle the kernel gives the first server, hwdb, as `main`'s second argument (`process_create_root` in `kernel/process.c`). The kernel's self-test gives it to `conformance/leaser.c`, which plays hwdb, and then to hwdb itself (`servers/hwdb/`). A lease is never made over RAM or reserved memory, over the registers the kernel drives itself, over lines the kernel uses, or over another lease.
+A **lease** is one device's registers, whole pages of MMIO, and up to 32 (`LEASE_IRQS`) interrupt lines. Only the holder of the **device root** may create one. The device root is a handle the kernel gives the first server, hwdb, as `main`'s second argument (`process_create_root` in `kernel/process.c`). The kernel's self-test gives it to `conformance/leaser.c`, which plays hwdb, and then to hwdb itself (`servers/hwdb/`). A lease is never made over RAM or reserved memory (but a framebuffer, or memory the firmware shares with a driver: `CreateLease`), over the registers the kernel drives itself, over lines the kernel uses, or over another lease.
 
 The process that creates a lease owns it. It grants the lease to one process at a time, one it created: the driver. The driver maps the registers at their physical address, binds lines to signals, and allocates the device's DMA memory against the lease. The driver doesn't own the lease's handle. It names the lease by the owner's handle value, which the owner passes it, in `CreateProcess`'s `arg` in the tests.
 
@@ -231,6 +231,47 @@ A kernel call.
 
 ---
 
+## lease/CallLease
+
+**NAME**
+CallLease -- make the firmware call a lease allows
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t CallLease(Handle lease, uint64_t x[4]);
+```
+
+**FUNCTION**
+Calls the firmware function that `SetLeaseCall` named for `lease`, by the SMC Calling Convention. The kernel puts the function ID in x0 and `x[1]`, `x[2]` and `x[3]` in x1 to x3, and makes the call through the conduit PSCI uses on this machine (SMC or HVC, from the device tree or the FADT). It then writes x0 to x3 as the firmware left them back into `x`. `x[0]` on the way in is ignored.
+
+The CIX's power server calls it to ring TF-A's SCMI channel for power domains (SMC `0xc2000001`, [Devices ch. 8](../devices/08-power.md)).
+
+A kernel call. The firmware runs with the calling task's CPU until it returns.
+
+**INPUTS**
+- `lease` -- a lease granted to the calling process.
+- `x` -- four 64-bit words: the arguments in `x[1..3]`, the results in `x[0..3]`.
+
+**RESULT**
+0 once the call was made: what the firmware answered is in `x[0]` (SMCCC's `NOT_SUPPORTED` is -1). Or:
+- `ERR_BADHANDLE` -- the calling process isn't the lease's grantee.
+- `ERR_RIGHTS` -- the lease allows no call.
+- `ERR_BADADDR` -- `x` isn't readable and writable.
+- `ERR_NOSYS` -- no conduit: RISC-V, whose firmware is SBI, or no PSCI described.
+
+**NOTES**
+- Only the one function, and only from the grantee: the owner names it, and can't call it.
+- SMCCC lets the firmware change x4 to x17. The kernel saves them; the caller sees only x0 to x3.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[SetLeaseCall](#leasesetleasecall), [QueryLease](#leasequerylease)
+
+---
+
 ## lease/CreateLease
 
 **NAME**
@@ -260,7 +301,7 @@ The lease's handle (positive), or:
 - `ERR_BADHANDLE` -- `root` isn't a device root the calling process owns.
 - `ERR_BADARG` -- `size` is 0 or over 1 GiB; `base` or `size` isn't page-aligned; the range wraps or passes the top of user addresses; `nirqs` is over 32; or a line is 0, 9216 or more, or given twice.
 - `ERR_BADADDR` -- `irqs` isn't readable.
-- `ERR_RIGHTS` -- the range overlaps RAM, reserved memory, or registers the kernel drives itself (the console, the interrupt controller and its ITS, the watchdogs: `kernel/devmem.c`); or a line has a handler in the kernel. One range of memory is allowed: the GOP framebuffer, exactly, page-rounded (`fi_FbBase`, from `MapFirmware`).
+- `ERR_RIGHTS` -- the range overlaps RAM, reserved memory, or registers the kernel drives itself (the console, the interrupt controller and its ITS, the watchdogs: `kernel/devmem.c`); or a line has a handler in the kernel. Two kinds of memory are allowed: the GOP framebuffer, exactly, page-rounded (`fi_FbBase`, from `MapFirmware`); and memory a board's quirk says the firmware shares with a driver, such as the CIX's SCMI channel to TF-A at `0x84380000` (`acpi_shared` in `kernel/acpi.c`).
 - `ERR_EXISTS` -- the range or a line overlaps another lease's.
 - `ERR_NOMEM` -- out of memory, or the system's handle table is full.
 - `ERR_LIMIT` -- the calling process already holds 256 handles.
@@ -568,6 +609,7 @@ Fills in `info` for a lease the calling process owns or holds:
 | `li_LentPages` | Pages of others' Areas its dead grantee mapped, held as well until `RevokeLease` |
 | `li_DmaLimit` | Where its DMA Areas must end (`LimitLeaseDma`); 0 if anywhere |
 | `li_Shares` | Ranges of it the grantee has shared with peers (`ShareLease`) |
+| `li_Call` | The firmware function its grantee may call (`SetLeaseCall`); 0 for none |
 
 A kernel call.
 
@@ -688,6 +730,42 @@ None known.
 
 **SEE ALSO**
 [AllocDmaArea](#leaseallocdmaarea), [GrantLease](#leasegrantlease), [KillProcess](exec.md#execkillprocess)
+
+---
+
+## lease/SetLeaseCall
+
+**NAME**
+SetLeaseCall -- name the one firmware call a lease's grantee may make
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t SetLeaseCall(Handle lease, uint32_t fid);
+```
+
+**FUNCTION**
+From now on, the process `lease` is granted to may make firmware call `fid` with `CallLease`, and no other. Some devices are driven partly by the firmware: the CIX's SCMI power domains are TF-A's, reached by SMC `0xc2000001`. hwdb calls it as it makes such a device's lease, with the function from a board quirk (`HW_Q_CALL`, `servers/hwdb/quirks.c`), and reports it as `firmware call` on the node.
+
+A kernel call.
+
+**INPUTS**
+- `lease` -- a lease the calling process owns, idle.
+- `fid` -- an SMCCC function ID; 0 for none.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- the calling process doesn't own `lease`.
+- `ERR_BUSY` -- the lease is granted or stopping.
+
+**NOTES**
+- The kernel doesn't check what the function does. A function ID is as strong as the lease, so a quirk names one only when the firmware's whole interface behind it belongs to the device.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CallLease](#leasecalllease), [CreateLease](#leasecreatelease), [QueryLease](#leasequerylease)
 
 ---
 

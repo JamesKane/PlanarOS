@@ -130,6 +130,7 @@ struct hw_node {
     uint16_t unit;                  /* its number among its driver's nodes */
     uint64_t dma_limit;             /* its DMA sees memory where the CPU does only below this
                                      * (dma-ranges, or a quirk); 0: everywhere */
+    uint32_t call;                  /* a firmware call its driver may make (a quirk); 0: none */
 };
 
 constexpr uint16_t HW_NODRV = UINT16_MAX;
@@ -157,6 +158,7 @@ struct hw_lease {
     hw_id nodes[HW_LEASE_NODES];
     uint32_t lines[HW_LEASE_LINES];
     uint64_t dma_limit;             /* the lowest of its nodes'; 0: none (LimitLeaseDma) */
+    uint32_t call;                  /* a node's firmware call (SetLeaseCall); 0: none */
 };
 
 /* --- Match tables (§11.6). --- */
@@ -272,14 +274,17 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_EXCLUDE,       /* never to this driver */
     HW_Q_ALIAS,         /* the device at 'arg' described again: its registers are that one's */
     HW_Q_DMA_LIMIT,     /* its DMA sees memory where the CPU does only below 'arg' */
+    HW_Q_REGS,          /* of its registers, only the blocks at the addresses in 'arg' are its */
+    HW_Q_MMIO,          /* registers the firmware doesn't list: 'arg' is "base size" */
+    HW_Q_CALL,          /* its driver may make the firmware call 'arg' (SetLeaseCall) */
 };
 
 struct hw_quirk {
     const char *board;
     enum hw_quirk_kind kind;
     const char *path;
-    const char *arg;    /* the driver, for PIN and EXCLUDE; the limit, in hex, for
-                         * DMA_LIMIT; else why */
+    const char *arg;    /* the driver, for PIN and EXCLUDE; numbers, in hex, for
+                         * DMA_LIMIT, REGS, MMIO and CALL; else why */
 };
 
 extern const struct hw_quirk hw_quirk_table[];

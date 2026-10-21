@@ -167,17 +167,31 @@ int64_t drv_publish(struct drv *, struct drv_dev *dev, const char *cls)
     return 0;
 }
 
-/* Copy hwdb's answer in and check it: it's hwdb's, but in shared memory. */
+int64_t drv_publish_as(struct drv *, struct drv_dev *dev, const char *name)
+{
+    unsigned n = 0;
+    int64_t h;
+
+    for (; *name && n < sizeof dev->port_name - 1; name++)
+        dev->port_name[n++] = *name;
+    dev->port_name[n] = '\0';
+    if ((h = CreatePort(dev->port_name, SIG_ACCEPT)) < 0)
+        return h;
+    dev->port = (Handle)h;
+    return 0;
+}
+
+/* Copy hwdb's answer in and check it: it's hwdb's, but in shared memory.
+ * A device with no registers (QEMU's power model) has none in a range. */
 static bool take_info(struct drv *d, const struct HwdbMsg *m)
 {
     memcpy(&d->info, m, sizeof d->info);
-    if (d->info.hm_NRanges == 0 || d->info.hm_NRanges > DRV_RANGES ||
-        d->info.hm_NDevices > DRV_DEVICES)
+    if (d->info.hm_NRanges > DRV_RANGES || d->info.hm_NDevices > DRV_DEVICES)
         return false;
     d->ndev = d->info.hm_NDevices;
     for (unsigned i = 0; i < d->ndev; i++) {
         const struct DrvDevice *dd = &d->info.hm_Device[i];
-        bool inside = false;
+        bool inside = dd->dd_Size == 0 && dd->dd_Line == DRV_NOLINE;
 
         d->info.hm_Device[i].dd_Key[sizeof dd->dd_Key - 1] = '\0';
         for (unsigned r = 0; r < d->info.hm_NRanges; r++) {
@@ -364,6 +378,8 @@ static void serve(struct drv *d, unsigned pos)
                 pos++;
                 continue;
             }
+            if (d->ops->gone)
+                d->ops->gone(d, &d->dev[client[c].dev], c);
             if (client[c].pending == 0) {
                 ClosePort(&live[pos]);
                 client[c].used = false;

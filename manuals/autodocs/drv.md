@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V4.*
+*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers).*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 
@@ -139,17 +139,19 @@ drv_main -- a driver's main loop
 
 **FUNCTION**
 Runs a driver, given its token (its `main`'s argument) and its callbacks:
-1. Connects to "hwdb", asks for its devices (`HWDB_BIND`), checks the answer and maps every range of registers where it is.
+1. Connects to "hwdb", asks for its devices (`HWDB_BIND`), checks the answer and maps every range of registers where it is. A device may have no registers (`dd_Size` 0, and no line): QEMU's power model, which hwdb's test mode adds, is leased no range at all.
 2. Calls `bind` for each device: `DRV_OK` to take it, `DRV_DECLINE` (not one this driver drives), or a negative error, which ends the process. Binds each taken device's line, or its MSI-X lines (`dd_NLines`).
 3. Calls `start` for each taken device, to publish its class port (`drv_publish`).
 4. Tells hwdb what it took and published (`HWDB_STARTED`). A driver that took nothing exits 0.
 5. Loops: accepts clients at the class ports (8 a port, `DRV_CLIENTS`), calls `interrupt` when a device's line fires and acknowledges it, and gives each client message to `request` (answered when it returns) or `message` (answered with `drv_reply`). With a `poll` callback that says work is outstanding, it looks again without sleeping. With a `deadline` callback that gives a time, it sleeps until then at most and calls `poll` (a command whose interrupt may not come).
 
+When a client's connection goes, by `CloseConn` or its death, the loop calls `gone` with its number before closing it: what the driver holds for that client is to go (§11.5, provider state per connection). power drops the client's votes there.
+
 It exits when hwdb's connection goes.
 
 **INPUTS**
 - `token` -- `main`'s argument, from hwdb.
-- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`. Any but `name` and `bind` may be `nullptr`.
+- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`. Any but `name` and `bind` may be `nullptr`.
 
 **EXAMPLE**
 From `drv/nvme/main.c`:
@@ -178,16 +180,19 @@ int main(uint64_t token)
 ## drv/drv_publish
 
 **NAME**
-drv_publish -- a device's class port
+drv_publish, drv_publish_as -- a device's class port
 
 **SYNOPSIS**
 ```c
 #include <planar/drv.h>
 int64_t drv_publish(struct drv *d, struct drv_dev *dev, const char *cls);
+int64_t drv_publish_as(struct drv *d, struct drv_dev *dev, const char *name);
 ```
 
 **FUNCTION**
 For Start: creates `dev`'s port, named for its class and unit: "nvme.0", "sd.0", "con.0", "rng.0". The unit is the device's number among its driver's, fixed when hwdb matched it, so a restarted driver republishes the same name.
+
+`drv_publish_as(d, dev, name)` is the same with the name as given, for a server there is one of: power publishes "power".
 
 **RESULT**
 0, or what `CreatePort` gives.

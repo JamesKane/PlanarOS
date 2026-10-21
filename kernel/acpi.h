@@ -105,6 +105,11 @@ bool acpi_pci(unsigned index, struct acpi_pci *p);
  * hands out as free but keeps (the CIX's RSVL carve-outs). */
 bool acpi_reserved(unsigned index, uint64_t *base, uint64_t *size);
 
+/* Shared range 'index': memory the firmware and a driver both use (the
+ * CIX's SMC channel for SCMI). Reserved, like the above, and the one
+ * memory but a framebuffer that a lease may cover (kernel/lease.c). */
+bool acpi_shared(unsigned index, uint64_t *base, uint64_t *size);
+
 /* The board's quirk entry's name, or nullptr if it has none. */
 const char *acpi_quirk_name(void);
 

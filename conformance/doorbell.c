@@ -6,6 +6,8 @@
  * 0-1 of the argument say which.
  *
  * 1, the server: granted the virtio entropy device's lease (bits 32-63;
+ * with the firmware call PSCI_VERSION, which it makes if bit 2 says
+ * there's a conduit;
  * bits 8-11 the device's slot in the page, in 512-byte units), whose DMA
  * limit leaves room below it for one page. It allocates that page, and
  * keeps it to the end (quarantined at its death), and no second. Then it accepts the app's connection and shares the lease's
@@ -83,7 +85,7 @@ static void move(volatile uint64_t *w, uint64_t to)
     WakeAddr(&w[W_STEP], 1);
 }
 
-static int server(Handle l, uint64_t off)
+static int server(Handle l, uint64_t off, bool calls)
 {
     int64_t psig = AllocSignal(-1), csig = AllocSignal(-1), r;
     struct ConnArena *a = nullptr;
@@ -95,6 +97,20 @@ static int server(Handle l, uint64_t off)
     role = "doorbell server";
     CHECK(psig > 0 && csig > 0);
     CHECK(QueryLease(l, &li) == 0 && li.li_State == LEASES_GRANTED && li.li_DmaLimit);
+
+    /* Its firmware call (v5-plan step 2): the leaser allowed PSCI_VERSION,
+     * which is 1.0 or later wherever there's PSCI. */
+    {
+        uint64_t x[4] = { 0, 0, 0, 0 };
+
+        CHECK(li.li_Call == 0x84000000);
+        CHECK(SetLeaseCall(l, 0) == ERR_BADHANDLE);        /* the grantee isn't the owner */
+        CHECK(CallLease(l, (uint64_t *)8) == ERR_BADADDR);
+        if (calls)
+            CHECK(CallLease(l, x) == 0 && x[0] >= 0x10000 && x[0] < 0x20000);
+        else
+            CHECK(CallLease(l, x) == ERR_NOSYS);
+    }
 
     /* Room below the limit for one page, and no more. */
     r = AllocDmaArea(l, PAGE, 0, &at);
@@ -181,7 +197,7 @@ int main(uint64_t arg)
 {
     switch (arg & 3) {
     case 1:
-        return server((Handle)(arg >> 32), (arg >> 8 & 0xf) * 512);
+        return server((Handle)(arg >> 32), (arg >> 8 & 0xf) * 512, arg >> 2 & 1);
     case 2:
         return app((Handle)(arg >> 32));
     default:

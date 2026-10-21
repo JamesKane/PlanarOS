@@ -71,6 +71,8 @@ int64_t lease_console_read_call(uint64_t buf, uint32_t len);
 int64_t lease_share_call(uint32_t lease, uint64_t addr, uint64_t size, uint32_t task);
 int64_t lease_unshare_call(uint32_t lease, uint64_t addr, uint32_t task);
 int64_t lease_limit_dma_call(uint32_t lease, uint64_t limit);
+int64_t lease_set_call_call(uint32_t lease, uint32_t fid);
+int64_t lease_call_call(uint32_t lease, uint64_t regs);
 int64_t lease_msi_call(uint32_t root, uint32_t device, uint32_t count, uint64_t info_out);
 
 #endif /* KERNEL_LEASE_H */

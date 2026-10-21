@@ -189,6 +189,14 @@ void arch_sync_icache(const void *va, size_t len);
 bool arch_has_nc(void);
 void arch_dcache_flush(const void *va, size_t len);
 
+/*
+ * A call to the firmware by the SMC Calling Convention (v5-plan step 2):
+ * function 'fid' with x[1..3], through the conduit PSCI uses; x[0..3]
+ * are what it returned. ERR_NOSYS where there's none (RISC-V, or no
+ * PSCI), else 0: what the call itself says is in x[0].
+ */
+int64_t arch_firmware_call(uint32_t fid, uint64_t x[4]);
+
 /* Read 64 bits at kernel address 'addr' if that doesn't fault: true and
  * the value, or false. For self-tests and probes. */
 bool arch_probe_read(uint64_t addr, uint64_t *val);

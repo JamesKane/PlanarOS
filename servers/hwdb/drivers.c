@@ -83,14 +83,21 @@ static const struct hw_match sdhci[] = {
     { nullptr, 0 },
 };
 
-/* Step 7: the framebuffer and power. */
+/* Step 7: the framebuffer. */
 static const struct hw_match display[] = {
     { "simple-framebuffer",     HW_GENERIC },
     { nullptr, 0 },
 };
 
-static const struct hw_match power_k1[] = {
+/* V5 step 2: power (drv/power): the K1's power domains and the clock and
+ * reset controllers that share their registers; the CIX's SCMI mailbox 6
+ * and its shared memory; and the model hwdb's test mode adds on QEMU. */
+static const struct hw_match power[] = {
     { "ky,x1-pm-domain",        HW_SPECIFIC },
+    { "ky,x1-ccu",              HW_SPECIFIC },
+    { "ky,x1-reset",            HW_SPECIFIC },
+    { "CIXHA004",               HW_SPECIFIC },  /* SCMI's shared memory, to the SCP */
+    { "planar,power-model",     HW_SPECIFIC },
     { nullptr, 0 },
 };
 
@@ -105,7 +112,7 @@ const struct hw_driver hw_drivers[] = {
     { "nvme",           HW_DRV_PROCESS,     nvme },
     { "sdhci",          HW_DRV_PROCESS,     sdhci },
     { "display",        HW_DRV_PROCESS,     display },
-    { "power-k1",       HW_DRV_PROCESS,     power_k1 },
+    { "power",          HW_DRV_PROCESS,     power },
 };
 
 const unsigned hw_ndrivers = sizeof hw_drivers / sizeof hw_drivers[0];

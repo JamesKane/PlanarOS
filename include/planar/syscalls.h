@@ -58,6 +58,8 @@
 #define SYS_SHARE_LEASE     48
 #define SYS_UNSHARE_LEASE   49
 #define SYS_LIMIT_LEASE_DMA 50
+#define SYS_SET_LEASE_CALL  51
+#define SYS_CALL_LEASE      52
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

@@ -79,6 +79,8 @@ static hw_id blocker(const struct hw_graph *g, const struct span *s, uint32_t i,
     return other;
 }
 
+static void lease_bare(struct hw_graph *g);
+
 void hw_leases(struct hw_graph *g)
 {
     struct hw_arena *a = g->arena;
@@ -217,6 +219,8 @@ void hw_leases(struct hw_graph *g)
             l->nodes[l->nnodes++] = s[i].node;
             if (d->dma_limit && (!l->dma_limit || d->dma_limit < l->dma_limit))
                 l->dma_limit = d->dma_limit;
+            if (d->call)
+                l->call = d->call;
             for (unsigned k = 0; k < d->nres; k++) {
                 const struct hw_res *q = &d->res[k];
                 bool have = false;
@@ -259,6 +263,27 @@ void hw_leases(struct hw_graph *g)
                     l->ranges[l->nranges++] = (struct hw_range){ base, end - base };
             }
         }
+    }
+    lease_bare(g);
+}
+
+/* A device with no registers at all (QEMU's power model, which hwdb's
+ * test mode adds) is leased nothing: its driver gets no ranges. */
+static void lease_bare(struct hw_graph *g)
+{
+    for (hw_id i = 1; i < g->count; i++) {
+        struct hw_node *d = &g->nodes[i];
+        bool regs = false;
+
+        if (!leased(g, d) || d->lease != HW_NOLEASE)
+            continue;
+        for (unsigned k = 0; k < d->nres; k++)
+            regs |= (d->res[k].kind == HW_MMIO || d->res[k].kind == HW_ECAM) && d->res[k].size;
+        if (regs || g->nleases == g->maxleases)
+            continue;
+        g->leases[g->nleases] = (struct hw_lease){ .driver = d->driver, .nnodes = 1, .nodes = { i },
+                                                   .call = d->call };
+        d->lease = (uint16_t)g->nleases++;
     }
 }
 

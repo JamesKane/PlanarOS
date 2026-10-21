@@ -560,7 +560,8 @@ static void test_leases(void)
     hw_leases(&g);
     hw_order_start(&g);
     hw_bind_all(&g);
-    CHECK(g.nleases == 3);
+    CHECK(g.nleases == 4);                  /* c's, which leases nothing */
+    CHECK(g.nodes[c].lease != HW_NOLEASE && g.leases[g.nodes[c].lease].nranges == 0);
     l = &g.leases[g.nodes[a1].lease];
     CHECK(g.nodes[a2].lease == g.nodes[a1].lease && l->nnodes == 2 && l->nranges == 1 &&
           l->ranges[0].base == 0x1000 && l->ranges[0].size == 0x1000 && l->nlines == 2);

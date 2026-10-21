@@ -172,6 +172,8 @@ bool memmap_init(void)
     /* What an ACPI board's quirks say the map gets wrong (kernel/acpi.c). */
     for (unsigned i = 0; acpi_reserved(i, &base, &size); i++)
         add(reserved, &nreserved, base, size);
+    for (unsigned i = 0; acpi_shared(i, &base, &size); i++)
+        add(reserved, &nreserved, base, size);
     /* A framebuffer the firmware left scanning out of RAM (the K1's: U-Boot
      * says nothing of it in its tree): kept from the allocator. */
     if (boot_fb() && !(bi && bi->mmap_size))

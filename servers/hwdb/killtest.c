@@ -49,7 +49,8 @@ constexpr uint64_t Y2020 = 1577836800;
 constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
-enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
+enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_POWER,
+                       T_STOP, T_END };
 
 enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
 
@@ -310,8 +311,8 @@ static void settle(void)
         for (unsigned k = 0; k < ls->nnodes && nclients < CLIENTS; k++) {
             struct client *c = &clients[nclients];
 
-            if (!(u->accepted & 1u << k) || !u->ports[k][0])
-                continue;
+            if (!(u->accepted & 1u << k) || !u->ports[k][0] || hw_streq(u->ports[k], "power"))
+                continue;           /* power's is the power test's (power.c) */
             for (unsigned q = 0; q < sizeof c->port; q++)
                 c->port[q] = u->ports[k][q];
             c->kind = hw_strneq(u->ports[k], "rtc.", 4)                                  ? K_RTC
@@ -327,7 +328,7 @@ static void settle(void)
     }
     if (!nlive) {
         say("hwdb: kill test: no driver here serves a device; nothing to kill");
-        phase = T_STOP;
+        phase = T_POWER;
         return;
     }
     phase = T_BENCH;
@@ -683,7 +684,7 @@ static void drain(void)
         say(l.text);
     }
     step_lines();
-    phase = T_STOP;
+    phase = T_POWER;
 }
 
 static void stop_all(void)
@@ -743,6 +744,10 @@ static void step(void)
     case T_DRAIN:
         drain();
         break;
+    case T_POWER:
+        if (power_test())
+            phase = T_STOP;
+        break;
     case T_STOP:
     case T_END:
         stop_all();
@@ -763,6 +768,7 @@ uint64_t test_deadline(void)
     case T_SHELL:
     case T_RETRY:
     case T_DRAIN:
+    case T_POWER:
         return hwdb.now + 5 * MS;
     default:
         return 0;

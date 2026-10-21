@@ -180,6 +180,10 @@ struct drv_ops {
      * deadline, in case its interrupt doesn't), as CurrentTime() goes; 0
      * if never. The loop sleeps until then at most. */
     uint64_t (*deadline)(struct drv *d);
+    /* Client 'c' went (its connection closed, or it died): what it held
+     * of the driver's is to be let go (§11.5, per-connection state). It
+     * may still have messages unanswered; drv_reply them as before. */
+    void (*gone)(struct drv *d, struct drv_dev *dev, unsigned c);
 };
 
 struct drv {
@@ -204,6 +208,8 @@ bool drv_in_heap(const struct drv *d, unsigned c, uint64_t addr, uint64_t size);
 
 /* For Start: publish 'dev's class port, named class.unit ("rtc.0"). */
 int64_t drv_publish(struct drv *d, struct drv_dev *dev, const char *cls);
+/* The same, named 'name' as it is: a server there is one of ("power"). */
+int64_t drv_publish_as(struct drv *d, struct drv_dev *dev, const char *name);
 
 /* Bind's helpers: the first range's lease, which carries the lines; wait
  * for 'dev's line (or 'mask', or 'ms' milliseconds; 0: no limit),

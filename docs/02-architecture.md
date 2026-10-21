@@ -57,7 +57,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 
 | Server | Role | First board |
 |---|---|---|
-| `power` | Clocks, regulators, resets and power domains, using SCMI (CIX), the RK806 PMIC with the CRU (RK3588), the K1 PMU, or RPMh (Q8B). The hwdb asks `power` to turn a node on before it grants the node's MMIO lease, so a driver never touches an unpowered device (§11.5, proposed). CIX raises SError if anything reads a GPU register too early. | all |
+| `power` | Clocks, regulators, resets and power domains, using SCMI (CIX), the RK806 PMIC with the CRU (RK3588), the K1 PMU, or RPMh (Q8B). The hwdb asks `power` to turn a node on before it grants the node's MMIO lease, so a driver never touches an unpowered device (§11.5; built in V5 step 2 for the K1 and the CIX). CIX raises SError if anything reads a GPU register too early. | all |
 | `dos` + handlers | Namespace and assigns. The FAT32 handler is needed for the EFI system partition. Later a modern native filesystem: journaled or CoW metadata, extents and checksums, but no snapshots or encryption (**VQ14**, **VQ14a**). | RV2 |
 | `blk` drivers | SDHCI, eMMC, NVMe (PCIe), and later UFS. | RV2 / RK3588 |
 | `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. | RV2 (Omega A2 already has flips and a sprite plane) |

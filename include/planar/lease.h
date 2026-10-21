@@ -42,7 +42,7 @@ struct LeaseInfo {
     uint64_t li_LentPages;          /* others' memory its dead grantee mapped, held as well */
     uint64_t li_DmaLimit;           /* its DMA Areas end below this; 0: anywhere */
     uint32_t li_Shares;             /* pages of it the grantee shares with peers */
-    uint32_t li_Pad;
+    uint32_t li_Call;               /* the firmware function it may call (SetLeaseCall); 0: none */
 };
 
 int64_t CreateLease(Handle root, uint64_t base, uint64_t size, const uint32_t *irqs,
@@ -83,6 +83,19 @@ int64_t LimitLeaseDma(Handle lease, uint64_t limit);
 
 int64_t ShareLease(Handle lease, uint64_t address, uint64_t size, Handle task);
 int64_t UnshareLease(Handle lease, uint64_t address, Handle task);
+
+/*
+ * A firmware call that goes with a device (v5-plan step 2): the CIX's
+ * SCMI power domains are TF-A's, reached by SMC 0xc2000001. The owner,
+ * while the lease is idle, names the one function ID its grantee may
+ * call (0: none); hwdb takes it from a board quirk. CallLease makes it
+ * by the SMC Calling Convention, through the conduit PSCI uses, with
+ * x[1..3] as its arguments; x[0..3] are what came back. ERR_RIGHTS if
+ * the lease has no function, ERR_NOSYS where there's no such conduit
+ * (RISC-V). What the firmware answers is in x[0], not the return.
+ */
+int64_t SetLeaseCall(Handle lease, uint32_t fid);
+int64_t CallLease(Handle lease, uint64_t x[4]);
 
 /*
  * The firmware's description, for the device root's holder: the DTB, or

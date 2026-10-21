@@ -1382,6 +1382,9 @@ void selftest_tasks(void *)
     selftest_uncached();
     selftest_shares();
     kprintf("V5.1 done\n");
+    /* hwdb's test said what it saw of power (servers/hwdb/power.c), and
+     * exited 0 only if that held; the firmware calls came with the shares. */
+    kprintf("V5.2 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2637,6 +2640,7 @@ static bool find_virtio_rng(uint64_t *base, uint32_t *irq)
 }
 
 static bool shares_tested;         /* by selftest_leases: there was a device to share */
+static bool calls_work;            /* and a firmware call could be made (CallLease) */
 
 /* Leases (conformance/leaser.c, which drives conformance/virtiorng.c and,
  * for V5 step 1, conformance/doorbell.c). */
@@ -2652,7 +2656,13 @@ void selftest_leases(void)
         kprintf("V4.1 leases skipped: no user programs\n");
         return;
     }
-    arg = (have ? dev / 512 : 0) | (uint64_t)irq << 24 | console_base() / PAGE_SIZE << 34;
+    /* Whether there's a firmware conduit, by asking PSCI's version:
+     * harmless anywhere, and refused where there's none (RISC-V). */
+    uint64_t x[4] = { 0, 0, 0, 0 };
+
+    calls_work = arch_firmware_call(0x84000000, x) == 0;
+    arg = (have ? dev / 512 : 0) | (uint64_t)irq << 24 | console_base() / PAGE_SIZE << 34 |
+          (uint64_t)calls_work << 63;
     task_set_signal(0, SIGF_DEAD);
     if (!(p = process_create_root("leaser", 5, arg, task_self(), SIGF_DEAD)))
         fail("V4.1 leases", "process_create failed");
@@ -2780,9 +2790,17 @@ void selftest_shares(void)
          * tree only, so an ACPI boot has nothing to share. */
         kprintf("V5.1 shares ok: not exercised: no virtio test device here (the device-tree "
                 "boots run it)\n");
+        kprintf("V5.2 firmware calls ok: not exercised: no virtio test device here (the "
+                "device-tree boots run it)\n");
         return;
     }
     kprintf("V5.1 shares ok: a lease's page shared with a connected peer and refused to "
             "others, read through, taken back and shared again, gone with the grantee; "
             "DMA held below the lease's limit\n");
+    if (calls_work)
+        kprintf("V5.2 firmware calls ok: the one function a lease allows (PSCI_VERSION) made by "
+                "its grantee, refused to its owner, set only while the lease is idle\n");
+    else
+        kprintf("V5.2 firmware calls ok: refused, ERR_NOSYS: no firmware conduit here; set only "
+                "by the owner, while the lease is idle\n");
 }

@@ -25,7 +25,6 @@
 #include "server.h"
 
 constexpr int64_t SIG_PORT = 16;        /* a driver at hwdb's port */
-constexpr int64_t SIG_CONN = 17;        /* a driver's connection */
 constexpr int64_t SIG_TIMER = 19;
 constexpr unsigned CONNS = 64;
 constexpr uint64_t ARENA = 4 << 20;
@@ -256,7 +255,7 @@ static struct hw_lease *lease_of(const struct unit *u)
     return &hwdb.g.leases[u - hwdb.units];
 }
 
-static void fail_unit(struct unit *u, const char *why)
+void unit_fail(struct unit *u, const char *why)
 {
     const struct hw_lease *ls = lease_of(u);
 
@@ -273,14 +272,14 @@ bool hwdb_busy(void)
     for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
         const struct unit *u = &hwdb.units[i];
 
-        if (u->state == U_DUE || u->state == U_STARTING ||
+        if (u->state == U_DUE || u->state == U_STARTING || u->state == U_POWERING ||
             (u->state == U_RUNNING && u->accepted == 0))    /* declined all: ending */
             return true;
     }
     return false;
 }
 
-static void start(struct unit *u)
+void unit_launch(struct unit *u)
 {
     const struct hw_lease *ls = lease_of(u);
     int64_t p;
@@ -289,11 +288,11 @@ static void start(struct unit *u)
     p = CreateProcess(unit_driver(u), (uint32_t)(u - hwdb.units) | u->gen << 12, SIG_DEAD,
                       PROCF_HELD);
     if (p == ERR_NOTFOUND) {
-        fail_unit(u, "its program isn't built yet");
+        unit_fail(u, "its program isn't built yet");
         return;
     }
     if (p < 0) {
-        fail_unit(u, "its process couldn't be made");
+        unit_fail(u, "its process couldn't be made");
         return;
     }
     for (unsigned r = 0; r < ls->nranges; r++) {
@@ -306,10 +305,14 @@ static void start(struct unit *u)
                 CloseHandle((Handle)h);
                 h = ERR_BADARG;
             }
+            if (h > 0 && r == 0 && ls->call && SetLeaseCall((Handle)h, ls->call) != 0) {
+                CloseHandle((Handle)h);
+                h = ERR_BADARG;
+            }
         }
         if (h < 0 || GrantLease((Handle)h, (Handle)p) != 0) {
             CloseHandle((Handle)p);
-            fail_unit(u, h < 0 ? "the kernel refused its lease" : "its lease couldn't be granted");
+            unit_fail(u, h < 0 ? "the kernel refused its lease" : "its lease couldn't be granted");
             return;
         }
         u->lease[r] = (Handle)h;
@@ -317,7 +320,7 @@ static void start(struct unit *u)
     u->dma = UINT64_MAX;
     if (StartProcess((Handle)p) != 0) {
         CloseHandle((Handle)p);
-        fail_unit(u, "its process couldn't be started");
+        unit_fail(u, "its process couldn't be started");
         return;
     }
     u->proc = (Handle)p;
@@ -326,6 +329,16 @@ static void start(struct unit *u)
     u->started = hwdb.now;
     u->due = hwdb.now + START_MS * MS;
     u->starts++;
+}
+
+/* Power before lease (D3): a unit whose devices need power's waits for
+ * its vote (power.c), then is launched. */
+static void start(struct unit *u)
+{
+    if (power_needed(u))
+        power_vote(u);
+    else
+        unit_launch(u);
 }
 
 /* Killed running, a driver's DMA Areas are what it allocated in Bind:
@@ -535,13 +548,14 @@ static void died(struct unit *u, const struct ProcessInfo *pi)
     if (!stop(u, quarantined)) {
         /* No stop method: its quarantine stays, and so do its leases. */
         say_unit(u, "no way to stop it, and it had DMA: its memory stays quarantined");
-        fail_unit(u, "it died with DMA, and nothing can stop it");
+        unit_fail(u, "it died with DMA, and nothing can stop it");
         return;
     }
     for (unsigned r = 0; r < ls->nranges; r++)
         if (RevokeLease(u->lease[r]) != 0 || QueryLease(u->lease[r], &li) != 0 ||
             li.li_State != LEASES_IDLE || li.li_QuarantinedPages != 0)
             check_failed(u, "revoking its lease left it held or quarantined");
+    power_release(u);
 
     for (unsigned i = 0; i < ls->nnodes; i++)
         if (hwdb.g.nodes[ls->nodes[i]].state == HW_S_BOUND)
@@ -586,7 +600,7 @@ static void died(struct unit *u, const struct ProcessInfo *pi)
             recent += hwdb.now - u->fail_at[i] < WINDOW_MS * MS;
         if (recent >= FAILS) {
             say_unit(u, "failed 5 times in 10 s: given up");
-            fail_unit(u, "it failed 5 times in 10 s");
+            unit_fail(u, "it failed 5 times in 10 s");
         } else {
             u->state = U_DUE;
             u->due = hwdb.now + (BACKOFF_MS << (recent - 1)) * MS;
@@ -693,6 +707,8 @@ static void started(struct unit *u, const struct HwdbMsg *m)
             hw_unbind(&hwdb.g, ls->nodes[i], HW_S_DECLINED, nullptr);
     }
     u->state = U_RUNNING;
+    if (accepted && hw_streq(unit_driver(u), "power"))
+        power_up();
 }
 
 static void serve(unsigned c)
@@ -701,6 +717,10 @@ static void serve(unsigned c)
 
     if (conn_unit[c] == CONN_ACPID) {
         acpid_serve(&conns[c]);
+        return;
+    }
+    if (conn_unit[c] == CONN_POWER) {
+        power_serve(&conns[c]);
         return;
     }
     while ((m = (struct HwdbMsg *)GetMsgSized(&conns[c], sizeof *m))) {
@@ -747,12 +767,32 @@ static void accept_all(void)
         }
 }
 
+bool server_add_conn(const struct MsgPort *mp, uint32_t mark)
+{
+    if (nconns == CONNS)
+        return false;
+    conn_unit[nconns] = mark;
+    conns[nconns++] = *mp;
+    return true;
+}
+
+struct MsgPort *server_conn(uint32_t mark)
+{
+    for (unsigned c = 0; c < nconns; c++)
+        if (conn_unit[c] == mark)
+            return &conns[c];
+    return nullptr;
+}
+
 /* Each connection's messages; one gone is closed, unless a unit's. */
 static void serve_all(void)
 {
     for (unsigned c = 0; c < nconns;) {
         serve(c);
-        if (PortGone(&conns[c]) && (conn_unit[c] == UINT32_MAX || conn_unit[c] == CONN_ACPID)) {
+        if (PortGone(&conns[c]) && (conn_unit[c] == UINT32_MAX || conn_unit[c] == CONN_ACPID ||
+                                    conn_unit[c] == CONN_POWER)) {
+            if (conn_unit[c] == CONN_POWER)
+                power_down();
             ClosePort(&conns[c]);
             conns[c] = conns[--nconns];
             conn_unit[c] = conn_unit[nconns];
@@ -992,6 +1032,8 @@ int main(uint64_t arg, uint64_t root)
     hwdb.port = (Handle)port;
     settle_acpid();
     smmus();
+    if (hwdb.test)
+        power_model();
     hw_prepare(&hwdb.g);
     hwdb.units = hw_alloc(&hwdb.arena, (hwdb.g.maxleases ? hwdb.g.maxleases : 1) * sizeof *hwdb.units);
     if (hwdb.g.full || !hwdb.units) {

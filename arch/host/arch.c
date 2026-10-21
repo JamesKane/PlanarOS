@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <planar/syscalls.h>
+
 #include "arch.h"
 #include "userimg.h"
 
@@ -223,6 +225,11 @@ bool arch_has_nc(void)
 
 void arch_dcache_flush(const void *, size_t)
 {
+}
+
+int64_t arch_firmware_call(uint32_t, uint64_t[4])
+{
+    return ERR_NOSYS;
 }
 
 /* A host process can't take a fault and carry on. */

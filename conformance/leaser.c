@@ -5,7 +5,8 @@
  * argument. The first says where things are, packed: bits 0-23 a virtio
  * entropy device's registers (in 512-byte units, as virtio-mmio slots
  * are spaced; 0 if there's none), 24-33 its interrupt line, 34-63 the
- * kernel console's registers (in pages).
+ * kernel console's registers (in pages), and bit 63 whether a firmware
+ * call can be made here (the kernel asked PSCI's version).
  *
  * Checks that the firmware's description is there to read (MapFirmware),
  * and readable by a child only once granted to it (GrantFirmware), and that a lease can't be had over memory, over the kernel's own
@@ -14,7 +15,8 @@
  * second driver with DMA outstanding and checks the Areas were
  * quarantined until the device was stopped and the lease revoked.
  * Last (v5-plan step 1), limits the lease's DMA and grants it to
- * conformance/doorbell.c's server, which shares its page with the app.
+ * conformance/doorbell.c's server, which shares its page with the app,
+ * and (step 2) lets it make one firmware call, PSCI_VERSION.
  * Exits 0 if every check passed, otherwise with the number of the
  * first that failed.
  */
@@ -26,6 +28,7 @@
 
 constexpr uint64_t PAGE = 4096;
 constexpr uint64_t MS = 1000000;
+constexpr uint32_t PSCI_VERSION = 0x84000000;
 
 static unsigned step;
 
@@ -64,7 +67,7 @@ static int64_t driver(Handle l, uint64_t mode, int64_t sigbit)
 int main(uint64_t arg, uint64_t root_arg)
 {
     Handle root = (Handle)root_arg;
-    uint64_t slot = (arg & 0xffffff) * 512, console = (arg >> 34) * PAGE;
+    uint64_t slot = (arg & 0xffffff) * 512, console = (arg >> 34 & ((1ULL << 29) - 1)) * PAGE;
     uint64_t dev = slot & ~(PAGE - 1);
     uint32_t irq = (uint32_t)(arg >> 24) & 0x3ff, irqs[LEASE_IRQS + 1] = { irq, irq + 1 };
     uint64_t ram = (uint64_t)&arg & ~(PAGE - 1);
@@ -193,12 +196,24 @@ int main(uint64_t arg, uint64_t root_arg)
     CHECK(LimitLeaseDma(root, PAGE) == ERR_BADHANDLE);
     lowa = AllocArea(PAGE, 0, &low);
     CHECK(lowa > 0);
-    s = CreateProcess("doorbell", 1 | off / 512 << 8 | (uint64_t)l << 32, 24, PROCF_HELD);
+    s = CreateProcess("doorbell", 1 | (arg >> 63) << 2 | off / 512 << 8 | (uint64_t)l << 32, 24,
+                      PROCF_HELD);
     CHECK(s > 0);
     CHECK(LimitLeaseDma((Handle)l, (uint64_t)low + PAGE) == 0);
     CHECK(QueryLease((Handle)l, &li) == 0 && li.li_DmaLimit == (uint64_t)low + PAGE);
+    /* A firmware call that goes with it (step 2): PSCI_VERSION, which
+     * any PSCI answers and nothing minds. */
+    CHECK(SetLeaseCall(root, PSCI_VERSION) == ERR_BADHANDLE);
+    CHECK(SetLeaseCall((Handle)l, PSCI_VERSION) == 0);
+    CHECK(QueryLease((Handle)l, &li) == 0 && li.li_Call == PSCI_VERSION);
     CHECK(GrantLease((Handle)l, (Handle)s) == 0);
     CHECK(LimitLeaseDma((Handle)l, 0) == ERR_BUSY);
+    CHECK(SetLeaseCall((Handle)l, 0) == ERR_BUSY);
+    {
+        uint64_t x[4] = { PSCI_VERSION };
+
+        CHECK(CallLease((Handle)l, x) == ERR_BADHANDLE);   /* the owner isn't the grantee */
+    }
     /* Its app, which reads the device through the shared page, then
      * faults on it once the server has gone: made now, and started once
      * the server has its page, so it can't take that page first. */
@@ -221,6 +236,7 @@ int main(uint64_t arg, uint64_t root_arg)
           li.li_Shares == 0 && li.li_QuarantinedPages == 1);
     CHECK(RevokeLease((Handle)l) == 0);
     CHECK(LimitLeaseDma((Handle)l, 0) == 0);
+    CHECK(SetLeaseCall((Handle)l, 0) == 0);
 
     CHECK(CloseHandle((Handle)l) == 0);
     CHECK(QueryLease((Handle)l, &li) == ERR_BADHANDLE);
