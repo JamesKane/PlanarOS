@@ -28,7 +28,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 | **4. `acpid`** ✅ | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
 | **5. Storage** | The `pci` server (ECAM, MSI-X through the ITS), NVMe on QEMU and the CIX, SDHCI on the RV2, the block class, GPT partitions. The queue-depth measurements. |
 | **6. Files and programs** | FAT32 under `dos`, programs loaded from storage, and the boot moved onto each board's own storage. |
-| **7. A shell on the framebuffer** | The firmware framebuffer leased to `display`, a text console on it, and a shell. Then `power` (the K1 PMU, SCMI on the CIX) and native scanout where the exit needs it. |
+| **7. A shell on the framebuffer** | The firmware framebuffer leased to `display`, a text console on it, and a shell. (`power` moved to V5, with native scanout.) |
 
 ## 1. The kernel calls drivers need ✅
 
@@ -244,8 +244,9 @@ On the CIX every I/O takes its own interrupt even at depth 32, since the SSD com
 
 **Progress (2026-10-20): files and programs from storage work on QEMU and the CIX.** Still to come: the RV2's SD boot partition (with step 5's SDHCI), and the shell's commands (step 7).
 - **FAT32** (`servers/dos/fat.c`): pure C over two sector calls, tested on the host (`make dos-test`) on images `tools/mkdisk.py` formats, and checked after by `fsck_msdos`. Long names are read. A name it makes is 8.3, keeping lower case by the flags Windows uses. Writes go straight to the disk: the FAT, then the data, then the entry. The FSInfo free count is marked unknown at the first write, as the spec allows.
-- **`dos`** (`servers/dos`, `planar/dos.h`) mounts the FAT32 partitions of every block device and serves files by path (`VOLUME:dir/file`), with `SYS:` (the volume holding `EFI/planar`) and `C:` (`SYS:EFI/planar/C`). **A volume is writable only if its label is `PLANAR`** (the test disks), so a board's EFI partition, shared with its other systems' loaders, is only read until writing it is decided.
+- **`dos`** (`servers/dos`, `planar/dos.h`) mounts the FAT32 partitions of every block device and serves files by path (`VOLUME:dir/file`), with `SYS:` (the volume holding `EFI/planar`) and `C:` (`SYS:EFI/planar/C`). Every volume is writable. Until 2026-10-20 only the test disks were, until writing to the CIX's EFI partition (shared with FreeBSD's and Ubuntu's loaders) was agreed: it's a test board.
 - **Programs from storage.** `dos.library`'s loader reads an ELF static PIE (the `.elf` the build already links at 0) into an `AREAF_EXEC` Area. The new call `CreateProcessImage` (43) takes that Area from the parent and maps it in the child, code read and execute. There's no ELF in the kernel.
+- **Written on the CIX** (2026-10-20): `dostest` writes, reads back and removes a 150 KB file under `SYS:EFI/planar/tmp`. FreeBSD's `fsck_msdosfs -n` then finds the volume consistent, and its other systems' loaders untouched. It also warns of an "invalid signature in fsinfo block", but that's FreeBSD wanting `55 AA` at the end of the sector after FSInfo too, an old two-sector form `mkfs.fat` never wrote there; the FSInfo sector itself is valid.
 - **Tested** by `conformance/dostest`, run from hwdb's test mode after the bench. `dos` stays up through the kill test, its devices restarting under it. On QEMU it reads files by short and long names, runs `C:hello` from the disk, and writes, reads back and removes a 150 KB file. On the CIX, `tools/efi-boot.py` installs `C:hello` next to `planar.efi`, and `dostest` reads the SSD's EFI partition and runs it.
 
 - **FAT32** as a `dos` handler, read-write, on the EFI partition and on the RV2's SD boot partition (VQ14).
@@ -256,7 +257,7 @@ On the CIX every I/O takes its own interrupt even at depth 32, since the SSD com
 
 ## 7. A shell on the framebuffer
 
-**Progress (2026-10-20): the CIX boots to a shell on its screen.** Still to come: `power` (SCMI on the CIX, the K1 PMU on the RV2), and the RV2.
+**Progress (2026-10-20): the CIX boots to a shell on its screen.** Still to come: the RV2. **`power` moved to V5** (decided 2026-10-20): nothing in V4's exit needs it, a wrong SCMI request can hang or reset the board, and the GPU and native scanout that need it come in V5. The kill test's check that a dead driver's votes go moves with it.
 - **The framebuffer.** `MapFirmware` gives hwdb the GOP's (1920×1080 on the CIX; QEMU's edk2 boots get one from `-device ramfb`). hwdb adds a `simple-framebuffer` node for it, and the kernel lets that one range of memory be leased. Firmware that makes it of RAM still reports the machine's RAM unchanged: the range counts as reserved.
 - **`display`** (`drv/display`) draws a text console in omega's 8×8 font (doubled on screens 1600 pixels or wider) and serves `con.0`. Each line also goes to the kernel's log, so the console is the screen and the serial line both (decision 1).
 - **Input** comes from the serial console. The device root's holder gives it to one process (`GrantConsole`, 44), which polls it (`ReadConsole`, 45). There's no receive interrupt yet.

@@ -12,10 +12,10 @@ const struct hw_quirk hw_quirk_table[] = {
      * The K1 under its vendor U-Boot (the root says only "ky,x1"): U-Boot
      * sets up the clocks, resets and pins of what it boots from, and
      * leaves them so. V4 drives SD (step 5) before `power` takes these
-     * over (step 7), so until then they count as the firmware's.
+     * over (V5), so until then they count as the firmware's.
      */
-    { "ky,x1", HW_Q_FIRMWARE, "/soc/clock-controller@d4050000", "U-Boot's, until power (V4 step 7)" },
-    { "ky,x1", HW_Q_FIRMWARE, "/soc/reset-controller@d4050000", "U-Boot's, until power (V4 step 7)" },
+    { "ky,x1", HW_Q_FIRMWARE, "/soc/clock-controller@d4050000", "U-Boot's, until power (V5)" },
+    { "ky,x1", HW_Q_FIRMWARE, "/soc/reset-controller@d4050000", "U-Boot's, until power (V5)" },
     { "ky,x1", HW_Q_FIRMWARE, "/soc/pinctrl@d401e000", "U-Boot's pins" },
     /* Its GPIOs: the SD slot's card detect is one, which sdhci does
      * without (it asks the card). */

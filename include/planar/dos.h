@@ -11,10 +11,6 @@
  * One message per call, answered at once (a server copies, so the data
  * is in the connection's heap: dm_Buffer). Files are opened by path and
  * named by the number OPEN gives; a client's files close when it goes.
- *
- * In V4 a volume is writable only if its label is PLANAR (the disks
- * tools/mkdisk.py makes for QEMU): a board's own EFI partition, shared
- * with its other systems' loaders, is read until writing to it is meant.
  */
 #ifndef PLANAR_DOS_H
 #define PLANAR_DOS_H

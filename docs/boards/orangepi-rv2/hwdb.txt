@@ -56,7 +56,7 @@
   irq 3 on /cpus/cpu@7/interrupt-controller
   irq 7 on /cpus/cpu@7/interrupt-controller
   needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /cpus/cpu@4/interrupt-controller (interrupts); /cpus/cpu@5/interrupt-controller (interrupts); /cpus/cpu@6/interrupt-controller (interrupts); /cpus/cpu@7/interrupt-controller (interrupts); /soc (parent)
-/soc/clock-controller@d4050000 [ky,x1-ccu]: firmware, U-Boot's, until power (V4 step 7)
+/soc/clock-controller@d4050000 [ky,x1-ccu]: firmware, U-Boot's, until power (V5)
   mmio 0xd4050000+0x209c
   mmio 0xd4282800+0x400
   mmio 0xd4015000+0x1000
@@ -66,7 +66,7 @@
   mmio 0xc0000000+0x4280
   mmio 0xf0610000+0x20
   needs /clocks/vctcxo_24 (clock); /clocks/vctcxo_3 (clock); /clocks/vctcxo_1 (clock); /clocks/pll1_vco (clock); /clocks/clk_32k (clock); /clocks/clk_dummy (clock); /soc (parent)
-/soc/reset-controller@d4050000 [ky,x1-reset]: firmware, U-Boot's, until power (V4 step 7)
+/soc/reset-controller@d4050000 [ky,x1-reset]: firmware, U-Boot's, until power (V5)
   mmio 0xd4050000+0x209c
   mmio 0xd4282800+0x400
   mmio 0xd4015000+0x1000

@@ -4,8 +4,8 @@
  * hwdb's test mode starts dos, then this. It lists the volumes and SYS:'s
  * EFI/planar, reads the files tools/mkdisk.py put there (on a board's own
  * disk they aren't, and are skipped), and runs C:hello from the disk,
- * which must exit 7, as the built-in one does. On a writable volume (a
- * test disk) it then makes a directory and a file across many clusters,
+ * which must exit 7, as the built-in one does. If SYS: is writable it
+ * then makes a directory and a file across many clusters in EFI/planar,
  * reads it back, and removes both. Exit 0 if all of it held.
  */
 #include <stddef.h>
@@ -151,7 +151,7 @@ int main(void)
 
     /* Writing, where it may. */
     for (uint32_t i = 0; dos_volume(&d, i, &e) == 0; i++)
-        writable |= e.de_Dir && test_disk;
+        writable |= e.de_Dir;
     if (writable) {
         for (unsigned i = 0; i < sizeof big; i++)
             big[i] = (uint8_t)(i * 13 + (i >> 11));

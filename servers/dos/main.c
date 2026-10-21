@@ -167,8 +167,7 @@ static void mount_all(void)
                     cat(vol->name, sizeof vol->name, "p");
                     cat_dec(vol->name, sizeof vol->name, p);
                 }
-                /* Writable only if it's a test disk (planar/dos.h). */
-                vol->v.read_only = !same(vol->v.label, "planar", 7);
+                vol->v.read_only = false;
                 nvols++;
                 {
                     struct fat_node n;
