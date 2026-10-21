@@ -25,7 +25,7 @@ enum : uint32_t {
 };
 enum : uint32_t { CMD_MEM = 1u << 1, CMD_MASTER = 1u << 2, CMD_NOINTX = 1u << 10 };
 enum : uint32_t { STATUS_CAPS = 1u << 20 };     /* in the COMMAND dword */
-enum : uint8_t { CAP_MSIX = 0x11 };
+enum : uint8_t { CAP_PCIE = 0x10, CAP_MSIX = 0x11 };
 enum : uint32_t { MSIX_ENABLE = 1u << 31, MSIX_MASKALL = 1u << 30 };   /* in its first dword */
 
 struct func {
@@ -178,9 +178,30 @@ static void read_caps(struct func *f)
 
 /* --- The walk. --- */
 
-static void scan(struct drv *d, unsigned bus, unsigned depth)
+/* A PCIe root port's or switch downstream port's link has one device on
+ * it, number 0; the others may answer as aliases of it (PCIe 6.0 §7.3.1). */
+static bool one_device_below(const struct func *f)
 {
-    for (unsigned dev = 0; dev < 32; dev++)
+    uint32_t at = rd(f, CAPS) & 0xfc;
+
+    if (!(rd(f, COMMAND) & STATUS_CAPS))
+        return false;
+    for (unsigned n = 0; at >= 0x40 && n < 48; n++) {
+        uint32_t v = rd(f, at);
+
+        if ((v & 0xff) == CAP_PCIE) {
+            uint32_t type = v >> 20 & 0xf;
+
+            return type == 4 || type == 6;
+        }
+        at = v >> 8 & 0xfc;
+    }
+    return false;
+}
+
+static void scan(struct drv *d, unsigned bus, unsigned depth, bool only0)
+{
+    for (unsigned dev = 0; dev < (only0 ? 1u : 32u); dev++)
         for (unsigned fn = 0; fn < 8; fn++) {
             struct func *f = &funcs[nfuncs];
             uint32_t id, header;
@@ -211,7 +232,7 @@ static void scan(struct drv *d, unsigned bus, unsigned depth)
                 unsigned sec = buses >> 8 & 0xff, sub = buses >> 16 & 0xff;
 
                 if (sec > bus && sec <= sub && sub <= host.ph_LastBus && depth < 8)
-                    scan(d, sec, depth + 1);
+                    scan(d, sec, depth + 1, one_device_below(f));
                 else
                     drv_log(d, nullptr, "a bridge the firmware didn't number: not walked");
             }
@@ -255,7 +276,7 @@ static int bind(struct drv *d, struct drv_dev *dev)
         return -12;
     ecam = (uint64_t)dev->regs;
     nfuncs = assigned = 0;
-    scan(d, host.ph_FirstBus, 0);
+    scan(d, host.ph_FirstBus, 0, false);
 
     for (unsigned k = 0; k < nfuncs; k++) {
         struct func *f = &funcs[k];

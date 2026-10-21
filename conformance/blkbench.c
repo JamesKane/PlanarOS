@@ -3,9 +3,11 @@
  * and 32 (docs §11.8, v4-plan step 5's measurement)
  *
  * hwdb's test mode runs it on each block port before the kill test, the
- * port's unit as its argument ("nvme.N"). It reads the disk's second
- * partition (tools/mkdisk.py: every block holds its own number, which
- * each read is checked against), keeping the queue at its depth with
+ * port's unit as its argument ("nvme.N"). On the test disk it reads the
+ * second partition (tools/mkdisk.py: every block holds its own number,
+ * which each read is checked against); on any other (a board's own) it
+ * reads the whole disk and checks nothing. It never writes. It keeps
+ * the queue at its depth with
  * lib/blk's asynchronous calls and heap buffers: the device writes the
  * connection's heap, which this reads, with no copy (VQ3).
  *
@@ -96,6 +98,15 @@ static void put_frac(struct line *l, uint64_t num, uint64_t den)
     put_dec(l, h % 10);
 }
 
+static uint64_t le64(const uint8_t *p)
+{
+    uint64_t v = 0;
+
+    for (unsigned i = 0; i < 8; i++)
+        v |= (uint64_t)p[i] << 8 * i;
+    return v;
+}
+
 struct io {
     struct BlkMsg *m;
     uint8_t *buf;
@@ -109,6 +120,7 @@ int main(uint64_t unit)
     struct io io[32] = { 0 };
     uint32_t per;
     unsigned wrong = 0;
+    bool check = false;
     int64_t e;
 
     for (unsigned i = 5, k = 0, u = (unsigned)unit;; ) {
@@ -122,9 +134,21 @@ int main(uint64_t unit)
         port[i] = '\0';
         break;
     }
-    if ((e = blk_open(&b, port, SIG_BLK, 1 << 20)) != 0 || (e = blk_partition(&b, 2)) != 0) {
+    if ((e = blk_open(&b, port, SIG_BLK, 1 << 20)) != 0) {
         say_dec("blkbench: no disk to read: error ", (uint64_t)-e);
         return 1;
+    }
+    /* The test disk's second partition, whose blocks hold their own
+     * numbers (tools/mkdisk.py); any other disk is read, never written,
+     * across the whole of it, and its blocks can't be checked. */
+    if (blk_partition(&b, 2) == 0 && b.block_size <= BYTES) {
+        uint8_t *first = blk_alloc(&b, b.block_size);
+
+        check = first && blk_read(&b, 0, 1, first) == 0 && le64(first) == b.first;
+    }
+    if (!check) {
+        b.first = 0;
+        b.blocks = b.dev_blocks;
     }
     per = (uint32_t)(BYTES / b.block_size);
     if (per == 0 || b.blocks < 2 * per) {
@@ -175,13 +199,8 @@ int main(uint64_t unit)
             }
             if (m->bm_Msg.mn_Error || m->bm_Req[0].br_Error)
                 wrong++;
-            for (uint32_t k = 0; k < per; k++) {
-                uint64_t v = 0;
-
-                for (unsigned q = 0; q < 8; q++)
-                    v |= (uint64_t)io[i].buf[k * b.block_size + q] << 8 * q;
-                wrong += v != b.first + io[i].block + k;
-            }
+            for (uint32_t k = 0; k < per && check; k++)
+                wrong += le64(io[i].buf + k * b.block_size) != b.first + io[i].block + k;
             lat[done] = CurrentTime() - io[i].at;
             sum += lat[done];
             done++;
@@ -213,7 +232,7 @@ int main(uint64_t unit)
         put_frac(&l, s1.si_Crossings - s0.si_Crossings, done);
         put(&l, " crossings (");
         put_dec(&l, done);
-        put(&l, " reads)");
+        put(&l, check ? " reads, each checked)" : " reads, unchecked: not the test disk)");
         KLog(l.text);
     }
     blk_close(&b);

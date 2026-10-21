@@ -205,7 +205,22 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 
 ## 5. Storage
 
-**Progress (2026-10-20): QEMU's half is built.** Still to come: the CIX's SSD, SDHCI on the RV2, and the step's exit line.
+**Progress (2026-10-20): QEMU and the CIX are done.** Still to come: SDHCI on the RV2, and the step's exit line.
+
+**On the CIX** (2026-10-20):
+- Both SMMUs were left off and passing DMA through, which hwdb now checks at start (`SMMU_CR0`, `SMMU_GBPA`). That settles this step's *(verify)*. A function behind an SMMU that translates or aborts would wait on it, named.
+- Each root complex is described twice, as PNP0A08 and as CIXH2020, whose `_CRS` repeats the ECAM and the first MiB of the bridge's window, where the firmware put the SSD's BAR. A quirk calls CIXH2020 the bridge's alias (`HW_Q_ALIAS`), so its registers block no lease. hwdb's reservations (PNP0C02) no longer join clusters either: RES0 had put all three bridges in one lease.
+- `pci` walked three bridges. It took only device 0 below each root port, where the others may alias it. The SSD (a Crucial P3, `CT500P3SSD8`, 976,773,168 blocks) bound with MSI-X through the board's ITS.
+- The kill test killed the NVMe driver 12 times under I/O, 4 of them while binding, and passed.
+
+| 4 KiB random reads | Depth 1 | Depth 2 | Depth 8 | Depth 32 |
+|---|---|---|---|---|
+| CIX, Crucial P3: IOPS | 12,141 | 22,797 | 50,263 | 70,013 |
+| CIX: mean / median / 99th latency, µs | 82 / 97 / 105 | 87 / 98 / 149 | 158 / 176 / 317 | 454 / 519 / 872 |
+| CIX: calls, interrupts, crossings per I/O | 8.15, 1.12, 4.04 | 8.01, 1.06, 3.91 | 7.75, 1.03, 3.57 | 7.66, 1.03, 3.44 |
+| QEMU (TCG): calls, interrupts, crossings per I/O | 8.14, 1.12, 4.02 | 5.57, 0.57, 2.02 | 3.94, 0.36, 0.44 | 4.39, 0.65, 0.42 |
+
+On the CIX every I/O takes its own interrupt even at depth 32, since the SSD completes them one at a time and nothing coalesces. So the calls and crossings per I/O barely fall with depth, where QEMU's batched completions halve them. At depth 1 about 4 crossings and 8 calls are the cost of two processes between the application and the device. The next lever is interrupt coalescing (NVMe's feature 08h) and a driver task that drains several completions per wakeup.
 - **`pci`** (`drv/pci`, `servers/hwdb/pci.c`) is an hwdb source. It asks hwdb for the bridge's buses and windows (`HWDB_PCI_HOST`), walks config space, gives BARs the firmware left empty an address in a window (QEMU booted without firmware), and sends each function (`HWDB_PCI_FUNCTION`). hwdb adds a node per function, keyed `pciVVVV,DDDD` then `pciclass,CCSSPP`, and leases, matches and starts it like any other (`hw_add_late`). A BAR outside the bridge's windows is refused.
 - **The ITS** (`arch/aarch64/its.c`) is the kernel's. hwdb asks for a function's LPIs (`AllocMsi`, call 41) by the MSI device ID its bridge's `msi-map` or IORT gives, and leases them as lines. LPIs are edge-triggered, so nothing masks one as it fires.
 - **NVMe** (`drv/nvme`) has an admin queue and one I/O queue, takes MSI-X (or polls without), and serves the block class. hwdb's stop method for it is `CC.EN = 0`.

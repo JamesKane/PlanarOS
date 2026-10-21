@@ -79,7 +79,7 @@ hw_id hw_node_new(struct hw_graph *g, hw_id parent, const char *name)
     n = &g->nodes[g->count];
     *n = (struct hw_node){
         .id = g->count, .parent = parent, .name = name, .enabled = true,
-        .driver = HW_NODRV,
+        .driver = HW_NODRV, .alias = HW_NONE,
     };
     return g->count++;
 }

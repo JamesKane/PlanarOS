@@ -17,7 +17,8 @@
  *   the K1 that's `power`'s job (step 7), by a quirk.
  *
  * A device with registers in two clusters joins them into one lease with
- * two ranges. Its interrupt lines go with it.
+ * two ranges. Its interrupt lines go with it. A node a quirk calls
+ * another's alias (the same device, described twice) takes no part.
  */
 #include "hwdb.h"
 
@@ -102,8 +103,9 @@ void hw_leases(struct hw_graph *g)
         const struct hw_node *d = &g->nodes[i];
 
         first[i] = UINT32_MAX;
-        if (!d->nkeys || !d->enabled || d->state == HW_S_DISABLED)
-            continue;
+        if (!d->nkeys || !d->enabled || d->state == HW_S_DISABLED || d->alias != HW_NONE ||
+            (d->driver != HW_NODRV && g->drivers[d->driver].kind == HW_DRV_HWDB))
+            continue;           /* hwdb's own (buses, reservations) take no registers */
         for (unsigned k = 0; k < d->nres; k++) {
             const struct hw_res *r = &d->res[k];
             uint32_t j = n;
@@ -277,7 +279,9 @@ void hw_lease_late(struct hw_graph *g, hw_id id)
         for (hw_id i = 1; i < g->count; i++) {
             const struct hw_node *o = &g->nodes[i];
 
-            if (i == id || !o->nkeys || !o->enabled || o->state == HW_S_DISABLED)
+            if (i == id || !o->nkeys || !o->enabled || o->state == HW_S_DISABLED ||
+                o->alias != HW_NONE ||
+                (o->driver != HW_NODRV && g->drivers[o->driver].kind == HW_DRV_HWDB))
                 continue;
             for (unsigned q = 0; q < o->nres; q++) {
                 const struct hw_res *x = &o->res[q];

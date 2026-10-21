@@ -203,6 +203,13 @@ int64_t pci_function(const struct unit *u, const struct HwdbMsg *m)
         r->target = b;
         r->supplier = b;
     }
+    /* Its DMA goes through the bridge's IOMMU, which must pass it (server.c). */
+    for (unsigned k = 0; k < g->nodes[b].nrefs; k++)
+        if (g->nodes[b].refs[k].kind == HW_REF_IOMMU && g->nodes[b].refs[k].supplier != HW_NONE &&
+            (r = hw_ref_add(g, id, HW_REF_IOMMU, "iommu", true))) {
+            r->target = g->nodes[b].refs[k].target;
+            r->supplier = g->nodes[b].refs[k].supplier;
+        }
     if (g->full)
         return ERR_NOMEM;
     hw_add_late(g, id);

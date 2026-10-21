@@ -121,6 +121,7 @@ struct hw_node {
     uint16_t driver;                /* index into the match tables; HW_NODRV */
     const char *why;                /* for KERNEL, FIRMWARE and FAILED: what says so */
     const char *pin, *exclude;      /* a quirk's: the driver it must or mustn't have */
+    hw_id alias;                    /* a quirk's: the device this describes again; HW_NONE */
     uint32_t pending;               /* references not yet met */
     uint32_t order;                 /* when it was bound, from 1 */
     uint32_t fdt_props;             /* the device tree: where its properties start */
@@ -266,6 +267,7 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_CONSOLE,       /* the kernel's console, where the firmware doesn't say */
     HW_Q_PIN,           /* bind to this driver only */
     HW_Q_EXCLUDE,       /* never to this driver */
+    HW_Q_ALIAS,         /* the device at 'arg' described again: its registers are that one's */
 };
 
 struct hw_quirk {
@@ -281,6 +283,8 @@ extern const unsigned hw_nquirks;
 /* Apply the table's quirks for g's board; the count applied. A quirk
  * naming a node the graph hasn't got is counted in g->broken. */
 unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n);
+/* (An alias quirk whose either node is missing just doesn't apply: the
+ * namespace's devices aren't there when acpid fails.) */
 
 /* The node at 'path' ("/soc/uart@d4017000"), or HW_NONE. */
 hw_id hw_find_path(const struct hw_graph *g, const char *path, size_t len);

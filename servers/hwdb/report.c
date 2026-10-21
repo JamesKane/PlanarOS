@@ -265,6 +265,10 @@ void hw_report(const struct hw_graph *g, bool detail, hw_print *out, void *ctx)
             hw_put(&l, state_name(n->state));
             break;
         }
+        if (n->alias != HW_NONE) {
+            hw_put(&l, "; the same device as ");
+            hw_put_path(&l, g, n->alias);
+        }
         out(ctx, l.text);
         if (detail && n->state != HW_S_DISABLED) {
             resources(g, n, out, ctx);

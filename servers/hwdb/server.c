@@ -174,6 +174,48 @@ static bool build(void)
     return false;
 }
 
+/*
+ * Each SMMUv3 (Arm IHI 0070, §6.3): nothing drives one in V4, so what
+ * matters is what the firmware left it doing. Disabled (CR0.SMMUEN 0)
+ * with GBPA.ABORT clear, it passes DMA through untranslated: then it's
+ * the firmware's, and the devices behind it may bind. Anything else and
+ * they wait on it, named (pci.c gives each function the reference).
+ */
+static void smmus(void)
+{
+    for (hw_id i = 1; i < hwdb.g.count; i++) {
+        struct hw_node *n = &hwdb.g.nodes[i];
+        struct hw_line l = { 0 };
+        uint32_t cr0, gbpa;
+        int64_t h;
+        void *at;
+
+        if (!hw_has_key(n, "arm,smmu-v3") || !n->enabled || n->nres == 0 ||
+            n->res[0].kind != HW_MMIO || n->res[0].size < 0x1000)
+            continue;
+        if ((h = CreateLease(hwdb.root, n->res[0].base & ~0xfffULL, 0x1000, nullptr, 0)) < 0)
+            continue;
+        if (MapLease((Handle)h, &at) == 0) {
+            volatile uint32_t *r = (volatile uint32_t *)(n->res[0].base & ~0xfffULL);
+
+            cr0 = r[0x20 / 4];
+            gbpa = r[0x44 / 4];
+            hw_put(&l, "hwdb: ");
+            hw_put_path(&l, &hwdb.g, i);
+            if (!(cr0 & 1) && !(gbpa & 1u << 20)) {
+                n->state = HW_S_FIRMWARE;
+                n->why = "left passing DMA through by the firmware";
+                hw_put(&l, ": off, passing DMA through");
+            } else {
+                hw_put(&l, cr0 & 1 ? ": translating" : ": off, aborting DMA");
+                hw_put(&l, "; nothing behind it can bind");
+            }
+            say(l.text);
+        }
+        CloseHandle((Handle)h);
+    }
+}
+
 /* --- Units. --- */
 
 static struct hw_lease *lease_of(const struct unit *u)
@@ -806,6 +848,7 @@ int main(uint64_t arg, uint64_t root)
     }
     hwdb.port = (Handle)port;
     settle_acpid();
+    smmus();
     hw_prepare(&hwdb.g);
     hwdb.units = hw_alloc(&hwdb.arena, (hwdb.g.maxleases ? hwdb.g.maxleases : 1) * sizeof *hwdb.units);
     if (hwdb.g.full || !hwdb.units) {

@@ -109,9 +109,19 @@ static bool plausible(const struct client *c, const struct DrvRequest *r)
  * shows as a reconnect, and a recovery as a good read after one. */
 static uint8_t blocks[CLIENTS][8 * 4096];
 
+static uint64_t le64(const uint8_t *p)
+{
+    uint64_t v = 0;
+
+    for (unsigned i = 0; i < 8; i++)
+        v |= (uint64_t)p[i] << 8 * i;
+    return v;
+}
+
 static void block_client(struct client *c, uint8_t *buf)
 {
     struct blk b;
+    bool check = false;
     uint32_t seen = 0, lost = 0;
     uint64_t r = (uint64_t)buf | 1;     /* its own: the clients run at once */
 
@@ -119,8 +129,23 @@ static void block_client(struct client *c, uint8_t *buf)
     for (uint64_t since = CurrentTime();;) {
         int64_t e = blk_open(&b, c->port, SIG_CLIENT, 256 * 1024);
 
-        if (e == 0 && (e = blk_partition(&b, 2)) == 0 && b.block_size <= 4096)
-            break;
+        if (e == 0 && b.block_size <= 4096 && b.dev_blocks > 16) {
+            /* The test disk's second partition (tools/mkdisk.py), whose
+             * blocks hold their own numbers; any other disk is only read,
+             * anywhere, and nothing it holds can be checked. */
+            int64_t p = blk_partition(&b, 2);
+
+            if (p == ERR_PORT_DIED)
+                e = p;
+            else if (p == 0 && (e = blk_read(&b, 0, 1, buf)) == 0)
+                check = le64(buf) == b.first;
+            if (e == 0 && !check) {
+                b.first = 0;
+                b.blocks = b.dev_blocks;
+            }
+            if (e == 0)
+                break;
+        }
         if (e == 0)
             blk_close(&b);
         if (c->stop || CurrentTime() - since > BLK_GONE_MS * MS) {
@@ -151,13 +176,8 @@ static void block_client(struct client *c, uint8_t *buf)
             continue;
         }
         good = true;
-        for (uint32_t k = 0; k < n; k++) {
-            uint64_t v = 0;
-
-            for (unsigned i = 0; i < 8; i++)
-                v |= (uint64_t)buf[k * b.block_size + i] << 8 * i;
-            good &= v == b.first + at + k;
-        }
+        for (uint32_t k = 0; k < n && check; k++)
+            good &= le64(buf + k * b.block_size) == b.first + at + k;
         if (b.reconnects != seen) {
             c->deaths += b.reconnects - seen;
             lost += b.reconnects - seen;

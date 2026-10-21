@@ -58,6 +58,7 @@ constexpr uint32_t LPIS = IRQ_SOURCES - LPI_BASE;               /* those handed 
 constexpr uint64_t CMDQ_BYTES = 64 * 1024;
 constexpr uint64_t PAGE = 4096;
 constexpr unsigned MAX_DEVICES = 64;
+constexpr uint64_t SPINS = 100000000;           /* reads of a register, at most, waiting for it */
 
 /* Cacheability and shareability, as the BASER-style registers spell them. */
 constexpr uint64_t RAWAWB = 7, NC = 1, INNER_SHAREABLE = 1;
@@ -71,6 +72,7 @@ enum : uint8_t {
 static uintptr_t its;
 static uint64_t its_pa, typer;
 static bool noncoherent;            /* the ITS doesn't snoop: clean what's written */
+static bool stalled;                /* a command wasn't taken: no more are sent */
 static spinlock_t lock;
 
 static uint8_t *prop;               /* the property table */
@@ -118,6 +120,8 @@ static void command(uint64_t d0, uint64_t d1, uint64_t d2, uint64_t d3)
 {
     uint64_t *c = (uint64_t *)((uint8_t *)cmdq + cwriter);
 
+    if (stalled)
+        return;
     c[0] = d0;
     c[1] = d1;
     c[2] = d2;
@@ -126,8 +130,17 @@ static void command(uint64_t d0, uint64_t d1, uint64_t d2, uint64_t d3)
     __asm__ volatile("dsb ishst" : : : "memory");
     cwriter = (cwriter + 32) % CMDQ_BYTES;
     *g64(GITS_CWRITER) = cwriter;
-    while ((*g64(GITS_CREADR) & (CMDQ_BYTES - 1)) != cwriter)
+    for (uint64_t spins = 0; (*g64(GITS_CREADR) & (CMDQ_BYTES - 1)) != cwriter; spins++) {
+        if (*g64(GITS_CREADR) & 1 || spins > SPINS) {
+            /* Stalled on an error, or not reading: no more MSIs from it. */
+            if (!stalled)
+                kprintf("planar: ITS: command %llx not taken (CREADR %llx); no more MSIs\n",
+                        (unsigned long long)d0, (unsigned long long)*g64(GITS_CREADR));
+            stalled = true;
+            return;
+        }
         arch_cpu_relax();
+    }
 }
 
 static void sync_cmd(unsigned cpu)
@@ -232,8 +245,9 @@ static bool setup(void)
         return false;
     itt_esz = (unsigned)(typer >> 4 & 0xf) + 1;
     *g32(GITS_CTLR) = 0;
-    while (!(*g32(GITS_CTLR) & (1u << 31)))     /* Quiescent */
-        arch_cpu_relax();
+    for (uint64_t spins = 0; !(*g32(GITS_CTLR) & (1u << 31)); spins++)    /* Quiescent */
+        if (spins > SPINS)
+            return false;
 
     /* The tables the ITS asks for, by type: devices, and collections
      * unless it holds enough itself (HCC). */
@@ -320,7 +334,7 @@ bool its_msi_alloc(uint32_t dev, uint32_t n, uint32_t *first, uint64_t *doorbell
     uint64_t itt;
     bool ok = false;
 
-    if (!its || n == 0 || n > 32 || !cpu_ready[0])
+    if (!its || stalled || n == 0 || n > 32 || !cpu_ready[0])
         return false;
     while ((1u << bits) < n)
         bits++;
@@ -344,6 +358,8 @@ bool its_msi_alloc(uint32_t dev, uint32_t n, uint32_t *first, uint64_t *doorbell
         command(CMD_MAPTI | (uint64_t)dev << 32, e | (uint64_t)(LPI_BASE + id) << 32, 0, 0);
     }
     sync_cmd(0);
+    if (stalled)
+        goto out;
     devices[ndevices++] = (typeof(devices[0])){ dev, next_lpi, n };
     *first = LPI_BASE + next_lpi;
     *doorbell = its_pa + GITS_TRANSLATER;
