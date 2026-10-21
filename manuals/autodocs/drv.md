@@ -1,0 +1,199 @@
+# drv: drv.library
+
+*Checked against V4 step 7.*
+
+What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
+
+---
+
+## drv/drv_hwdb
+
+**NAME**
+drv_hwdb_msg, drv_hwdb -- a bus driver's messages to hwdb
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+struct HwdbMsg *drv_hwdb_msg(struct drv *d, uint32_t op);
+int64_t drv_hwdb(struct drv *d, struct HwdbMsg *m);
+```
+
+**FUNCTION**
+For a bus driver's Bind, which tells hwdb about what it found. `drv_hwdb_msg` gives the driver's one spare message, cleared, with `op` and the driver's token filled in. `drv_hwdb` sends it and waits for hwdb's answer.
+
+**RESULT**
+`drv_hwdb_msg`: the message, or `nullptr` if there's no heap for it. `drv_hwdb`: 0, or the error hwdb or the connection gave.
+
+**EXAMPLE**
+From `drv/pci/main.c`:
+```c
+struct HwdbMsg *m = drv_hwdb_msg(d, HWDB_PCI_HOST);
+
+m->hm_Host.ph_Device = (uint32_t)(dev - d->dev);
+if (drv_hwdb(d, m) != 0)
+    return -11;
+host = m->hm_Host;
+```
+
+**NOTES**
+The message is reused: copy what you need from an answer before the next call.
+
+**SEE ALSO**
+[Devices ch. 4](../devices/04-pci.md)
+
+---
+
+## drv/drv_in_heap
+
+**NAME**
+drv_in_heap -- is a client's buffer where it may be?
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+bool drv_in_heap(const struct drv *d, unsigned c, uint64_t addr, uint64_t size);
+```
+
+**FUNCTION**
+True if `size` bytes at `addr` lie in client `c`'s connection heap, the only memory of the client's a driver may hand its device. A block driver checks every request's buffer with it.
+
+**BUGS**
+None known.
+
+---
+
+## drv/drv_lease
+
+**NAME**
+drv_lease, drv_wait_irq -- the lease, and waiting for a line
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+Handle drv_lease(const struct drv *d);
+uint64_t drv_wait_irq(struct drv *d, struct drv_dev *dev, uint64_t ms);
+```
+
+**FUNCTION**
+`drv_lease` gives the first range's lease, which carries the lines: the one to give `AllocDmaArea`. `drv_wait_irq` waits for `dev`'s line, at most `ms` milliseconds (0: no limit), and acknowledges it (`AckWaitIrq`). For Bind, before the library's loop runs.
+
+**RESULT**
+`drv_wait_irq`: the signals that came; the line's is signal 32 plus its index.
+
+**BUGS**
+None known.
+
+---
+
+## drv/drv_log
+
+**NAME**
+drv_log -- a line in the kernel's log
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+void drv_log(const struct drv *d, const struct drv_dev *dev, const char *text);
+```
+
+**FUNCTION**
+Logs `text`, after the driver's name and, if `dev` isn't `nullptr`, its unit: "nvme.0: ...".
+
+**BUGS**
+None known.
+
+---
+
+## drv/drv_main
+
+**NAME**
+drv_main -- a driver's main loop
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+[[noreturn]] void drv_main(uint64_t token, const struct drv_ops *ops);
+```
+
+**FUNCTION**
+Runs a driver, given its token (its `main`'s argument) and its callbacks:
+1. Connects to "hwdb", asks for its devices (`HWDB_BIND`), checks the answer and maps every range of registers where it is.
+2. Calls `bind` for each device: `DRV_OK` to take it, `DRV_DECLINE` (not one this driver drives), or a negative error, which ends the process. Binds each taken device's line, or its MSI-X lines (`dd_NLines`).
+3. Calls `start` for each taken device, to publish its class port (`drv_publish`).
+4. Tells hwdb what it took and published (`HWDB_STARTED`). A driver that took nothing exits 0.
+5. Loops: accepts clients at the class ports (8 a port, `DRV_CLIENTS`), calls `interrupt` when a device's line fires and acknowledges it, and gives each client message to `request` (answered when it returns) or `message` (answered with `drv_reply`). With a `poll` callback that says work is outstanding, it looks again without sleeping.
+
+It exits when hwdb's connection goes.
+
+**INPUTS**
+- `token` -- `main`'s argument, from hwdb.
+- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`. Any but `name` and `bind` may be `nullptr`.
+
+**EXAMPLE**
+From `drv/nvme/main.c`:
+```c
+static const struct drv_ops ops = {
+    .name = "nvme", .bind = bind, .start = start, .interrupt = interrupt, .message = message,
+    .message_size = sizeof(struct BlkMsg), .poll = poll,
+};
+
+int main(uint64_t token)
+{
+    drv_main(token, &ops);
+}
+```
+
+**NOTES**
+- Signals 16 to 19 are the library's; line *n* of the lease is signal 32 + *n*.
+- A client that goes with messages unanswered keeps its connection, out of the loop, until the driver has answered them all: its heap holds buffers the device may be using.
+- With `DRVF_CRASH` in hwdb's answer it faults on purpose before Bind: the kill test's give-up case.
+
+**BUGS**
+`struct drv_dev`'s `clients` and `nclients` are left over; the library keeps its clients itself.
+
+**SEE ALSO**
+[Devices ch. 1](../devices/01-drivers.md)
+
+---
+
+## drv/drv_publish
+
+**NAME**
+drv_publish -- a device's class port
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+int64_t drv_publish(struct drv *d, struct drv_dev *dev, const char *cls);
+```
+
+**FUNCTION**
+For Start: creates `dev`'s port, named for its class and unit: "nvme.0", "sd.0", "con.0", "rng.0". The unit is the device's number among its driver's, fixed when hwdb matched it, so a restarted driver republishes the same name.
+
+**RESULT**
+0, or what `CreatePort` gives.
+
+**BUGS**
+None known.
+
+---
+
+## drv/drv_reply
+
+**NAME**
+drv_reply -- answer a client's message
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+void drv_reply(struct drv *d, unsigned c, struct Message *m);
+```
+
+**FUNCTION**
+Answers `m`, which the `message` callback was given from client `c`, now or later. Each message is answered exactly once. When a client that went has had all its messages answered, its connection closes.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[drv_main](#drvdrv_main), [Devices ch. 2](../devices/02-block.md)

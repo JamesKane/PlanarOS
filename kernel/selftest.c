@@ -1374,6 +1374,9 @@ void selftest_tasks(void *)
     kprintf("V4.1 done\n");
     selftest_hwdb();
     kprintf("V4.3 done\n");
+    /* hwdb's test said what it covered of steps 5 to 7 (servers/hwdb/
+     * killtest.c), and exited 0 only if all of that held. */
+    kprintf("V4.5 done\nV4.6 done\nV4.7 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

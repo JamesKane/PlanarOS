@@ -1,8 +1,9 @@
 /*
  * servers/hwdb/drivers.c -- the match tables hwdb knows
  *
- * Until drivers are ELF programs (step 6) and carry their tables in a
- * .note.planar.match section (§11.6), the tables are here. Only the
+ * Until drivers are loaded from storage as ELF programs and carry their
+ * tables in a .note.planar.match section (§11.6), the tables are here:
+ * V4's drivers are all built into the image. Only the
  * drivers V4 plans are listed, each with the step that builds it: none
  * of them is a program yet, so a node "bound" to one says what will bind
  * it, in what order.

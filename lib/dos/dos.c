@@ -336,6 +336,7 @@ void dos_path(const char *cwd, const char *name, char *out, unsigned size)
 void con_open(struct con *c, int64_t sigbit)
 {
     memset(c, 0, sizeof *c);
+    c->sigbit = sigbit;
     if (ConnectPort(&c->mp, "con.0", sigbit, 4, 2 * sizeof(struct DrvRequest)) != 0)
         return;
     if (!(c->m = AllocMsg(&c->mp, sizeof(struct DrvRequest)))) {
@@ -374,9 +375,17 @@ void con_write(struct con *c, const char *text, uint32_t len)
                 len -= n;
                 continue;
             }
-            /* The console went (display restarting): to the log from here. */
+            /* The console went (display restarting): once more on a new
+             * connection, else to the log from here. */
             ClosePort(&c->mp);
             c->open = false;
+            if (!c->retried) {
+                c->retried = true;
+                con_open(c, c->sigbit);
+                c->retried = true;
+                if (c->open)
+                    continue;
+            }
         }
         for (uint32_t i = 0; i < n; i++) {
             if (text[i] == '\n' || c->nline == sizeof c->line - 1) {

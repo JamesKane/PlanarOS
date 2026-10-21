@@ -1,6 +1,6 @@
 # exec: kernel calls
 
-*Checked against V3.*
+*Checked against V4 step 7.*
 
 The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
@@ -72,13 +72,13 @@ A kernel call.
 
 **INPUTS**
 - `size` -- bytes wanted; more than 0.
-- `flags` -- any of `AREAF_CLEAR`, `AREAF_CONTIG`, `AREAF_EXEC`, `AREAF_RWX`, `AREAF_LARGE`. See [Libraries ch. 3](../libraries/03-areas.md#flags).
+- `flags` -- any of `AREAF_CLEAR`, `AREAF_CONTIG`, `AREAF_EXEC`, `AREAF_RWX`, `AREAF_LARGE`, `AREAF_DMA32`. See [Libraries ch. 3](../libraries/03-areas.md#flags). `AREAF_DMA32` places the Area below 4 GiB, for memory a 32-bit DMA engine must reach.
 - `address` -- where to store the Area's address.
 
 **RESULT**
 The Area's handle (positive), or:
 - `ERR_BADARG` -- `size` is 0, or `flags` has an unknown bit.
-- `ERR_NOMEM` -- out of memory, no run of free pages is long enough, or the system's handle table is full. A `size` of more pages than are free fails at once, before anything is allocated.
+- `ERR_NOMEM` -- out of memory, no run of free pages is long enough (below 4 GiB with `AREAF_DMA32`), or the system's handle table is full. A `size` of more pages than are free fails at once, before anything is allocated.
 - `ERR_LIMIT` -- the calling process already holds 256 handles.
 - `ERR_BADADDR` -- `address` isn't writable. The Area has been freed again.
 - `ERR_BADHANDLE` -- another task of the process freed the new handle before this call returned.
@@ -323,7 +323,7 @@ A process never outlives its handle: `CloseHandle` on it kills it, and so does t
 A kernel call.
 
 **INPUTS**
-- `name` -- the program's name, at most 31 characters. Today the built-in programs are the `conformance/` images linked into the kernel.
+- `name` -- the program's name, at most 31 characters. The built-in programs are the boot bundle: the `conformance/` images, the servers (`servers/`) and the drivers (`drv/`), linked into the kernel. A program on a disk is started with `CreateProcessImage` instead.
 - `arg` -- passed to the program's `main` as its first argument.
 - `sigbit` -- the signal bit, 16–63, set in the calling task when the process is dead.
 - `flags` -- 0 or `PROCF_HELD`.
@@ -362,7 +362,74 @@ CloseHandle((Handle)d);
 - A malformed built-in image gives `ERR_NOMEM`.
 
 **SEE ALSO**
-[StartProcess](#execstartprocess), [KillProcess](#execkillprocess), [QueryProcess](#execqueryprocess), [CloseHandle](#execclosehandle), [GrantLease](lease.md#leasegrantlease)
+[CreateProcessImage](#execcreateprocessimage), [StartProcess](#execstartprocess), [KillProcess](#execkillprocess), [QueryProcess](#execqueryprocess), [CloseHandle](#execclosehandle), [GrantLease](lease.md#leasegrantlease)
+
+---
+
+## exec/CreateProcessImage
+
+**NAME**
+CreateProcessImage -- start a program its parent loaded
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t CreateProcessImage(const struct ProcessImage *image, uint64_t arg, int64_t sigbit,
+                           uint32_t flags);
+```
+
+**FUNCTION**
+Starts a new process running a program the caller has laid out in an Area, and returns a handle to it, as `CreateProcess` does for a built-in one. The kernel has no ELF loader (§2.2). `dos.library`'s `dos_run` reads the file and calls this ([DOS ch. 1](../dos/01-files-and-programs.md#programs)).
+
+`image` names the Area and its layout:
+
+| Field | |
+|---|---|
+| `pi_Area` | An Area the caller allocated with `AREAF_EXEC`, owns, and alone maps |
+| `pi_Etext` | Bytes of code and constants at its start: a page multiple |
+| `pi_Entry` | Where the first task starts, as bytes from its start; below `pi_Etext` |
+| `pi_Name` | The process's name, for its log lines (15 characters) |
+
+The Area becomes the new process's. The caller stops mapping it and its handle goes, whatever happens next. In the child the first `pi_Etext` bytes are read and execute, the rest read and write, at the Area's own address (VQ3: the child sees it where the parent filled it).
+
+Otherwise as `CreateProcess`: `arg` is `main`'s first argument, `sigbit` is set in the calling task when the process is dead, and `PROCF_HELD` holds it for `StartProcess`.
+
+A kernel call.
+
+**INPUTS**
+- `image` -- the Area and its layout.
+- `arg` -- passed to the program's `main`.
+- `sigbit` -- the signal bit, 16–63.
+- `flags` -- 0 or `PROCF_HELD`.
+
+**RESULT**
+The process's handle (positive), or:
+- `ERR_BADADDR` -- `image` isn't readable.
+- `ERR_BADARG` -- `sigbit` is out of range, `flags` has an unknown bit, `pi_Etext` isn't a page multiple, or `pi_Entry` isn't below it.
+- `ERR_BADHANDLE` -- `pi_Area` isn't an Area the calling process owns and alone maps, wasn't made with `AREAF_EXEC`, is shorter than `pi_Etext`, is a DMA Area, or another call is using it. The Area is still the caller's.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full.
+- `ERR_LIMIT` -- the calling process already holds 256 handles.
+
+**EXAMPLE**
+From `lib/dos/dos.c`, once the program's segments are read into `image`:
+```c
+pi.pi_Area = (Handle)area;
+pi.pi_Etext = etext;
+pi.pi_Entry = entry;
+e = CreateProcessImage(&pi, arg, sigbit, flags);
+if (e < 0)
+    FreeArea((Handle)area);     /* still ours if the kernel didn't take it */
+```
+
+**NOTES**
+- The kernel makes the code executable and cleans it to the point of unification (`create_from` in `kernel/process.c`); the caller writes it as data.
+- The taking is `area_take` in `kernel/area.c`.
+
+**BUGS**
+After `ERR_NOMEM` the Area is gone too: the kernel took it, then couldn't make the process.
+
+**SEE ALSO**
+[CreateProcess](#execcreateprocess), [AllocArea](#execallocarea), [StartProcess](#execstartprocess), [DOS ch. 1](../dos/01-files-and-programs.md#programs)
 
 ---
 
@@ -866,6 +933,50 @@ None known.
 
 **SEE ALSO**
 [CreateProcess](#execcreateprocess), [KillProcess](#execkillprocess), [ExitProcess](#execexitprocess)
+
+---
+
+## exec/QuerySystem
+
+**NAME**
+QuerySystem -- the whole machine's counts since boot
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t QuerySystem(struct SystemInfo *info);
+```
+
+**FUNCTION**
+Fills in `info` with counts summed over every CPU:
+
+| Field | |
+|---|---|
+| `si_Calls` | Kernel calls made |
+| `si_Interrupts` | Interrupts taken from the controller and the timer |
+| `si_Switches` | Task switches |
+| `si_Crossings` | Of those, from one process's domain to another's |
+| `si_Quarantined` | DMA pages waiting for their device to stop (`RevokeLease`) |
+
+It's for measuring what an operation costs: read it before and after, and divide. `conformance/blkbench.c` reports calls, interrupts and crossings per I/O this way (docs §11.8).
+
+A kernel call.
+
+**INPUTS**
+- `info` -- where to store the counts.
+
+**RESULT**
+0, or `ERR_BADADDR` if `info` isn't writable.
+
+**NOTES**
+- The counts are the whole machine's, so other work shows in them. Measure with the machine otherwise quiet.
+- Each CPU's counts are read without stopping it, so a count taken while others run is approximate.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[QueryProcess](#execqueryprocess)
 
 ---
 

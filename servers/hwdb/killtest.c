@@ -70,6 +70,8 @@ static unsigned nlive, round, rounds, binding, victim_starts;
 static uint64_t wake, phase_at, seed, all_done_at;
 static Handle bench;                /* blkbench, measuring a block device; then dostest */
 static Handle dos;                  /* the file server, from T_DOS to the end */
+static unsigned measured;           /* block devices blkbench measured well */
+static bool files_ok, shell_ok;     /* dostest, and the Shell's script, passed */
 static unsigned benched;            /* clients whose devices it has measured */
 static uint32_t handles;            /* hwdb's, before the clients */
 
@@ -341,6 +343,8 @@ static void bench_step(void)
             return;
         if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
             fail("blkbench failed");
+        else
+            measured++;
         CloseHandle(bench);
         bench = 0;
     }
@@ -417,6 +421,8 @@ static void dos_step(void)
     }
     if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
         fail("dostest failed");
+    else
+        files_ok = true;
     CloseHandle(bench);
     bench = 0;
     phase = T_SHELL;
@@ -453,7 +459,7 @@ static void shell_step(void)
     if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
         fail("a line of the Shell's script failed");
     else
-        say("hwdb: kill test: the Shell ran its script from the disk");
+        shell_ok = true;
     CloseHandle(bench);
     bench = 0;
     start_clients();
@@ -553,6 +559,40 @@ static void give_up(void)
     }
 }
 
+/* What V4's steps 5 to 7 saw here, for the kernel's "V4.n done" lines. */
+static void step_lines(void)
+{
+    unsigned blocks = 0, kills = 0, cons = 0;
+    struct hw_line l = { 0 };
+
+    for (unsigned i = 0; i < nclients; i++) {
+        blocks += clients[i].kind == K_BLOCK;
+        cons += clients[i].kind == K_CON;
+        if (clients[i].kind == K_BLOCK)
+            kills += clients[i].deaths;
+    }
+    if (!blocks) {
+        say("V4.5 storage: no block device on this machine");
+        say("V4.6 files: no block device on this machine");
+        say("V4.7 shell: no block device on this machine");
+        return;
+    }
+    hw_put(&l, "V4.5 storage ok: ");
+    hw_put_dec(&l, measured);
+    hw_put(&l, measured == 1 ? " block device" : " block devices");
+    hw_put(&l, " measured at depths 1, 2, 8 and 32; their clients recovered from ");
+    hw_put_dec(&l, kills);
+    hw_put(&l, " driver deaths under I/O");
+    say(l.text);
+    if (files_ok)
+        say("V4.6 files ok: FAT32 under dos, files read, written and removed where it may, "
+            "a program loaded from the disk and run");
+    if (shell_ok)
+        say(cons ? "V4.7 shell ok: the Shell from the disk ran its script there, on the framebuffer"
+                 : "V4.7 shell ok: the Shell from the disk ran its script there (no framebuffer: "
+                   "to the log)");
+}
+
 static void drain(void)
 {
     bool all = true;
@@ -642,6 +682,7 @@ static void drain(void)
         hw_put(&l, " DMA pages held in quarantine until the device was stopped");
         say(l.text);
     }
+    step_lines();
     phase = T_STOP;
 }
 

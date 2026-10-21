@@ -679,6 +679,8 @@ int64_t lease_msi_call(uint32_t root_h, uint32_t device, uint32_t count, uint64_
         return ERR_BADARG;
     if (!intc() || !intc()->msi_alloc)
         return ERR_NOTFOUND;
+    if (!arch_copy_to_user(info_out, &info, sizeof info))
+        return ERR_BADADDR;         /* before anything's made that it would lose */
     unsigned long was = spin_lock_irqsave(&msi_lock);
     for (unsigned i = 0; i < ngiven; i++)
         if (given[i] == device)

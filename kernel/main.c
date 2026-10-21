@@ -140,6 +140,12 @@
         kprintf("V4.1 done\n");
         kprintf("V4.3 hwdb skipped: no tasks\n");
         kprintf("V4.3 done\n");
+        kprintf("V4.5 storage skipped: no tasks\n");
+        kprintf("V4.5 done\n");
+        kprintf("V4.6 files skipped: no tasks\n");
+        kprintf("V4.6 done\n");
+        kprintf("V4.7 shell skipped: no tasks\n");
+        kprintf("V4.7 done\n");
         arch_halt();
     }
     sched_idle();

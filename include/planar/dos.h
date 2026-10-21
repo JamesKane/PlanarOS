@@ -111,12 +111,16 @@ int64_t dos_run(struct dos *d, const char *path, const char *args, int64_t sigbi
 /*
  * The console (a program's Output(), the Amiga's CON:): text to display's
  * "con.0", which draws it and logs it, and so to the serial console. Where
- * there's no framebuffer, a line at a time to the kernel's log.
+ * there's no framebuffer, a line at a time to the kernel's log. If the
+ * console goes (display restarting) it's reconnected once; after that,
+ * the log.
  */
 struct con {
     struct MsgPort mp;
     void *m;                        /* a DrvRequest */
     bool open;
+    bool retried;                   /* reconnected once after the console went */
+    int64_t sigbit;
     char line[160];                 /* the log's, without a console */
     unsigned nline;
 };

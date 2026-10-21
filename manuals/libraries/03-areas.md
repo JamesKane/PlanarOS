@@ -23,6 +23,7 @@ An **Area** is Planar's unit of memory a program can ask for, give to another pr
 | `AREAF_EXEC` | May be made executable with `ProtectArea`, but never while writable. |
 | `AREAF_RWX` | May be writable and executable at once. Use only when you have to, such as for a JIT that patches code in place. |
 | `AREAF_LARGE` | Aligned to 2 MiB, so the kernel can map it with large pages. |
+| `AREAF_DMA32` | Below 4 GiB, for memory a device with 32-bit DMA addresses must reach (V4: SDHCI's ADMA2). |
 
 The flags for device memory, non-cacheable and write-combining memory, and DMA below 4 GiB are **planned** with drivers ([docs §3.3](../../docs/03-memory.md)).
 

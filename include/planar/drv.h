@@ -154,8 +154,6 @@ struct drv_dev {
     bool line_bound;
     Handle port;                    /* its class port, or 0 */
     char port_name[16];
-    struct MsgPort clients[DRV_CLIENTS];
-    unsigned nclients;
     void *priv;                     /* the driver's */
 };
 
