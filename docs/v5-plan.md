@@ -56,11 +56,11 @@ Steps 2 to 4 are independent of each other and can run in any order. Step 5 need
 
 hwdb's own tests check `dma-ranges` on a hand-built tree of the K1's shape, and the quirk. Mutation-tested: without the limit, or without revoking shares at the grantee's death, the leaser fails.
 
-**Not yet on the boards.** On the RV2 the Svpbmt probe and the DPU's limit are untried, and on the CIX nothing here touches hardware until step 5. Both boards boot this build at the next step that needs them.
+**Not yet on the boards.** On the RV2 the Svpbmt probe works (step 2's run: `V5.1 uncached ok`), and the DPU's limit is untried, and on the CIX nothing here touches hardware until step 5. Both boards boot this build at the next step that needs them.
 
 ## 2. `power`
 
-**Done on QEMU (2026-10-21).** `drv/power` is a driver like the others, with a backend per kind of hardware, and hwdb votes through it before granting a lease. The boards are untried (below).
+**Done on QEMU and the RV2 (2026-10-21); the CIX is untried.** `drv/power` is a driver like the others, with a backend per kind of hardware, and hwdb votes through it before granting a lease.
 
 - **The class** (`planar/devices/power.h`). One port, `power`. `POWER_ON` names a set and a tag of the client's own. A set is either the firmware references of a node (kind, which of power's devices, and the cells) or a name such as `"gpu"`. `POWER_OFF` takes a vote back, and `POWER_QUERY` reads a set from the hardware. A vote turns domains on first, then clocks, then releases resets. It is all or nothing: if one resource fails, the ones it turned on go off again. A resource goes off when its last vote goes, in reverse order, and only if power turned it on: whatever was on when power started is kept. A reference power doesn't drive is left as the firmware set it and counted (`pm_Untouched`); it isn't an error.
 - **Votes are per connection** (§11.5). When a client's connection goes, its votes go. The driver library gained a `gone` callback for this.
@@ -107,7 +107,16 @@ In the system, on every QEMU boot, hwdb's kill test:
 - Power never turns off what the firmware left on, and after a restart that includes what the last power turned on. That wastes power and breaks nothing. Linux's `clk_disable_unused` is the opposite policy, and is known to break boards whose consoles or buses nobody claims.
 - The RV2's GPU domain is probably mainline's 1 under U-Boot's numbering, not the vendor kernel's 2. Its clock's number, `0xbd`, is inferred by the plus-41 rule.
 
-**Not yet on the boards.** On the RV2, power takes over the APMU from U-Boot. SD then waits for it, and the GPU's domain is switched on and off by the test. On the CIX, both transports are untried, and so is whether TF-A wants the channel's page in x1 (FreeBSD) or zeros (Linux, which this follows).
+**On the RV2** (2026-10-21, `make PLATFORM=ky-x1 test`):
+- power bound the APMU page for its three nodes;
+- SD bound behind it and booted the disk, dos and the Shell as before;
+- the kill test went through 24 kills;
+- the client's vote turned the GPU's domain, clock and reset on (the domain's status bit came up within the vendor's limit), and its death turned them off;
+- power was killed and the votes made again.
+
+No restart turned anything on again, as expected: SD's clocks and resets were U-Boot's, so they're kept. The same run confirmed step 1's Svpbmt probe: uncached Areas work on the X60.
+
+**Not yet on the CIX:** both transports are untried, and so is whether TF-A wants the channel's page in x1 (FreeBSD) or zeros (Linux, which this follows).
 
 ## 3. Native scanout
 

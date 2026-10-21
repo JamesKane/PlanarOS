@@ -2788,9 +2788,9 @@ void selftest_shares(void)
     if (!shares_tested) {
         /* As V4.1's leases: the kernel finds its test device in the device
          * tree only, so an ACPI boot has nothing to share. */
-        kprintf("V5.1 shares ok: not exercised: no virtio test device here (the device-tree "
-                "boots run it)\n");
-        kprintf("V5.2 firmware calls ok: not exercised: no virtio test device here (the "
+        kprintf("V5.1 shares ok: not exercised: no virtio test device here (QEMU's "
+                "device-tree boots run it)\n");
+        kprintf("V5.2 firmware calls ok: not exercised: no virtio test device here (QEMU's "
                 "device-tree boots run it)\n");
         return;
     }

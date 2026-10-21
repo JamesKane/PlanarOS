@@ -24,6 +24,9 @@ Taken on 2026-10-20 from the board, for hwdb's tests (docs/v4-plan.md step 2).
 
 ## Facts found running Planar
 
+- **Power** (V5 step 2): every clock, reset and domain V5 drives is in the APMU's page (`0xd4282000`), which `power` leases alone. The GPU's domain (APMU `0xd0`, status `0xf0` bit 0) comes on by the vendor's software sequence and goes off again. SD's clocks and resets are on from U-Boot, so power keeps them.
+- **Svpbmt works** on the X60, though U-Boot's ISA string doesn't list it: the kernel's probe maps uncached memory (V5 step 1).
+
 - **DMA isn't cache-coherent** on the K1 (Linux: `dma-noncoherent` on the SoC bus). The X60 has Zicbom with 64-byte blocks; drivers clean and flush through it.
 - **The PLIC ignores a completion of a disabled source**, as the spec allows: complete before disabling, and again after enabling (the vendor's Linux does).
 - The SD card here is a 32 GB SDHC (61,952,000 blocks), MBR, one FAT32 partition (label `OMEGA`). The eMMC slot is empty.
