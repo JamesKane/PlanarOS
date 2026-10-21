@@ -264,7 +264,44 @@ Core interface operations on `struct FontIFace`:
 
 ---
 
-## 14.7 Open questions
+## 14.7 Implementation notes: third-party C shortcut candidates
+
+Writing `font.library` entirely from scratch from ISO 14496-22 (§14.1 #1)—including the `CFF ` Type 2 charstring VM, `GSUB`/`GPOS` table walkers, and analytical rasteriser—is estimated at **4,000–6,000+ LOC** (comparable to the 10–15k LOC budget of the entire kernel in [§7.1.1](07-language-toolchain.md#711-why-c23-over-newer-systems-languages)).
+
+If Principle 1 (§14.1) is relaxed to allow adapting small, permissive C libraries behind `struct FontIFace` (§14.6) while keeping the zero-copy `Area` model (§14.2), stub boundaries (§14.4), and FreeType/HarfBuzz host oracle (§14.5), three existing C candidates stand out:
+
+| Requirement in `14-font-engine.md` | **`libschrift`** | **`stb_truetype.h`** | **`kb_text_shape.h`** |
+|---|---|---|---|
+| **Approximate size** | **~1,450 LOC** (`schrift.c` + `.h`) | **~3,500 LOC** code (~5k w/ comments) | **~22,000 LOC** (single header) |
+| **License** | ISC | Public Domain (Unlicense) / MIT | MIT / Public Domain |
+| **Zero-copy over RO `Area` (§14.1 #2)** | Yes (reads `const uint8_t *` in place) | Yes (`stbtt_InitFont` points into buffer) | Yes |
+| **`cmap` Format 4 & 12 (§14.3.2)** | Yes (Format 4, 6, 12) | Yes (Format 0, 2, 4, 6, 12, 13) | Yes (shaping only, no rasteriser) |
+| **TrueType outlines (`glyf`/`loca`)** | Yes (simple + composite) | Yes (simple + composite) | No (shaper only) |
+| **OpenType cubic outlines (`CFF `)** | **No** (`.ttf` only) | **Yes** (Type 2 charstring interpreter) | No |
+| **Analytical A8 scanline rasteriser** | **Yes** (trapezoidal coverage + subpixel) | **Yes** (v2 analytical coverage + subpixel) | No |
+| **Kerning (`kern` + `GPOS` Lookup 2)** | `kern` Format 0 only | **Both** (`kern` Format 0 + `GPOS` Pair Adjustment Fmt 1 & 2 via `stbtt_GetGlyphGPOSInfoAdvance`) | Full `GPOS` |
+| **`GSUB` (`liga`, `tnum`, `pnum`)** | No | No | Full `GSUB` |
+| **Bounds checking on malformed fonts** | **High** (checks offsets against `size`; returns `-1`) | **Low** (trusts internal offsets; needs `area_len` bounds checks added) | Medium |
+
+### Candidate breakdown
+
+1. **Option A — `stb_truetype.h` (~3,500 LOC; ~2,200 LOC stripped):**
+   - Already implements ~85% of this document: TrueType `glyf`/`loca`, OpenType `CFF ` Type 2 charstrings (`stbtt__run_charstring`), `cmap` Formats 4 & 12, analytical A8 rasterisation with subpixel offsets (`stbtt_MakeGlyphBitmapSubpixel`), and both `kern` Format 0 and `GPOS` Lookup Type 2 (Format 1 & 2 class-based pair kerning via `stbtt_GetGlyphGPOSInfoAdvance`).
+   - **Gaps to close:** Add ~250 LOC for `GSUB` Lookup Type 1 (`tnum`/`pnum`) and Lookup Type 4 (`liga`); thread `area_len` bounds checks into table/offset reads so Pass 5 fuzzing (§14.5) returns `ERR_BADFONT` cleanly; strip the v1 rasteriser, SDF generator, and SVG helpers to bring it down to ~2,200 LOC.
+2. **Option B — `libschrift` (~1,450 LOC):**
+   - Clean, modern imperative C with explicit bounds checking on every big-endian read (`offset + n <= font->size`), stack/caller scratch buffers, and the same analytical trapezoidal area-coverage algorithm as `stb_truetype` v2 with subpixel positioning.
+   - **Gaps to close:** Supports `.ttf` (`glyf`/`loca`) only—no `.otf` (`CFF `) cubic outlines (acceptable if base fonts ship as `.ttf` per VQ34). Only parses legacy `kern` Format 0, so it must be paired with ~400–500 LOC for `GPOS` Lookup Type 2 (ported from `stbtt_GetGlyphGPOSInfoAdvance` or written from spec) and `GSUB` Lookup Types 1 & 4.
+3. **Option C — `kb_text_shape.h` (~22,000 LOC):**
+   - Single-header C shaper covering `GSUB` and `GPOS`, but exceeds the entire kernel LOC budget because it bundles full Unicode segmentation tables and complex-script state machines that §14.4 deliberately stubs out. Not recommended as a drop-in.
+
+### Recommended hybrid shortcut (~1,900–2,500 LOC total)
+
+- **If `.ttf` only is sufficient (per VQ34):** Base `lib/font/` on **`libschrift`** (~1,450 LOC) for bounds-checked SFNT/table parsing, `cmap`, `glyf`/`loca`, and analytical A8 rasterisation + port **`stbtt_GetGlyphGPOSInfoAdvance`** (~180 LOC, bounds-hardened) for `GPOS` kerning + write ~250 LOC for **`GSUB` Lookup 1 (`tnum`/`pnum`) and Lookup 4 (`liga`)**. Total: **~1,900 LOC**.
+- **If `.otf` (`CFF `) support is required:** Base `lib/font/` on a stripped, bounds-checked **`stb_truetype.h`** (~2,200 LOC) + ~250 LOC for **`GSUB` Lookup 1 & 4**. Total: **~2,500 LOC**.
+
+---
+
+## 14.8 Open questions
 
 - **VQ34 Base system font files (`System Sans` and `System Mono`).**
   Which permissive open-source font files (e.g. OFL-1.1 or Apache-2.0) should ship in the image via `#embed` for V4 (`Shell`) and V6 (`Workbench`)?
