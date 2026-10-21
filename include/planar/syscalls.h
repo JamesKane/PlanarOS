@@ -50,6 +50,7 @@
 #define SYS_GRANT_FIRMWARE  40
 #define SYS_ALLOC_MSI       41
 #define SYS_QUERY_SYSTEM    42
+#define SYS_CREATE_PROCESS_IMAGE 43
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

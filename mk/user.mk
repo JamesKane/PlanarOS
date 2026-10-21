@@ -2,7 +2,7 @@
 # bundle. Included by mk/arch-<arch>.mk after it sets USER_FLAGS.
 #
 # - conformance/NAME.c: a test program, one file each; blk* ones link
-#   the block class's library (lib/blk).
+#   the block class's library (lib/blk), dos* ones dos.library (lib/dos).
 # - servers/NAME/ and drv/NAME/: a server or a driver, every .c in its
 #   directory but host.c and test.c (the host's harnesses). Drivers also
 #   link drv.library (lib/drv), acpid links ACPICA (mk/acpica.mk), and
@@ -26,6 +26,7 @@ USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/s
 	$(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
 USER_DRV     := $(patsubst lib/drv/%.c,$(BUILD)/user/drv-lib/%.o,$(wildcard lib/drv/*.c))
 USER_BLK     := $(BUILD)/user/blk/blk.o
+USER_DOS     := $(BUILD)/user/dos/dos.o
 USER_ACPICA  := $(BUILD)/user/libacpica.a
 ACPICA_OBJS  := $(patsubst third_party/acpica/source/components/%.c,$(BUILD)/user/acpica/%.o,$(ACPICA_SRCS))
 
@@ -42,6 +43,10 @@ $(BUILD)/user/rt/%.o: lib/rt/%.c
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/user/exec/%.o: lib/exec/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/user/dos/%.o: lib/dos/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -78,14 +83,15 @@ $(BUILD)/user/%.o: conformance/%.c
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/user/%.o \
-		$(USER_RT) $(USER_BLK) arch/$(ARCH)/user/user.ld
-	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) -o $@
+		$(USER_RT) $(USER_BLK) $(USER_DOS) arch/$(ARCH)/user/user.ld
+	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) \
+	  $(if $(filter dos%,$*),$(USER_DOS)) -o $@
 
 # A program per directory: $(1) its name, $(2) the directory.
 define user_dir_prog
 $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$$(wildcard $(2)/*.c))) \
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA)) \
-	$(if $(filter servers/hwdb,$(2)),$(USER_BLK))
+	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK))
 $(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) arch/$(ARCH)/user/user.ld
 	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) -o $$@
 -include $$(patsubst %.o,%.d,$$(filter %.o,$$($(1)_OBJS)))

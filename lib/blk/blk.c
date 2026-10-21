@@ -55,7 +55,7 @@ static int64_t info(struct blk *b)
 /* A connection, its messages and its bounce buffer, and what the device
  * is. A driver restarting may not have published its port yet, or may
  * die again as this asks: both are waited out, for up to BLK_GONE_MS. */
-static int64_t connect(struct blk *b)
+static int64_t connect_for(struct blk *b, uint64_t wait_ms)
 {
     uint64_t since = CurrentTime();
     int64_t e;
@@ -76,12 +76,18 @@ static int64_t connect(struct blk *b)
             ClosePort(&b->mp);
             b->open = false;
         }
-        if ((e != ERR_NOTFOUND && e != ERR_PORT_DIED) || CurrentTime() - since > BLK_GONE_MS * MS)
+        if ((e != ERR_NOTFOUND && e != ERR_PORT_DIED) || CurrentTime() - since >= wait_ms * MS)
             return e;
         sleep_ms(1);
     }
     b->bounce = blk_alloc(b, (uint64_t)b->max_blocks * b->block_size);
-    return b->bounce ? 0 : ERR_NOMEM;
+    b->scratch = blk_alloc(b, b->block_size);
+    return b->bounce && b->scratch ? 0 : ERR_NOMEM;
+}
+
+static int64_t connect(struct blk *b)
+{
+    return connect_for(b, BLK_GONE_MS);
 }
 
 static int64_t reconnect(struct blk *b)
@@ -93,7 +99,8 @@ static int64_t reconnect(struct blk *b)
     return connect(b);
 }
 
-int64_t blk_open(struct blk *b, const char *port, int64_t sigbit, uint64_t heap)
+static int64_t open_for(struct blk *b, const char *port, int64_t sigbit, uint64_t heap,
+                        uint64_t wait_ms)
 {
     int64_t e;
     unsigned i = 0;
@@ -103,13 +110,23 @@ int64_t blk_open(struct blk *b, const char *port, int64_t sigbit, uint64_t heap)
         b->port[i] = port[i];
     b->sigbit = sigbit;
     b->heap = heap;
-    if ((e = connect(b)) != 0) {
+    if ((e = connect_for(b, wait_ms)) != 0) {
         blk_close(b);
         return e;
     }
     b->first = 0;
     b->blocks = b->dev_blocks;
     return 0;
+}
+
+int64_t blk_open(struct blk *b, const char *port, int64_t sigbit, uint64_t heap)
+{
+    return open_for(b, port, sigbit, heap, BLK_GONE_MS);
+}
+
+int64_t blk_open_now(struct blk *b, const char *port, int64_t sigbit, uint64_t heap)
+{
+    return open_for(b, port, sigbit, heap, 0);
 }
 
 void blk_close(struct blk *b)
@@ -295,46 +312,83 @@ static uint64_t le(const uint8_t *p, unsigned n)
 
 int64_t blk_partition(struct blk *b, unsigned index)
 {
-    uint64_t bs = b->block_size, entries, first, last;
-    uint32_t n, size, hsize, crc;
-    uint8_t *h, *t;
+    uint64_t first, count;
     int64_t e;
 
     b->first = 0;
     b->blocks = b->dev_blocks;
-    if (index == 0 || !(h = blk_alloc(b, bs)))
-        return ERR_BADARG;
-    if ((e = blk_read(b, 1, 1, h)) != 0)
+    if ((e = blk_partition_range(b, index, &first, &count)) != 0)
         return e;
-    hsize = (uint32_t)le(h + 12, 4);
-    if (le(h, 8) != 0x5452415020494645ULL || hsize < 92 || hsize > bs)
-        return ERR_NOTFOUND;            /* "EFI PART" */
-    crc = (uint32_t)le(h + 16, 4);
-    h[16] = h[17] = h[18] = h[19] = 0;
-    if (crc32(h, hsize, 0) != crc)
-        return ERR_BADARG;
-    entries = le(h + 72, 8);
-    n = (uint32_t)le(h + 80, 4);
-    size = (uint32_t)le(h + 84, 4);
-    crc = (uint32_t)le(h + 88, 4);
-    if (size < GPT_ENTRY_MIN || size > 1024 || (size & (size - 1)) || n == 0 || n > 1024 ||
-        index > n || entries >= b->dev_blocks)
-        return ERR_BADARG;
-    uint64_t tblocks = ((uint64_t)n * size + bs - 1) / bs;
-    if (tblocks > b->dev_blocks - entries || !(t = blk_alloc(b, tblocks * bs)))
-        return ERR_BADARG;
-    if ((e = blk_read(b, entries, (uint32_t)tblocks, t)) != 0)
-        return e;
-    if (crc32(t, (uint64_t)n * size, 0) != crc)
-        return ERR_BADARG;
-    t += (uint64_t)(index - 1) * size;
-    if (le(t, 8) == 0 && le(t + 8, 8) == 0)
-        return ERR_NOTFOUND;            /* an unused entry */
-    first = le(t + 32, 8);
-    last = le(t + 40, 8);
-    if (first > last || last >= b->dev_blocks)
-        return ERR_BADARG;
     b->first = first;
-    b->blocks = last - first + 1;
+    b->blocks = count;
     return 0;
+}
+
+int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first_out, uint64_t *count)
+{
+    uint8_t *blk = b->scratch;          /* one block at a time, the connection's own */
+    uint64_t bs = b->block_size, entries, first = 0, last = 0, was_first = b->first;
+    uint64_t was_blocks = b->blocks, tblocks;
+    uint32_t n, size, hsize, crc, sum = 0;
+    bool found = false;
+    int64_t e;
+
+    if (index == 0 || !blk)
+        return ERR_BADARG;
+    /* The table is read from the whole device, whatever the view. */
+    b->first = 0;
+    b->blocks = b->dev_blocks;
+    if ((e = blk_read(b, 1, 1, blk)) != 0)
+        goto out;
+    e = ERR_NOTFOUND;
+    hsize = (uint32_t)le(blk + 12, 4);
+    if (le(blk, 8) != 0x5452415020494645ULL || hsize < 92 || hsize > bs)
+        goto out;                       /* not "EFI PART" */
+    e = ERR_BADARG;
+    crc = (uint32_t)le(blk + 16, 4);
+    blk[16] = blk[17] = blk[18] = blk[19] = 0;
+    if (crc32(blk, hsize, 0) != crc)
+        goto out;
+    entries = le(blk + 72, 8);
+    n = (uint32_t)le(blk + 80, 4);
+    size = (uint32_t)le(blk + 84, 4);
+    crc = (uint32_t)le(blk + 88, 4);
+    if (size < GPT_ENTRY_MIN || size > bs || (size & (size - 1)) || n == 0 || n > 1024 ||
+        entries >= b->dev_blocks)
+        goto out;
+    tblocks = ((uint64_t)n * size + bs - 1) / bs;
+    if (tblocks > b->dev_blocks - entries)
+        goto out;
+    for (uint64_t k = 0; k < tblocks; k++) {
+        uint64_t in = (uint64_t)n * size - k * bs < bs ? (uint64_t)n * size - k * bs : bs;
+
+        if ((e = blk_read(b, entries + k, 1, blk)) != 0)
+            goto out;
+        sum = crc32(blk, in, sum);
+        for (uint64_t at = 0; at < in; at += size) {
+            const uint8_t *t = blk + at;
+
+            if ((k * bs + at) / size + 1 != index)
+                continue;
+            found = !(le(t, 8) == 0 && le(t + 8, 8) == 0);
+            first = le(t + 32, 8);
+            last = le(t + 40, 8);
+        }
+    }
+    e = ERR_BADARG;
+    if (sum != crc)
+        goto out;
+    e = ERR_NOTFOUND;
+    if (!found)
+        goto out;                       /* past the table, or an unused entry */
+    e = ERR_BADARG;
+    if (first > last || last >= b->dev_blocks)
+        goto out;
+    *first_out = first;
+    *count = last - first + 1;
+    e = 0;
+out:
+    b->first = was_first;
+    b->blocks = was_blocks;
+    return e;
 }

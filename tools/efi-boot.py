@@ -21,6 +21,7 @@ seconds, which needs someone at the power switch. Nothing else may have
 the port open while this runs.
 """
 import argparse
+import posixpath
 import os
 import struct
 import subprocess
@@ -84,11 +85,17 @@ def wait_for_ssh(host: str, seconds: float = 300) -> None:
             time.sleep(5)
 
 
-def install(host: str, image: bytes, bootargs: str) -> None:
+def install(host: str, image: bytes, bootargs: str, files: list) -> None:
     wait_for_ssh(host)
     opt = load_option(hd_node(host), bootargs)
     ssh(host, f"mkdir -p {ESP} && (mount | grep -q ' {ESP} ' || mount_msdosfs {ESP_DEV} {ESP})"
               f" && mkdir -p {ESP}/EFI/planar && cat > {ESP}/EFI/planar/planar.efi", image)
+    # Programs it loads from there (C:, step 6), each under EFI/planar.
+    for src, dst in files:
+        with open(src, "rb") as f:
+            data = f.read()
+        d = posixpath.dirname(dst)
+        ssh(host, f"mkdir -p {ESP}/EFI/planar/{d} && cat > {ESP}/EFI/planar/{dst}", data)
     # efivar -w takes the value on stdin (its -f isn't implemented for writes).
     ssh(host, f"efivar -w -t 7 -n {GLOBAL}-{ENTRY} && efibootmgr -n -b {ENTRY[4:]} >/dev/null"
               f" && sync && umount {ESP}", opt)
@@ -101,6 +108,8 @@ def main() -> int:
     ap.add_argument("--port", required=True)
     ap.add_argument("--image", required=True)
     ap.add_argument("--bootargs", default="")
+    ap.add_argument("--file", action="append", default=[],
+                    help="SRC:DST, installed as EFI/planar/DST")
     ap.add_argument("--log", default="build/efi-boot.log")
     ap.add_argument("--quiet", type=float, default=180.0,
                     help="give up after this many seconds without output")
@@ -112,7 +121,8 @@ def main() -> int:
     log = open(args.log, "wb")
     print(f"efi-boot: installing {args.image} on {args.host}, BootNext, rebooting", flush=True)
     try:
-        install(args.host, image, args.bootargs.strip())
+        install(args.host, image, args.bootargs.strip(),
+                [tuple(f.split(":", 1)) for f in args.file])
     except RuntimeError as e:
         print(f"efi-boot: {e}", flush=True)
         return 1

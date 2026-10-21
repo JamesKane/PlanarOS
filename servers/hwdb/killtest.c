@@ -5,7 +5,9 @@
  * has, this:
  *
  * 0. Measures each block device with blkbench (conformance/blkbench.c),
- *    one at a time, while nothing else runs.
+ *    one at a time, while nothing else runs. Then starts dos, the file
+ *    server, and runs dostest against it; dos stays through the kills,
+ *    its devices restarting under it, and is stopped at the end.
  * 1. Starts a client task per class port the drivers published. Each
  *    reads its device over and over, and when its connection dies with
  *    ERR_PORT_DIED, reconnects, as a class library would (§11.9). A
@@ -44,7 +46,7 @@ constexpr uint64_t Y2020 = 1577836800;
 constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
-enum phase : uint8_t { T_SETTLE, T_BENCH, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
+enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
 
 enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK };
 
@@ -63,7 +65,8 @@ static enum phase phase;
 static struct unit *live[64], *victim;
 static unsigned nlive, round, rounds, binding, victim_starts;
 static uint64_t wake, phase_at, seed, all_done_at;
-static Handle bench;                /* blkbench, measuring a block device */
+static Handle bench;                /* blkbench, measuring a block device; then dostest */
+static Handle dos;                  /* the file server, from T_DOS to the end */
 static unsigned benched;            /* clients whose devices it has measured */
 static uint32_t handles;            /* hwdb's, before the clients */
 
@@ -360,6 +363,11 @@ static void bench_step(void)
         return;
     }
 
+    phase = T_DOS;
+}
+
+static void start_clients(void)
+{
     handles = own_handles();
     for (unsigned i = 0; i < nclients; i++)
         if (CreateTask(client, i) < 0)      /* its handle goes when it ends */
@@ -367,6 +375,45 @@ static void bench_step(void)
     rounds = ROUNDS * nlive;
     wake = hwdb.now + 20 * MS;      /* let the clients get going */
     phase = T_ROUNDS;
+}
+
+/* With block devices: dos, and dostest against it. */
+static void dos_step(void)
+{
+    struct ProcessInfo pi;
+    int64_t p;
+    bool any = false;
+
+    for (unsigned i = 0; i < nclients; i++)
+        any |= clients[i].kind == K_BLOCK;
+    if (!any) {
+        start_clients();
+        return;
+    }
+    if (!dos) {
+        if ((p = CreateProcess("dos", 0, SIG_DEAD, 0)) < 0 ||
+            (bench = (Handle)CreateProcess("dostest", 0, SIG_DEAD, 0)) == 0 || (int64_t)bench < 0) {
+            fail("dos or dostest couldn't be started");
+            bench = 0;
+            start_clients();
+            return;
+        }
+        dos = (Handle)p;
+        phase_at = hwdb.now;
+        return;
+    }
+    if (QueryProcess(bench, &pi) != 0 || pi.pi_State < PROCS_EXITED) {
+        if (hwdb.now - phase_at < 15000 * MS)
+            return;
+        fail("dostest didn't finish");
+        KillProcess(bench);
+        return;
+    }
+    if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+        fail("dostest failed");
+    CloseHandle(bench);
+    bench = 0;
+    start_clients();
 }
 
 static void kill_rounds(void)
@@ -554,6 +601,9 @@ static void stop_all(void)
     bool any = false;
 
     if (phase == T_STOP) {
+        if (dos)
+            CloseHandle(dos);       /* which ends it, before its devices */
+        dos = 0;
         hwdb.stopping = true;
         for (uint32_t i = 0; i < hwdb.g.nleases; i++)
             unit_kill(&hwdb.units[i]);
@@ -587,6 +637,9 @@ static void step(void)
     case T_BENCH:
         bench_step();
         break;
+    case T_DOS:
+        dos_step();
+        break;
     case T_ROUNDS:
         kill_rounds();
         break;
@@ -613,6 +666,7 @@ uint64_t test_deadline(void)
             return hwdb.now + MS / 4;
         return wake > hwdb.now ? wake : hwdb.now + 1 * MS;
     case T_BENCH:
+    case T_DOS:
     case T_RETRY:
     case T_DRAIN:
         return hwdb.now + 5 * MS;

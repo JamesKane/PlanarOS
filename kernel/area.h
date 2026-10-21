@@ -48,6 +48,12 @@ void area_unhold(struct area *list);
  * code at its start, mapped read and execute whatever 'rights' says. */
 bool area_map(struct area *a, struct process *p, uint32_t rights, uint64_t exec_bytes);
 
+/* Take Area 'h' from 'p', which owns and alone maps it, and which made it
+ * AREAF_EXEC and at least 'min_size' long: no longer mapped in 'p' or
+ * named by its handle, for the kernel to map in a new process
+ * (CreateProcessImage). nullptr, and nothing changed, if it can't be. */
+struct area *area_take(uint32_t h, struct process *p, uint64_t min_size);
+
 /* 'p' stops mapping 'a'; it's freed if nobody else maps it. */
 void area_release(struct area *a, struct process *p);
 

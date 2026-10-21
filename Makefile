@@ -90,18 +90,20 @@ include mk/acpica.mk
 BOOTARGS ?=
 QEMU_MEM ?= 256M
 
-# The disks QEMU's NVMe and SD card hold (tools/mkdisk.py): GPT, each
-# block holding its own number. Made once, and read only.
-DISK := build/disk.img
-SDCARD := build/sd.img
-QEMU_DISK := -drive if=none,id=disk,file=$(DISK),format=raw,readonly=on \
+# The disks QEMU's NVMe and SD card hold (tools/mkdisk.py): GPT, a FAT32
+# EFI partition with C:hello on it (step 6's dostest runs it), then a
+# partition each block of which holds its own number. Writes are
+# discarded (snapshot), so the images stay as made.
+DISK = $(BUILD)/disk.img
+SDCARD = $(BUILD)/sd.img
+QEMU_DISK = -drive if=none,id=disk,file=$(DISK),format=raw,snapshot=on \
 	-device nvme,serial=planar0,drive=disk \
 	-drive if=none,id=sd,file=$(SDCARD),format=raw,snapshot=on \
 	-device sdhci-pci -device sd-card,drive=sd
 
-$(DISK) $(SDCARD): tools/mkdisk.py
+$(BUILD)/disk.img $(BUILD)/sd.img: tools/mkdisk.py $(BUILD)/user/hello.elf
 	@mkdir -p $(dir $@)
-	python3 -I tools/mkdisk.py $@
+	python3 -I tools/mkdisk.py $@ --file $(BUILD)/user/hello.elf:EFI/planar/C/hello
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
@@ -114,7 +116,7 @@ CPPFLAGS += -Iarch/$(ARCH)/include
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -133,7 +135,7 @@ $(BUILD)/%.S.o: %.S
 # console needs minutes (mk/ky-x1.mk).
 BOOT_TIMEOUT ?= 20
 
-test: $(IMAGE) $(DISK) $(SDCARD)
+test: $(IMAGE) $(TEST_DEPS)
 	python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' $(CHECK_FLAGS) \
 	  -- $(RUN_CMD)
 
@@ -290,6 +292,28 @@ hwdb-test: $(HWDB_HOST) $(HWDB_TEST) $(ACPID_HOST)
 	  echo "hwdb-test: ok: $$(tail -1 $$want)"; \
 	done
 	@echo "V4.2 done: hwdb's graph on $(words $(HWDB_CASES)) captured descriptions, $(words $(ACPID_CASES)) through acpid"
+
+# The FAT32 code (servers/dos/fat.c) on the host, with the sanitizers:
+# on a disk tools/mkdisk.py makes, it reads what's there, writes and
+# removes files and directories, and leaves some for fsck_msdos (macOS's)
+# or fsck.fat to check.
+DOS_BUILD := build/dos
+FAT_HOST := $(DOS_BUILD)/fat-host
+
+$(FAT_HOST): servers/dos/fat.c servers/dos/fat.h servers/dos/host.c
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/dos) servers/dos/fat.c servers/dos/host.c -o $@
+
+dos-test: $(FAT_HOST)
+	@python3 -I tools/mkdisk.py $(DOS_BUILD)/test.img
+	@$(FAT_HOST) $(DOS_BUILD)/test.img test
+	@dd if=$(DOS_BUILD)/test.img of=$(DOS_BUILD)/esp.img bs=512 skip=2048 count=131072 2>/dev/null
+	@if command -v fsck_msdos >/dev/null; then fsck_msdos -n $(DOS_BUILD)/esp.img >$(DOS_BUILD)/fsck.txt 2>&1; \
+	 elif command -v fsck.fat >/dev/null; then fsck.fat -n $(DOS_BUILD)/esp.img >$(DOS_BUILD)/fsck.txt 2>&1; \
+	 else echo "dos-test: no fsck for FAT here: not checked"; exit 0; fi; \
+	 st=$$?; cat $(DOS_BUILD)/fsck.txt | grep -v '^\*\*' ; test $$st -eq 0 || { echo "dos-test: FAILED: fsck"; exit 1; }
+	@$(FAT_HOST) $(DOS_BUILD)/test.img cat EFI/planar/made/note.txt
+	@echo "dos-test: ok"
 
 clean:
 	rm -rf build

@@ -551,6 +551,34 @@ int64_t area_free_call(uint32_t h)
     return mine ? 0 : ERR_BADHANDLE;
 }
 
+struct area *area_take(uint32_t h, struct process *p, uint64_t min_size)
+{
+    struct area *a = area_of(h);
+    struct mapping *m = nullptr;
+    bool ok;
+
+    if (!a)
+        return nullptr;
+    unsigned long was = spin_lock_irqsave(&lock);
+    ok = a->owner == p && a->handle == h && !a->lease && !a->held && a->flags & AREAF_EXEC &&
+         a->size >= min_size && a->sharers == 1 && (m = find(a, p)) && a->refs == 1;
+    if (ok) {
+        unmap_pages(a, p);
+        unlink_mapping(m);
+        a->handle = 0;
+        a->owner = nullptr;         /* the kernel's, until it maps it in the child */
+        a->refs--;                  /* area_of's: now as area_new leaves one */
+    }
+    spin_unlock_irqrestore(&lock, was);
+    if (!ok) {
+        put_area(a);
+        return nullptr;
+    }
+    handle_free(h);
+    kfree(m);
+    return a;
+}
+
 int64_t area_share_call(uint32_t h, uint32_t task, uint32_t rights)
 {
     struct process *self = task_self()->process;

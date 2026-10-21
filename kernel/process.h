@@ -55,7 +55,8 @@ constexpr unsigned PROCESS_CONNS = 32;  /* connection ends, open or waiting */
 
 struct process {
     struct arch_domain domain;
-    const char *name;
+    const char *name;               /* a built-in's, or name_buf */
+    char name_buf[16];              /* a program its parent loaded: CreateProcessImage */
     int pri;
     uint64_t affinity;              /* where its tasks may run, by CPU index */
     spinlock_t lock;                /* tasks */
@@ -137,6 +138,7 @@ int64_t process_create_task(uint64_t entry, uint64_t arg);
 /* The kernel calls behind CreateProcess, StartProcess, KillProcess and
  * QueryProcess. */
 int64_t process_create_call(uint64_t name, uint64_t arg, int64_t sigbit, uint32_t flags);
+int64_t process_create_image_call(uint64_t image, uint64_t arg, int64_t sigbit, uint32_t flags);
 int64_t process_start_call(uint32_t process);
 int64_t process_kill_call(uint32_t process);
 int64_t process_query_call(uint32_t process, uint64_t info_out);

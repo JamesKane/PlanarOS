@@ -242,6 +242,12 @@ On the CIX every I/O takes its own interrupt even at depth 32, since the SSD com
 
 ## 6. Files and programs
 
+**Progress (2026-10-20): files and programs from storage work on QEMU and the CIX.** Still to come: the RV2's SD boot partition (with step 5's SDHCI), and the shell's commands (step 7).
+- **FAT32** (`servers/dos/fat.c`): pure C over two sector calls, tested on the host (`make dos-test`) on images `tools/mkdisk.py` formats, and checked after by `fsck_msdos`. Long names are read. A name it makes is 8.3, keeping lower case by the flags Windows uses. Writes go straight to the disk: the FAT, then the data, then the entry. The FSInfo free count is marked unknown at the first write, as the spec allows.
+- **`dos`** (`servers/dos`, `planar/dos.h`) mounts the FAT32 partitions of every block device and serves files by path (`VOLUME:dir/file`), with `SYS:` (the volume holding `EFI/planar`) and `C:` (`SYS:EFI/planar/C`). **A volume is writable only if its label is `PLANAR`** (the test disks), so a board's EFI partition, shared with its other systems' loaders, is only read until writing it is decided.
+- **Programs from storage.** `dos.library`'s loader reads an ELF static PIE (the `.elf` the build already links at 0) into an `AREAF_EXEC` Area. The new call `CreateProcessImage` (43) takes that Area from the parent and maps it in the child, code read and execute. There's no ELF in the kernel.
+- **Tested** by `conformance/dostest`, run from hwdb's test mode after the bench. `dos` stays up through the kill test, its devices restarting under it. On QEMU it reads files by short and long names, runs `C:hello` from the disk, and writes, reads back and removes a 150 KB file. On the CIX, `tools/efi-boot.py` installs `C:hello` next to `planar.efi`, and `dostest` reads the SSD's EFI partition and runs it.
+
 - **FAT32** as a `dos` handler, read-write, on the EFI partition and on the RV2's SD boot partition (VQ14).
 - **Programs from storage.** The shell and its commands live on FAT and are loaded by a loader in user mode (§2.2: no ELF loading in the kernel). Only the boot bundle stays inside the image.
 - **Boot from storage.**

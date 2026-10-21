@@ -99,6 +99,27 @@ struct ProcessInfo {
 };
 
 int64_t CreateProcess(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);
+
+/*
+ * A program its parent loaded (V4 step 6: dos.library's ELF loader, §2.2:
+ * none in the kernel). pi_Area is an Area the caller allocated with
+ * AREAF_EXEC, owns and alone maps, holding the program laid out as it
+ * runs: code and constants in the first pi_Etext bytes (a page multiple),
+ * then data and .bss. The Area becomes the new process's: the caller
+ * stops mapping it, and its handle goes. The code is mapped read and
+ * execute, the rest read and write, and the first task starts pi_Entry
+ * bytes in. Otherwise as CreateProcess.
+ */
+struct ProcessImage {
+    Handle pi_Area;
+    uint32_t pi_Pad;
+    uint64_t pi_Etext;
+    uint64_t pi_Entry;
+    char pi_Name[16];               /* for its log lines */
+};
+
+int64_t CreateProcessImage(const struct ProcessImage *image, uint64_t arg, int64_t sigbit,
+                           uint32_t flags);
 int64_t StartProcess(Handle process);
 int64_t KillProcess(Handle process);
 int64_t QueryProcess(Handle process, struct ProcessInfo *info);

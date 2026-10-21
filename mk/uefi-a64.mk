@@ -28,8 +28,12 @@ else
 EXPECT := efi-boot: the board reset itself
 endif
 
+# The commands it loads from storage (C:, step 6), next to the image.
+C_PROGS := hello
 RUN_CMD := python3 -I tools/efi-boot.py --host $(BOARD) --port $(SERIAL) --image $(IMAGE) \
-	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/efi-boot.log
+	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/efi-boot.log \
+	$(foreach p,$(C_PROGS),--file $(BUILD)/user/$(p).elf:C/$(p))
+TEST_DEPS := $(foreach p,$(C_PROGS),$(BUILD)/user/$(p).elf)
 
 run: $(IMAGE)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }

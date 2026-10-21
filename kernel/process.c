@@ -119,38 +119,34 @@ static int64_t launch(struct process *p, struct task *t)
 static void reclaim(struct process *p);
 static void signal_task_handle(Handle h, uint64_t sig);
 
-/* Load built-in program 'name' into a new process, watched by 'watcher'
- * or the task 'watch_task' names. With 'held', its first task waits in
- * p->held for StartProcess. */
-static struct process *create(const char *name, int pri, uint64_t arg, struct task *watcher,
-                              Handle watch_task, uint64_t sig, uint64_t affinity, bool held)
+/* A new process running 'image' (its code the first 'etext' bytes, its
+ * entry 'entry' bytes in), watched by 'watcher' or the task 'watch_task'
+ * names. The image becomes the process's: if it can't be made, the image
+ * goes. With 'held', its first task waits in p->held for StartProcess. */
+static struct process *create_from(struct area *image, uint64_t etext, uint64_t entry,
+                                   const char *name, int pri, uint64_t arg,
+                                   struct task *watcher, Handle watch_task, uint64_t sig,
+                                   uint64_t affinity, bool held)
 {
-    const struct user_image *img = find_image(name);
-    const uint8_t *file;
-    uint64_t file_size, etext, end, page;
-    struct area *image = nullptr, *stack = nullptr;
+    struct area *stack = nullptr;
     struct process *p;
     struct task *t = nullptr;
+    uint64_t page;
 
-    if (!img)
+    if (!(page = pmm_alloc())) {
+        area_destroy(image);
         return nullptr;
-    file = img->start;
-    file_size = (uint64_t)(img->end - img->start);
-    if (file_size < 24 || get_le32(file + 4) != IMAGE_MAGIC)
-        return nullptr;
-    etext = get_le64(file + 8);
-    end = get_le64(file + 16);
-    if (etext > end || file_size > end || etext % PAGE_SIZE)
-        return nullptr;
-
-    if (!(page = pmm_alloc()))
-        return nullptr;
+    }
     p = phys_to_virt(page);
     /* Two references: the watcher's, and its own while it lives. */
-    *p = (struct process){ .name = img->name, .pri = pri, .affinity = affinity,
+    *p = (struct process){ .name = name, .pri = pri, .affinity = affinity,
                            .watcher = watcher, .watch_task = watch_task, .watch_sig = sig,
                            .refs = 2, .klog_tokens = 32, .klog_at = time_now() };
+    if (!name) {
+        p->name = p->name_buf;
+    }
     if (!arch_domain_create(&p->domain)) {
+        area_destroy(image);
         pmm_free(page);
         return nullptr;
     }
@@ -159,19 +155,15 @@ static struct process *create(const char *name, int pri, uint64_t arg, struct ta
     /* One Area for the image, so code and data stay where PC-relative
      * code expects them: code and constants read and execute, then data
      * and .bss read and write. */
-    image = area_new((end + PAGE_SIZE - 1) / PAGE_SIZE, AREAF_EXEC, false);
-    if (image) {
-        area_copy_in(image, 0, file, file_size);
-        for (uint64_t off = 0; off < etext; off += PAGE_SIZE)
-            arch_sync_icache(phys_to_virt(area_pa(image, off)), PAGE_SIZE);
-        if (!area_map(image, p, AREAR_READ | AREAR_WRITE, etext)) {
-            area_destroy(image);
-            image = nullptr;
-        }
+    for (uint64_t off = 0; off < etext; off += PAGE_SIZE)
+        arch_sync_icache(phys_to_virt(area_pa(image, off)), PAGE_SIZE);
+    if (!area_map(image, p, AREAR_READ | AREAR_WRITE, etext)) {
+        area_destroy(image);
+        image = nullptr;
     }
     if (image && new_stack(p, &stack)) {
         p->stack_base = area_base(stack);
-        t = new_user_task(p, area_base(image), stack, arg, 0);
+        t = new_user_task(p, area_base(image) + entry, stack, arg, 0);
     }
     if (!t) {
         area_process_died(p);
@@ -185,6 +177,32 @@ static struct process *create(const char *name, int pri, uint64_t arg, struct ta
     else
         launch(p, t);
     return p;
+}
+
+/* Load built-in program 'name' into a new process (create_from). */
+static struct process *create(const char *name, int pri, uint64_t arg, struct task *watcher,
+                              Handle watch_task, uint64_t sig, uint64_t affinity, bool held)
+{
+    const struct user_image *img = find_image(name);
+    const uint8_t *file;
+    uint64_t file_size, etext, end;
+    struct area *image;
+
+    if (!img)
+        return nullptr;
+    file = img->start;
+    file_size = (uint64_t)(img->end - img->start);
+    if (file_size < 24 || get_le32(file + 4) != IMAGE_MAGIC)
+        return nullptr;
+    etext = get_le64(file + 8);
+    end = get_le64(file + 16);
+    if (etext > end || file_size > end || etext % PAGE_SIZE)
+        return nullptr;
+    if (!(image = area_new((end + PAGE_SIZE - 1) / PAGE_SIZE, AREAF_EXEC, false)))
+        return nullptr;
+    area_copy_in(image, 0, file, file_size);
+    return create_from(image, etext, 0, img->name, pri, arg, watcher, watch_task, sig, affinity,
+                       held);
 }
 
 struct process *process_create(const char *name, int pri, uint64_t arg,
@@ -388,6 +406,41 @@ int64_t process_create_call(uint64_t user_name, uint64_t arg, int64_t sigbit, ui
     }
     /* From here a sibling task may close the handle under us; the
      * process is then killed, and starting it does nothing. */
+    if (!(flags & PROCF_HELD))
+        process_start_call(h);
+    return h;
+}
+
+int64_t process_create_image_call(uint64_t user_image, uint64_t arg, int64_t sigbit, uint32_t flags)
+{
+    struct task *self = task_self();
+    struct process *parent = self->process, *p;
+    struct ProcessImage pi;
+    struct area *image;
+    Handle h;
+
+    if (!arch_copy_from_user(&pi, user_image, sizeof pi))
+        return ERR_BADADDR;
+    if (!syscall_sigbit(sigbit) || (flags & ~PROCF_HELD))
+        return ERR_BADARG;
+    pi.pi_Name[sizeof pi.pi_Name - 1] = '\0';
+    if (pi.pi_Etext % PAGE_SIZE || pi.pi_Entry >= pi.pi_Etext)
+        return ERR_BADARG;
+    if (!(image = area_take(pi.pi_Area, parent, pi.pi_Etext)))
+        return ERR_BADHANDLE;
+    /* The Area is the kernel's now: the parent no longer maps or names it. */
+    if (!(p = create_from(image, pi.pi_Etext, pi.pi_Entry, nullptr, parent->pri, arg, nullptr,
+                          self->handle, 1ULL << sigbit, parent->affinity, true)))
+        return ERR_NOMEM;
+    for (unsigned i = 0; i < sizeof p->name_buf - 1 && pi.pi_Name[i]; i++)
+        p->name_buf[i] = pi.pi_Name[i];
+    if (!(h = handle_new(HANDLE_PROCESS, p, parent))) {
+        int64_t err = handle_error(parent);
+
+        p->watch_task = 0;
+        process_release(p);
+        return err;
+    }
     if (!(flags & PROCF_HELD))
         process_start_call(h);
     return h;

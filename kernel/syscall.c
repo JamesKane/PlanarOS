@@ -231,6 +231,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return conn_close_call((uint32_t)a[0]);
     case SYS_CREATE_PROCESS:
         return process_create_call(a[0], a[1], (int64_t)a[2], (uint32_t)a[3]);
+    case SYS_CREATE_PROCESS_IMAGE:
+        return process_create_image_call(a[0], a[1], (int64_t)a[2], (uint32_t)a[3]);
     case SYS_START_PROCESS:
         return process_start_call((uint32_t)a[0]);
     case SYS_KILL_PROCESS:
