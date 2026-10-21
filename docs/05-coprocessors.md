@@ -22,7 +22,7 @@ Waiting on a sync object works two ways:
 
 **Providers:**
 
-- **Hardware user queue:** the device's own firmware pulls from user rings. This is the paper's case. The kernel and the server are out of the data path.
+- **Hardware user queue:** the device's own firmware pulls from user rings. This is the paper's case. The kernel and the server are out of the data path. Linux's panthor doesn't do this: it rings every doorbell itself. Planar maps the app its queue's ring, interface pages and doorbell page ([v5-plan](v5-plan.md) step 5).
 - **Server queue:** a driver server owns the privileged ring. It takes app rings, validates them, and copies or chains them into the device. The app API is identical, but there is one extra hop.
 
 The lease also does these things:
@@ -35,11 +35,11 @@ The lease also does these things:
 
 | Device | Coherent? | Ring and buffer attribute |
 |---|---|---|
-| Mali CSF (RK3588, CIX) | Depends on the SoC's ACE-Lite setup *(verify each)* | NC by default; WB + cache maintenance if coherent |
+| Mali CSF (RK3588, CIX) | CIX: ACE-Lite one way. The GPU snoops CPU caches, but CPU writes in cache don't reach its L2 (FreeBSD saw stale command streams). RK3588 *(verify)* | NC to the GPU, WC to the CPU |
 | Adreno 690 | I/O-coherent via SMMU *(verify)* | Same as Linux msm |
 | Hexagon CDSP | **Coherent: it snoops CPU caches** | **WB.** NC breaks graphs (AbyssBSD npu.md). |
 | CIX Zhouyi | Via SMMUv3 | Normal memory. Device-type mapping cost 10×. |
-| K1 DPU / peripherals | Probably not coherent *(verify)* | NC/WC + Zicbom |
+| K1 DPU, GPU and peripherals | Not coherent (`SNOOP_EMULATED` in the vendor DDK; SDHCI in V4) | WB + Zicbom, or NC/WC. Below 4 GiB: above it they see memory 2 GiB lower (`dram_range1`) |
 
 ## 5.3 By board
 
@@ -59,7 +59,7 @@ Reference: `OS/drm-panthor-kmod`.
 
 **CIX P1: Immortalis-G720 MC10 (arch 12.8, CSF)**
 
-Same server as the RK3588, using `arch12.8/mali_csffw.bin` (interface v3.13). The extra work is power-on, and that ordering belongs to the `power` server:
+Same server as the RK3588, using `arch12.8/mali_csffw.bin` (interface v3.13). No SMMU confines it (none in IORT). Each CS doorbell has its own 64 KiB page, at `0x15090000 + i × 0x10000`. The extra work is power-on, and that ordering belongs to the `power` server ([v5-plan](v5-plan.md) step 2 has the IDs and registers):
 1. SCMI power via a TF-A SMC.
 2. SCMI clocks via mailbox `CIXHA006`.
 3. The `_ON` sequence.
@@ -109,7 +109,7 @@ Not a device *(verify)*. The "NPU" is extra architectural state on cluster-0 cor
 
 **K1: IMG BXE-2-32 GPU**
 
-Firmware-scheduled through kernel CCBs. Provider: a server queue. Needs vendor driver sources; not in the mainline DT (**VQ17**).
+Rogue core 36.29.52.182 with a MIPS firmware processor, firmware-scheduled through kernel CCBs. A kick is a privileged register write (`RGX_CR_MTS_SCHEDULE`), so there is no user doorbell. Provider: a server queue, `gpu-rogue`. Vendor sources exist: the DDK 24.2 in Orange Pi's kernel (`drivers/gpu/drm/img-rogue`). Mainline's `imagination` driver doesn't list this core, but mainline-format open-source firmware for it exists, so `gpu-rogue` follows mainline's interface (**VQ17**, [v5-plan](v5-plan.md) step 6).
 
 **Display controllers (all boards)**
 

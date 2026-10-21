@@ -111,4 +111,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V5, queue leases: a CSF job on the CIX's Mali G720 with no kernel or server in the data path, then native scanout and `power`, moved from V4 ([roadmap](docs/08-roadmap.md)).
+Next: V5 ([plan](docs/v5-plan.md), proposed): GPU queue leases (a CSF job on the CIX's G720 with no kernel or server in the data path, and the RV2's BXE-2-32 through a server queue), native scanout, `power` and USB input. Then V6, the Workbench ([roadmap](docs/08-roadmap.md)).

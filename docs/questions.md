@@ -39,7 +39,7 @@ Raised in §3.1 and §8.
 
 **VQ5 PMP and M-mode on RISC-V.**
 
-Should we ever replace OpenSBI with our own M-mode monitor? *Leaning:* not before V8. The `pmp` back end stays in the contract.
+Should we ever replace OpenSBI with our own M-mode monitor? *Leaning:* not before V9. The `pmp` back end stays in the contract.
 
 Raised in §1.2 and §3.5.
 
@@ -199,7 +199,7 @@ Raised in §13.5 and §13.7.
 
 **VQ34 Base system font files (`System Sans` and `System Mono`).**
 
-Which permissive open-source `.ttf`/`.otf` fonts should ship in the image via `#embed` for V4 (`Shell`) and V5.5 (`Workbench`)? *Leaning:* subsetted OFL builds of a geometric/humanist sans (Inter or IBM Plex Sans) and programmer monospace (JetBrains Mono or IBM Plex Mono) in the boot image, with unmodified full fonts in `tools/font-oracle/`.
+Which permissive open-source `.ttf`/`.otf` fonts should ship in the image via `#embed` for V4 (`Shell`) and V6 (`Workbench`)? *Leaning:* subsetted OFL builds of a geometric/humanist sans (Inter or IBM Plex Sans) and programmer monospace (JetBrains Mono or IBM Plex Mono) in the boot image, with unmodified full fonts in `tools/font-oracle/`.
 
 Raised in §14.7.
 
@@ -209,7 +209,7 @@ Should `font.library` cache `4×` horizontal subpixel phases (`0.0`, `0.25`, `0.
 
 Raised in §14.7.
 
-**VQ38 Compressed / tiled framebuffer modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. linear-only surfaces in V5.**
+**VQ38 Compressed / tiled framebuffer modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. linear-only surfaces in V6.**
 
 Should `AllocBitMap` default to `MOD_LINEAR` and reserve `MOD_AFBC_16x16` for explicit GPU-rendered scanout surfaces on CIX P1 (G720 + Linlon) and RK3588 (G610 + VOP2)? *Leaning:* yes; `MOD_LINEAR` (`ARGB8888` / `XRGB8888`) is the universal baseline for CPU SIMD and mixed surfaces, while `MOD_AFBC_16x16` is selected only when `BMF_GPU_ONLY | BMF_DISPLAYABLE` is requested on an AFBC-capable `friend_bitmap`.
 
@@ -229,7 +229,7 @@ Raised in §16.3 and §16.9.
 
 **VQ41 Shader compilation pipeline (`tools/shaderc` fat `.gbin` vs. runtime micro-JIT in `gfx3d.library`).**
 
-Should shaders ship as fat `.gbin` binaries compiled on the host by `tools/shaderc` (carrying Valhall/Immortalis, Adreno A6xx and SIMD bytecode sections) or should `gfx3d.library` include a small (~5–8k LoC) runtime translator from a restricted pointer-based SPIR-V subset to native GPU ISA? *Leaning:* build-time `tools/shaderc` `.gbin` bundles first for V5 (so the V5 triangle and compute demos need zero runtime compiler complexity on the board), then add a tiny pointer-first SPIR-V translator in user space once both G720/G610 and Adreno 690 are up.
+Should shaders ship as fat `.gbin` binaries compiled on the host by `tools/shaderc` (carrying Valhall/Immortalis, Adreno A6xx and SIMD bytecode sections) or should `gfx3d.library` include a small (~5–8k LoC) runtime translator from a restricted pointer-based SPIR-V subset to native GPU ISA? *Leaning:* build-time `tools/shaderc` `.gbin` bundles first for V6 (so the V6 triangle and compute demos need zero runtime compiler complexity on the board), then add a tiny pointer-first SPIR-V translator in user space once both G720/G610 and Adreno 690 are up.
 
 Raised in §16.5 and §16.9.
 
@@ -258,6 +258,8 @@ Raised in §5.3.
 **VQ17 K1 GPU and AI instructions.**
 
 Can we get usable vendor sources for the BXE-2-32? Is the 2 TOPS really in-core instructions?
+
+**Partly answered (2026-10-20):** yes, the sources exist. Orange Pi's kernel (`orange-pi-6.6-ky`) has IMG's DDK 24.2 for core 36.29.52.182, a MIPS firmware processor and a server-queue provider ([v5-plan](v5-plan.md) step 6). Its firmware is mainline's open-source build for this core (`rogue_36.29.52.182_v1.fw`), so mainline's interface applies. Whether the 2 TOPS are in the cores is still open.
 
 Raised in §1.1 and §5.3.
 

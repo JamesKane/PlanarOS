@@ -1,6 +1,6 @@
 # 14. OpenType and TrueType font engine (`font.library`)
 
-**Status: proposed (2026-10-20).** Required by `gfx.library`, `ui.library` and the [Workbench desktop environment](13-workbench.md) in V4/V5.5.
+**Status: proposed (2026-10-20).** Required by `gfx.library`, `ui.library` and the [Workbench desktop environment](13-workbench.md) in V6.
 
 Planar renders proportional UI typography (`System Sans`) and terminal/code text (`System Mono`) through a clean-room user-mode shared library, **`font.library`**. Rather than porting FreeType and HarfBuzz—which together exceed 250,000 lines of C and C++ covering legacy formats and every world script—Planar implements its own OpenType/TrueType engine **from scratch in C23 directly from the specification documents**.
 
@@ -267,7 +267,7 @@ Core interface operations on `struct FontIFace`:
 ## 14.7 Open questions
 
 - **VQ34 Base system font files (`System Sans` and `System Mono`).**
-  Which permissive open-source font files (e.g. OFL-1.1 or Apache-2.0) should ship in the image via `#embed` for V4 (`Shell`) and V5.5 (`Workbench`)?
+  Which permissive open-source font files (e.g. OFL-1.1 or Apache-2.0) should ship in the image via `#embed` for V4 (`Shell`) and V6 (`Workbench`)?
   *Leaning:* subsetted `.ttf` builds of an OFL geometric/humanist sans (such as Inter or IBM Plex Sans) and programmer monospace (JetBrains Mono or IBM Plex Mono), stripped of stubbed tables (`gvar`, non-Latin glyphs) for the embedded boot image while full unmodified `.ttf`/`.otf` files sit in the `tools/font-oracle/` test corpus.
 
 - **VQ35 Horizontal subpixel positioning (`1/4 px` bins) vs. whole-pixel glyph placement.**

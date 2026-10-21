@@ -1,6 +1,6 @@
 # 13. Workbench and desktop environment
 
-**Status: proposed (2026-10-20).** The kernel IPC and memory primitives are built (V1, V2). The `display` and `input` servers are scheduled for V4 ([§8](08-roadmap.md)), and GPU queue leases for V5 ([§5](05-coprocessors.md)). This document specifies the architecture, visual design language, widget toolkit and iconography of the Planar Workbench.
+**Status: proposed (2026-10-20).** The kernel IPC and memory primitives are built (V1, V2). `display` draws a console on the firmware's framebuffer (V4). Native scanout, `input` and GPU queue leases are V5's ([v5-plan](v5-plan.md)), and this document is V6's ([§8](08-roadmap.md)). This document specifies the architecture, visual design language, widget toolkit and iconography of the Planar Workbench.
 
 Planar's desktop environment—**Workbench**—gives a single user direct, tactile control over the machine. Its visual language updates the classic screen-and-window metaphor with high-DPI brushed metallic surfaces, deep slate wells, bevelled steel-blue window frames and crisp vector iconography, while keeping all Amiga trademarked marks out of the system. Underneath, it uses Planar's single address space (P2), zero-copy message rings (P4) and process-level crash isolation ([§12](12-let-it-crash.md)).
 
@@ -224,7 +224,7 @@ Maintaining the classic Workbench feel, every desktop and drawer icon has two vi
 
 ## 13.5 Core desktop applications
 
-The reference desktop comprises three first-party programs that ship in the base image once V4/V5 display and input are up:
+The reference desktop comprises three first-party programs that ship in the base image once V5's display and input are up:
 
 ### 1. `Workbench` (Desktop, volumes and drawers)
 
@@ -252,8 +252,9 @@ The reference desktop comprises three first-party programs that ship in the base
 
 | Milestone | Scope | Verification |
 |---|---|---|
-| **V4 (Framebuffer shell)** | `display` server (K1 DPU, Linlon) + `input` server (USB HID) + standalone `Shell` rendering with the `Shell` colour palette and monospace font ([§8](08-roadmap.md)). | Boots from storage to an interactive framebuffer shell on RV2 and CIX P1. |
-| **V5.5 (Intuition + Workbench)** | `intuition` server, `gfx.library`, `ui.library`, hardware cursor plane, `ScreenBar`, `Workbench` backdrop/icons, `Prefs` and windowed `Shell`. | Window creation, dragging, depth-arrangement, zero-copy `PresentWindow` flips at 60 Hz, and clean window reclamation when a client process is killed (`kill-window` conformance test). |
+| **V4 (Framebuffer shell)** ✅ | `display` on the firmware's framebuffer, an 8×8 text console, and the Shell, with keys from the serial console ([v4-plan](v4-plan.md)). | Boots from storage to a shell on the framebuffer on the RV2 and the CIX P1. |
+| **V5 (Scanout and input)** | Native scanout with planes, a cursor plane and vblank flips; USB HID keyboard and mouse through `input`; GPU queue leases; futexes ([v5-plan](v5-plan.md)). | Flips at vblank on both boards; USB keys drive the Shell. |
+| **V6 (Intuition + Workbench)** | `intuition` server, `gfx.library`, `ui.library`, hardware cursor plane, `ScreenBar`, `Workbench` backdrop/icons, `Prefs` and windowed `Shell`. | Window creation, dragging, depth-arrangement, zero-copy `PresentWindow` flips at 60 Hz, and clean window reclamation when a client process is killed (`kill-window` conformance test). |
 
 ---
 
@@ -261,7 +262,7 @@ The reference desktop comprises three first-party programs that ship in the base
 
 - **VQ31 Direct DPU plane promotion vs. full-screen composition.**
   All four target SoCs have multi-plane display controllers (K1 DPU, Linlon/komeda, VOP2, MDSS). Should `intuition` assign each visible top-level window to a hardware DPU plane when the window count fits the plane budget, falling back to CPU/GPU composition only when windows exceed planes or use translucency?
-  *Leaning:* always use the dedicated hardware cursor plane for the red pointer; compose windows into one primary scanout buffer first in V5.5, then promote full-screen or video/3D queue-lease windows to dedicated overlay planes.
+  *Leaning:* always use the dedicated hardware cursor plane for the red pointer; compose windows into one primary scanout buffer first in V6, then promote full-screen or video/3D queue-lease windows to dedicated overlay planes.
 
 - **VQ32 Icon asset representation.**
   Should icons be stored in sidecar `.info` files (classic Workbench style, works on FAT32 as well as the native filesystem) using a compact binary vector bytecode so they scale cleanly to any DPI, or as pre-rasterised `64×64` and `128×128` `ARGB8888` images?
