@@ -1,6 +1,6 @@
 # exec: kernel calls
 
-*Checked against V4, with V5 step 1's calls (WaitAddr, WakeAddr, `AREAF_NC`).*
+*Checked against V4, with V5 step 1's calls (WaitAddr, WakeAddr, `AREAF_NC`) and step 5's (ReleaseArea).*
 
 The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
@@ -981,6 +981,39 @@ None known.
 
 ---
 
+## exec/ReleaseArea
+
+**NAME**
+ReleaseArea -- let go of an Area another process shared
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t ReleaseArea(const void *address);
+```
+
+**FUNCTION**
+Unmaps from the calling process the Area containing `address`, which another process owns and shared with it (`ShareArea`). It's the sharer's side of `UnshareArea`: a server done with what a client lent it, such as `gpu-panthor` with an app's ring once its queue has gone. The Area itself goes only if nothing else holds it: its owner's handle and other mappings keep it.
+
+A kernel call (53), added in V5 step 5: before it, only the owner could take a mapping back, so what a dead client had lent a server stayed mapped in the server until the server died.
+
+**RESULT**
+0, or:
+- `ERR_NOTFOUND` -- nothing the caller maps contains `address`.
+- `ERR_RIGHTS` -- the caller owns that Area (free it with `FreeArea`), or the kernel does (the program image, a stack, a connection's arena).
+
+**NOTES**
+- Tested by `conformance/conn.c`: the client lends the server an Area, the server releases it, and the client sees one sharer left; the refusals for the server's own Area and for the arena.
+- A DMA Area of a lease that a peer maps (display's buffers) may be released by the peer as any other.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[ShareArea](#execsharearea), [UnshareArea](#execunsharearea), [QueryArea](#execqueryarea)
+
+---
+
 ## exec/SetSignal
 
 **NAME**
@@ -1055,7 +1088,7 @@ A kernel call.
 None known.
 
 **SEE ALSO**
-[UnshareArea](#execunsharearea), [Libraries ch. 3](../libraries/03-areas.md)
+[UnshareArea](#execunsharearea), [ReleaseArea](#execreleasearea), [Libraries ch. 3](../libraries/03-areas.md)
 
 ---
 

@@ -677,6 +677,31 @@ int64_t area_unshare_call(uint32_t h, uint32_t task)
     return err;
 }
 
+/* ReleaseArea: the caller's own mapping of an Area another process
+ * owns and shared with it (v5-plan step 5: a server done with what a
+ * client lent it). The Area goes, if nothing else holds it. */
+int64_t area_release_call(uint64_t addr)
+{
+    struct process *p = task_self()->process;
+    struct area *a = nullptr;
+    unsigned long was = spin_lock_irqsave(&lock);
+
+    for (struct mapping *m = p->maps; m; m = m->next_in_proc)
+        if (addr >= m->area->va && addr - m->area->va < m->area->size) {
+            a = m->area;
+            break;
+        }
+    if (!a || a->owner == p || a->handle == 0) {
+        spin_unlock_irqrestore(&lock, was);
+        return a ? ERR_RIGHTS : ERR_NOTFOUND;
+    }
+    a->refs++;
+    spin_unlock_irqrestore(&lock, was);
+    area_release(a, p);
+    put_area(a);
+    return 0;
+}
+
 int64_t area_protect_call(uint32_t h, uint32_t rights)
 {
     struct process *p = task_self()->process;

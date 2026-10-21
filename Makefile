@@ -73,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V5.4 done
+EXPECT := V5.5 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -154,9 +154,10 @@ $(BUILD)/%.S.o: %.S
 # console needs minutes (mk/ky-x1.mk).
 BOOT_TIMEOUT ?= 20
 
+# BOOT_LOG=file keeps the transcript.
 test: $(IMAGE) $(TEST_DEPS)
 	python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' $(CHECK_FLAGS) \
-	  -- $(RUN_CMD)
+	  $(if $(BOOT_LOG),--log $(BOOT_LOG)) -- $(RUN_CMD)
 
 
 TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
@@ -234,7 +235,7 @@ ACPID_BUILD := build/acpid
 # The graph: what the server and the host share (not the server's loop).
 HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c servers/hwdb/server.c \
 	servers/hwdb/killtest.c servers/hwdb/acpid.c servers/hwdb/pci.c servers/hwdb/power.c \
-	servers/hwdb/display.c servers/hwdb/input.c,\
+	servers/hwdb/display.c servers/hwdb/input.c servers/hwdb/gpu.c,\
 	$(wildcard servers/hwdb/*.c))
 HWDB_HOST := $(HWDB_BUILD)/hwdb-host
 HWDB_TEST := $(HWDB_BUILD)/hwdb-test

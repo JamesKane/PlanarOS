@@ -212,6 +212,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return area_share_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2]);
     case SYS_UNSHARE_AREA:
         return area_unshare_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_RELEASE_AREA:
+        return area_release_call(a[0]);
     case SYS_PROTECT_AREA:
         return area_protect_call((uint32_t)a[0], (uint32_t)a[1]);
     case SYS_QUERY_AREA:

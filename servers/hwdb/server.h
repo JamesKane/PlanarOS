@@ -176,6 +176,10 @@ void input_conn_down(void);
 void input_conn_serve(struct MsgPort *mp);
 bool input_test(void);              /* the kill test's input step: true when it's over */
 
+/* --- gpu-panthor (gpu.c): its stop method; the test. --- */
+bool stop_gpu(struct unit *u);      /* the MCU off and the GPU reset */
+bool gpu_test(void);                /* the kill test's GPU step: true when it's over */
+
 /* --- pci (pci.c): a host bridge's driver, while it binds. --- */
 
 bool pci_host(const struct unit *u, struct HwdbMsg *m);            /* fills m->hm_Host */

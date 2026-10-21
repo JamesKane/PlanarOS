@@ -96,6 +96,7 @@ int64_t area_alloc_call(uint64_t size, uint32_t flags, uint64_t addr_out);
 int64_t area_free_call(uint32_t area);
 int64_t area_share_call(uint32_t area, uint32_t task, uint32_t rights);
 int64_t area_unshare_call(uint32_t area, uint32_t task);
+int64_t area_release_call(uint64_t addr);
 int64_t area_protect_call(uint32_t area, uint32_t rights);
 int64_t area_query_call(uint64_t addr, uint64_t info_out);
 

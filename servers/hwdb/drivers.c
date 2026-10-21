@@ -113,6 +113,12 @@ static const struct hw_match xhci[] = {
     { nullptr, 0 },
 };
 
+/* V5 step 5: the CIX's Mali-G720 (drv/gpu-panthor), its CSF. */
+static const struct hw_match gpu_panthor[] = {
+    { "CIXH5000",               HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
 const struct hw_driver hw_drivers[] = {
     { "kernel",         HW_DRV_KERNEL,      kernel },
     { "firmware",       HW_DRV_FIRMWARE,    firmware },
@@ -126,6 +132,7 @@ const struct hw_driver hw_drivers[] = {
     { "display",        HW_DRV_PROCESS,     display },
     { "power",          HW_DRV_PROCESS,     power },
     { "xhci",           HW_DRV_PROCESS,     xhci },
+    { "gpu-panthor",    HW_DRV_PROCESS,     gpu_panthor },
 };
 
 const unsigned hw_ndrivers = sizeof hw_drivers / sizeof hw_drivers[0];

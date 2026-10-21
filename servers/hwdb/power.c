@@ -86,9 +86,34 @@ static int refs_of(const struct unit *u, struct PowerRef *out)
     return n;
 }
 
+/* A named set a quirk gave one of the unit's nodes, or nullptr. */
+static const char *set_of(const struct unit *u)
+{
+    const struct hw_lease *ls = &hwdb.g.leases[u - hwdb.units];
+
+    for (unsigned i = 0; i < ls->nnodes; i++)
+        if (hwdb.g.nodes[ls->nodes[i]].power_set)
+            return hwdb.g.nodes[ls->nodes[i]].power_set;
+    return nullptr;
+}
+
+/* The vote's body: the named set, or the references; false if they
+ * don't fit a message. */
+static bool fill(const struct unit *u, struct PowerMsg *m)
+{
+    const char *set = set_of(u);
+
+    if (set) {
+        for (unsigned i = 0; set[i] && i < POWER_NAME - 1; i++)
+            m->pm_Name[i] = set[i];
+        return true;
+    }
+    return (int)(m->pm_Count = (uint32_t)refs_of(u, m->pm_Ref)) >= 0;
+}
+
 bool power_needed(const struct unit *u)
 {
-    return !hw_streq(unit_driver(u), "power") && refs_of(u, nullptr) != 0;
+    return !hw_streq(unit_driver(u), "power") && (set_of(u) || refs_of(u, nullptr) != 0);
 }
 
 static struct PowerMsg *msg(void)
@@ -125,7 +150,7 @@ static void ask(struct unit *u)
     memset(m, 0, sizeof *m);
     m->pm_Op = POWER_ON;
     m->pm_Tag = (uint32_t)(u - hwdb.units);
-    if ((int)(m->pm_Count = (uint32_t)refs_of(u, m->pm_Ref)) < 0) {
+    if (!fill(u, m)) {
         pool[npool++] = m;
         unit_fail(u, "it names more power references than a vote holds");
         return;
@@ -163,7 +188,7 @@ static void revote(struct unit *u)
     memset(m, 0, sizeof *m);
     m->pm_Op = POWER_ON;
     m->pm_Tag = (uint32_t)(u - hwdb.units);
-    m->pm_Count = (uint32_t)refs_of(u, m->pm_Ref);
+    fill(u, m);
     u->revoting = send(m);
 }
 

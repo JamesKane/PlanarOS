@@ -132,6 +132,7 @@ struct hw_node {
     uint64_t dma_limit;             /* its DMA sees memory where the CPU does only below this
                                      * (dma-ranges, or a quirk); 0: everywhere */
     uint32_t call;                  /* a firmware call its driver may make (a quirk); 0: none */
+    const char *power_set;          /* power's named set it needs before its lease (a quirk) */
     bool bare;                      /* hwdb's own, with no registers: leased nothing (QEMU's
                                      * power model); any other such node can't be leased */
 };
@@ -283,6 +284,7 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_IRQ,           /* a line the firmware doesn't list: 'arg' is "line controller-path" */
     HW_Q_SCANOUT,       /* it scans out the firmware's framebuffer: leased with it, to one process */
     HW_Q_NOIRQ,         /* its lines through the controller at 'arg' ("[line] path") aren't used */
+    HW_Q_POWER,         /* it needs power's named set 'arg', voted for before its lease */
 };
 
 struct hw_quirk {

@@ -89,6 +89,15 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 - The EFI map has `0x84380000` reserved.
 - Of the G720's set (domain 21, `gpu_clk_core`, `gpu_clk_stacks`), one is on at boot.
 
+**The GPU** (V5 step 5):
+- The G720: `GPU_ID 0xc8700008` (arch 12), shader cores `0x550555` (10; none harvested by RCSU `0x304`), 8 address spaces, 48-bit VA. ACPI's `_CCA` is 1, but it's driven as Linux's CIX patches drive it: ACE-Lite, every page non-cacheable.
+- Its windows are the RCSU (`0x15000000`) and its registers (`0x15010000`), with doorbell *n* at `+0x80000 + 0x10000 n`. Its lines are 269 (job), 270 (MMU) and 271 (GPU).
+- UEFI leaves it held in reset: RST0 `0x16000400` bit 6 is clear (active low). Reading a register before releasing it is refused by the interconnect, and the CPU takes an SError.
+- Pulsing the RCSU's reset (`0x16000800` bit 28) loses the non-secure access TF-A gave the RCSU ("IDM: GPU secure access" on the next access).
+- After a refused access, TF-A prints IDM errors without end and the watchdog doesn't reset the board: it needs a power cycle.
+- GPUP's power bits (`0x15000218` bit 12 and 2–11) are already set when Planar starts. RST0's memory-repair strap (`0x16000504` bit 4) is clear: no repair.
+- `mali_csffw.bin` (arch 12.8, interface 1.1) boots with 8 group slots.
+
 **USB** (V5 step 4):
 - Ten Cadence CDNSP controllers, xHCI 1.10 with 64-byte contexts, not coherent (`_CCA` 0). UEFI leaves them in host mode, so an xHCI reset is all they need. XHC0–5 have two ports (USB 2 port 1, USB 3 port 2), USB0–3 one (USB 2).
 - hwdb gives xhci their `CIXH2031` descriptions (`CUBn`), on their xHCI windows and host lines alone. The `PNP0D10` ones are aliases. Three of the latter are disabled by VQ42, but the CIXH2031s' `_STA` isn't, so all ten run.

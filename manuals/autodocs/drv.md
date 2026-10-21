@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers) step 3's (two ports a device, `DRVF_AGAIN`) and step 4's (`drv_io_barrier`).*
+*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers) step 3's (two ports a device, `DRVF_AGAIN`), step 4's (`drv_io_barrier`) and step 5's (`every_line`).*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 
@@ -161,7 +161,7 @@ drv_main -- a driver's main loop
 **FUNCTION**
 Runs a driver, given its token (its `main`'s argument) and its callbacks:
 1. Connects to "hwdb", asks for its devices (`HWDB_BIND`), checks the answer and maps every range of registers where it is. A device may have no registers (`dd_Size` 0, and no line): QEMU's power model, which hwdb's test mode adds, is leased no range at all.
-2. Calls `bind` for each device: `DRV_OK` to take it, `DRV_DECLINE` (not one this driver drives), or a negative error, which ends the process. Binds each taken device's line, or its MSI-X lines (`dd_NLines`).
+2. Calls `bind` for each device: `DRV_OK` to take it, `DRV_DECLINE` (not one this driver drives), or a negative error, which ends the process. Binds each taken device's line, or its MSI-X lines (`dd_NLines`), or, if `every_line` is set, every line its description gives it (`dd_NLines` from `dd_Line` on: the G720's job, MMU and GPU lines). `interrupt` is called once for any of a device's lines; it reads the device to see which.
 3. Calls `start` for each taken device, to publish its class port (`drv_publish`).
 4. Tells hwdb what it took and published (`HWDB_STARTED`). A driver that took nothing exits 0.
 5. Loops: accepts clients at the class ports (8 a port, `DRV_CLIENTS`), calls `interrupt` when a device's line fires and acknowledges it, and gives each client message to `request` (answered when it returns) or `message` (answered with `drv_reply`). With a `poll` callback that says work is outstanding, it looks again without sleeping. With a `deadline` callback that gives a time, it sleeps until then at most and calls `poll` (a command whose interrupt may not come).
@@ -172,7 +172,7 @@ It exits when hwdb's connection goes.
 
 **INPUTS**
 - `token` -- `main`'s argument, from hwdb.
-- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`. Any but `name` and `bind` may be `nullptr`.
+- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`, and the flag `every_line`. Any but `name` and `bind` may be `nullptr`.
 
 **EXAMPLE**
 From `drv/nvme/main.c`:

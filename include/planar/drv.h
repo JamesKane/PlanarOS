@@ -55,7 +55,9 @@ struct DrvDevice {
     /* A PCI function's MSI-X: dd_NLines vectors, vector i on line dd_Line
      * + i, each written as event i to dd_MsiDoorbell. The driver fills
      * the table at dd_MsixTable (in its registers) and unmasks it; pci
-     * has enabled MSI-X. dd_NLines is 0 with no MSI-X, or no ITS. */
+     * has enabled MSI-X. With no MSI-X (dd_MsiDoorbell 0), dd_NLines is
+     * how many of the device's own lines there are from dd_Line on: the
+     * library binds them all only if the driver says so (every_line). */
     uint64_t dd_MsiDoorbell;
     uint64_t dd_MsixTable;
     uint32_t dd_NLines;
@@ -186,6 +188,9 @@ struct drv_ops {
      * of the driver's is to be let go (§11.5, per-connection state). It
      * may still have messages unanswered; drv_reply them as before. */
     void (*gone)(struct drv *d, struct drv_dev *dev, unsigned c);
+    /* Bind every line a device has (dd_NLines), not only its first: a
+     * device with a line per source (the G720's job, MMU and GPU). */
+    bool every_line;
 };
 
 struct drv {

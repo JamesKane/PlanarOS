@@ -9,7 +9,8 @@
  * of it. The server also leaves a port "conn2" behind when it exits,
  * with a connection it never accepted, which the client must hear has
  * gone; and the client leaves that connection open when it exits: the
- * kernel must close both. Exits 0 if every check passed, otherwise with the number of the
+ * kernel must close both. The client lends the server an Area, which
+ * the server lets go of with ReleaseArea (v5-plan step 5). Exits 0 if every check passed, otherwise with the number of the
  * first that failed. Rings come with lib/exec (V2 step 2).
  */
 #include <planar/ipc.h>
@@ -47,6 +48,7 @@ static int server(void)
 {
     int64_t psig = AllocSignal(-1), csig = AllocSignal(-1);
     struct ConnArena *a = nullptr;
+    struct AreaInfo info;
     Handle port, conn;
     int64_t r;
 
@@ -80,6 +82,20 @@ static int server(void)
             Wait(1ULL << csig);
         CHECK(SignalConn(conn) == 0);
     }
+
+    /* What the client lent it, let go (ReleaseArea): only that, once. */
+    {
+        void *lent = (void *)heap_word(a)[2], *mine;
+        int64_t area = AllocArea(4096, 0, &mine);
+
+        CHECK(lent && QueryArea(lent, &info) == 0 && info.ai_Area == 0 && info.ai_Sharers == 2);
+        CHECK(ReleaseArea(a) == ERR_RIGHTS);            /* the kernel's: the arena */
+        CHECK(area > 0 && ReleaseArea(mine) == ERR_RIGHTS);
+        CHECK(FreeArea((Handle)area) == 0);
+        CHECK(ReleaseArea(lent) == 0);
+        CHECK(QueryArea(lent, &info) == ERR_NOTFOUND);
+        CHECK(ReleaseArea(lent) == ERR_NOTFOUND);
+    }
     CHECK(CloseConn(conn) == 0);
     CHECK(SignalConn(conn) == ERR_BADHANDLE);
     return 0;
@@ -91,7 +107,8 @@ static int client(Handle stranger)
     struct ConnArena *a = nullptr, *a2 = nullptr;
     struct AreaInfo info;
     Handle conn, server = 0;
-    int64_t r;
+    int64_t r, lent = 0;
+    void *lent_at = nullptr;
 
     role = "conn client";
     CHECK(sig > 0);
@@ -132,6 +149,11 @@ static int client(Handle stranger)
             CHECK(ProtectArea((Handle)area, AREAR_READ | AREAR_EXEC) == ERR_RIGHTS);
             CHECK(FreeArea((Handle)area) == 0);
             CHECK(QueryArea(a, &info) == 0 && info.ai_Sharers == 2);
+
+            /* One kept, lent to the server, which lets it go. */
+            lent = AllocArea(4096, 0, &lent_at);
+            CHECK(lent > 0 && ShareArea((Handle)lent, server, AREAR_READ | AREAR_WRITE) == 0);
+            heap_word(a)[2] = (uint64_t)lent_at;
             CHECK(OpenPort("conn2", sig, 0, 0, &a2) > 0);
             CHECK(a2->ca_Closed == 0);
         }
@@ -144,6 +166,8 @@ static int client(Handle stranger)
     CHECK(SignalConn(conn) == ERR_PORT_DIED);
     CHECK(SignalWaitConn(conn, 1ULL << sig) == 0);
     CHECK(QueryArea(a, &info) == 0 && info.ai_Sharers == 1);
+    CHECK(QueryArea(lent_at, &info) == 0 && info.ai_Sharers == 1);    /* released */
+    CHECK(FreeArea((Handle)lent) == 0);
     CHECK(CloseConn(conn) == 0);
     CHECK(QueryArea(a, &info) == ERR_NOTFOUND);
     {

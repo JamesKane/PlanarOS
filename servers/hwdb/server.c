@@ -510,6 +510,8 @@ static bool stop(struct unit *u, uint64_t quarantined)
         return stop_display(u);
     if (hw_streq(name, "xhci"))
         return stop_xhci(u);
+    if (hw_streq(name, "gpu-panthor"))
+        return stop_gpu(u);
     return quarantined == 0;    /* none: only a device that kept no DMA is safe (VQ24) */
 }
 
@@ -687,9 +689,25 @@ static void bind_reply(struct unit *u, struct HwdbMsg *m)
                         d->dd_Line = l;
         }
         /* MSI-X's: its lines, in order from dd_Line (hw_lease_late's order). */
-        if (d->dd_MsiDoorbell && d->dd_Line != DRV_NOLINE)
+        if (d->dd_MsiDoorbell && d->dd_Line != DRV_NOLINE) {
             for (unsigned q = 0; q < n->nres; q++)
                 d->dd_NLines += n->res[q].kind == HW_IRQ && n->res[q].base != HW_NOLINE;
+        } else if (d->dd_Line != DRV_NOLINE) {
+            /* Its own lines, as far as they follow each other in the
+             * lease (they do for a device alone in one: the G720's). */
+            unsigned l = d->dd_Line;
+
+            for (unsigned q = 0; q < n->nres; q++) {
+                const struct hw_res *r = &n->res[q];
+
+                if (r->kind != HW_IRQ || r->base == HW_NOLINE)
+                    continue;
+                if (l >= ls->nlines || ls->lines[l] != r->base)
+                    break;
+                l++;
+            }
+            d->dd_NLines = l - d->dd_Line;
+        }
         for (; key[k] && k < sizeof d->dd_Key - 1; k++)
             d->dd_Key[k] = key[k];
     }

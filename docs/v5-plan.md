@@ -232,6 +232,40 @@ On the boards nobody types for the test, which says so ("typing not exercised");
 
 ## 5. `gpu-panthor` on the CIX
 
+**Done (2026-10-21), on the CIX.** An app takes a queue of its own from `gpu.0`, writes CSF instructions into its own ring and rings its own doorbell. The doorbell-to-update time for the first job is 25–50 µs. Only 2 kernel calls are made machine-wide meanwhile, both the test's own timing. 1,000 jobs take 11 µs each, and a job waited for with `WaitAddr`, woken by the server, takes 16 µs. The class is [Devices ch. 9](../manuals/devices/09-gpu.md).
+
+- **The class** (`planar/devices/gpu.h`): `GPU_OPEN`, `GPU_MAP`/`GPU_UNMAP` (a whole `AREAF_NC` Area the client shared with the server, mapped at its own address in the client's own GPU address space), `GPU_QUEUE` (the ring's input and output pages and the doorbell page, shared with the client), `GPU_STATUS` (faults).
+- **The driver** (`drv/gpu-panthor`, about 1,600 lines): bring-up from the loop, since nothing may read the GPU before it has power; the firmware read through `dos`; the MCU's address space and one per client; one group per client, pinned to a slot with its doorbell, as panthor numbers them (slot *n*, address space and doorbell *n* + 1); the job line's events (sync updates woken, stream faults); the 12 s ping.
+- **hwdb**: the G720 matched (`CIXH5000`); RST0's page added to its lease, and taken from PDC0, RST0 and CRU0, which nobody drives; a new quirk, `HW_Q_POWER`, which has hwdb vote for a named set before the lease; `stop_gpu` (MCU off, soft reset, unless it was never powered or is held in reset); and the kill test's `T_GPU` (`servers/hwdb/gpu.c`, with `conformance/gputest.c`).
+- **The firmware** is copied from `/Volumes/nas/firmware` into the build, checked against its SHA-256, and installed as `DEVS/mali_csffw.bin` with each CIX run (`mk/uefi-a64.mk`; decision 5).
+- **A kernel call, 53: `ReleaseArea(address)`.** A process lets go of an Area another process shared with it. Only an Area's owner could take a share back, so what a dead client had lent `gpu-panthor` would have stayed mapped in it, held, until the server died. Tested by `conformance/conn.c`.
+- **drv.library**: `every_line` binds all of a device's own lines, and hwdb now gives `dd_NLines` for a device with several (the G720's job, MMU and GPU lines).
+
+**Tested** on the CIX by the kill test's GPU phase, three rounds:
+- `gputest` takes a queue and runs a job, 1,000 more, then one waited for;
+- a second `gputest` running jobs without end is killed under them, and a third round runs after it;
+- `gpu-panthor` is killed under that third client, which connects to the restarted server and runs a round again.
+
+The kill rounds kill `gpu-panthor` too, during bring-up and after, with no client. On QEMU the phase says "not exercised: no GPU here".
+
+**Found on the board:**
+- **UEFI leaves the GPU held in reset**: RST0 `0x400` bit 6 is clear. Until it's released, the first GPU register read is refused and the CPU takes an SError. The driver pulses it on every start, after power and before reading, as the vendor's tree does: 20 ms each way, read-modify-write, since the word is also the DDR controller's, the GIC's and the NoCs'.
+- **Pulsing the RCSU's reset (`0x800` bit 28) breaks the RCSU.** TF-A's interconnect monitor then refuses every access to it ("IDM: GPU secure access"). Only the GPU's reset is pulsed.
+- **A refused access wedges the board.** TF-A prints IDM errors without end, and the watchdog can't reset it; only a power cycle does. So nothing may touch a GPU register unless the GPU has power and is out of reset:
+  - The driver's own vote for `"gpu"` went with its death, before hwdb's stop wrote to the GPU, so hwdb votes instead (`HW_Q_POWER`), and its vote goes only after the stop.
+  - A driver killed during its reset pulse leaves the GPU held in reset, so `stop_gpu` leaves a GPU in reset alone.
+- **The extract pointer is lazy.** The firmware moves `gq_Extract` when it gets to it, not at each job.
+- The CSF's global interface reports version 1.1, with 8 group slots. The address spaces number 8, so 7 queues are given to clients.
+
+**Corrected:**
+- The plan's five power-on steps are four on this firmware: power's set, GPUP's `_ON`, the reset pulse, and the Q-channel. The memory repair runs only if RST0's strap (`0x504` bit 4) asks, and it didn't on this board.
+- Mesa's `genxml` wasn't needed: V5's job uses only `MOV48`, `SYNC_ADD64` and `ERROR_BARRIER`, whose encodings are panthor's own. `SYNC_WAIT` waits for V6.
+
+**Not yet:**
+- More groups than slots; compute and the tiler heap (V6).
+- A fault reaching the client as a message: it's kept for `GPU_STATUS`, and the client's sync object doesn't move.
+- The step 7 costs under load.
+
 **This is where Planar goes past Linux.** panthor doesn't map doorbells into user space: the kernel writes the ring and rings the doorbell for every job. Planar gives the app its queue instead.
 
 - **Doorbells have a 64 KiB page each:** `CSF_DOORBELL(i)` at `0x15090000 + i × 0x10000`. Doorbell 0 is the global interface and stays with the server. The rest go one per app, through step 1's sub-lease.
@@ -271,7 +305,7 @@ The BXE-2-32 is Rogue core **36.29.52.182**, with a MIPS firmware processor. The
 - **The CIX:** `drm-panthor-kmod` (FreeBSD's panthor, with the power-on glue), `drm-komeda-kmod`, `freebsd-src/sys/arm64/cix`, AbyssBSD's notes for the Orange Pi 6 Plus, the board's own DSDT (`boards/cix-p1/acpi`), and the vendor kernel's `orange-pi-6.6-cix` branch.
 - **The RV2:** mainline's `imagination` driver (the firmware's interface), the vendor kernel's `orange-pi-6.6-ky` branch (`img-rogue` for the core's facts, `ky`, `soc/ky`, `clk/ky`), and omega's `plat/ky-x1`.
 - **Firmware:** `/Volumes/nas/firmware`, which has `mali_csffw.bin` and `rogue_36.29.52.182_v1.fw`.
-- **Not found locally:** Mesa's `genxml` for CSF.
+- **Not found locally:** Mesa's `genxml` for CSF (not needed in V5, step 5).
 
 ## Carried in from V4
 

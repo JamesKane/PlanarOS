@@ -62,6 +62,10 @@ int64_t AllocArea(uint64_t size, uint32_t flags, void **address);   /* handle, o
 int64_t FreeArea(Handle area);
 int64_t ShareArea(Handle area, Handle task, uint32_t rights);
 int64_t UnshareArea(Handle area, Handle task);
+/* The caller's own mapping of an Area another process shared with it,
+ * let go (v5-plan step 5): ERR_RIGHTS for one of its own or the
+ * kernel's, ERR_NOTFOUND if nothing's mapped there. */
+int64_t ReleaseArea(const void *address);
 int64_t ProtectArea(Handle area, uint32_t rights);
 int64_t QueryArea(const void *address, struct AreaInfo *info);
 

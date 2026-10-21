@@ -50,7 +50,7 @@ constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
 enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_POWER,
-                       T_DISPLAY, T_INPUT, T_STOP, T_END };
+                       T_DISPLAY, T_INPUT, T_GPU, T_STOP, T_END };
 
 enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
 
@@ -313,6 +313,10 @@ static void settle(void)
 
             if (!(u->accepted & 1u << k) || !u->ports[k][0] || hw_streq(u->ports[k], "power"))
                 continue;           /* power's is the power test's (power.c) */
+            if (hw_strneq(u->ports[k], "gpu.", 4)) {
+                any = true;         /* killed in the rounds; its client is the GPU test's (gpu.c) */
+                continue;
+            }
             for (unsigned q = 0; q < sizeof c->port; q++)
                 c->port[q] = u->ports[k][q];
             c->kind = hw_strneq(u->ports[k], "rtc.", 4)                                  ? K_RTC
@@ -754,6 +758,10 @@ static void step(void)
         break;
     case T_INPUT:
         if (input_test())
+            phase = T_GPU;
+        break;
+    case T_GPU:
+        if (gpu_test())
             phase = T_STOP;
         break;
     case T_STOP:
@@ -779,6 +787,7 @@ uint64_t test_deadline(void)
     case T_POWER:
     case T_DISPLAY:
     case T_INPUT:
+    case T_GPU:
         return hwdb.now + 5 * MS;
     default:
         return 0;

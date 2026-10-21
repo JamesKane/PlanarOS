@@ -28,12 +28,27 @@ else
 EXPECT := efi-boot: the board reset itself
 endif
 
+# The GPU's firmware (v5-plan decision 5): not in the repository, but
+# copied from the NAS into the build, checked by its SHA-256, and
+# installed as DEVS/mali_csffw.bin, where gpu-panthor reads it.
+FIRMWARE_DIR ?= /Volumes/nas/firmware
+MALI_FW := $(BUILD)/firmware/mali_csffw.bin
+MALI_FW_SHA256 := 267f958f7e63065b8cdb6c2119526f92f0860b2376ad4b00bcc121727d6c4ed5
+
+$(MALI_FW):
+	@mkdir -p $(dir $@)
+	@test -f $(FIRMWARE_DIR)/mali_csffw.bin || \
+	  { echo "no $(FIRMWARE_DIR)/mali_csffw.bin (set FIRMWARE_DIR=...)"; exit 1; }
+	@echo "$(MALI_FW_SHA256)  $(FIRMWARE_DIR)/mali_csffw.bin" | shasum -a 256 -c --status || \
+	  { echo "$(FIRMWARE_DIR)/mali_csffw.bin isn't the firmware expected"; exit 1; }
+	cp $(FIRMWARE_DIR)/mali_csffw.bin $@
+
 # The commands and scripts it loads from storage (Makefile's DISK_FILES),
-# installed next to the image.
+# and the firmware, installed next to the image.
 RUN_CMD = python3 -I tools/efi-boot.py --host $(BOARD) --port $(SERIAL) --image $(IMAGE) \
 	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/efi-boot.log \
-	$(foreach f,$(DISK_FILES),--file $(f))
-TEST_DEPS = $(DISK_DEPS)
+	$(foreach f,$(DISK_FILES) $(MALI_FW):DEVS/mali_csffw.bin,--file $(f))
+TEST_DEPS = $(DISK_DEPS) $(MALI_FW)
 
 run: $(IMAGE) $$(TEST_DEPS)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }

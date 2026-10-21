@@ -64,7 +64,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 | `input` | Keys and the mouse to one client, on a ring it maps; USB HID boot keyboards and mice from `xhci`, which drives xHCI (the CIX's Cadence, the K1's DWC3, QEMU's) and hubs. Built in V5 step 4. | CIX |
 | `audio` | Real-time SIMD voice/stream mixer, Paula-style precedence and exclusive DMA leases over HDA (CIX ALC269), I²S (RK3588/K1) and `virtio-snd` ([§15](15-audio-dsp.md), proposed). | QEMU / CIX |
 | `net` | RTL8125 (PCIe), the K1 EMAC, and a TCP/IP stack (**VQ15**). | later |
-| `gpu-*` | One per GPU family, granting queue leases (§5). | CIX (Panthor, G720), then RK3588 |
+| `gpu-*` | One per GPU family, granting queue leases (§5). `gpu-panthor` drives the CIX's G720: an app's own queue, rung by its own doorbell, with no kernel call per job (V5 step 5). | CIX (Panthor, G720), then RK3588 |
 | `npu-*` | Per NPU family. | CIX / RK3588 |
 
 ## 2.5 Boot

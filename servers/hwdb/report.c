@@ -186,6 +186,13 @@ static void resources(const struct hw_graph *g, const struct hw_node *n, hw_prin
         hw_put_hex(&l, n->dma_limit);
         out(ctx, l.text);
     }
+    if (n->power_set) {
+        struct hw_line l = { 0 };
+
+        hw_put(&l, "  power's set ");
+        hw_put(&l, n->power_set);
+        out(ctx, l.text);
+    }
     if (n->call) {
         struct hw_line l = { 0 };
 

@@ -154,6 +154,8 @@
         kprintf("V5.3 done\n");
         kprintf("V5.4 input skipped: no tasks\n");
         kprintf("V5.4 done\n");
+        kprintf("V5.5 gpu skipped: no tasks\n");
+        kprintf("V5.5 done\n");
         arch_halt();
     }
     sched_idle();

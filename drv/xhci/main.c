@@ -272,7 +272,7 @@ static int bind(struct drv *d, struct drv_dev *dev)
         c->cap = nullptr;
         return DRV_DECLINE;
     }
-    if (info->dd_NLines && info->dd_MsixTable && info->dd_MsixTable >= info->dd_Base &&
+    if (info->dd_MsiDoorbell && info->dd_MsixTable && info->dd_MsixTable >= info->dd_Base &&
         info->dd_MsixTable - info->dd_Base + 16 <= info->dd_Size)
         msix(info);
     c->irq = info->dd_Line != DRV_NOLINE;
@@ -303,7 +303,7 @@ static int bind(struct drv *d, struct drv_dev *dev)
     lput(&l, "), ");
     lnum(&l, c->ctx, 10);
     lput(&l, "-byte contexts, ");
-    lput(&l, info->dd_NLines ? "MSI-X" : c->irq ? "its line" : "polled");
+    lput(&l, info->dd_MsiDoorbell ? "MSI-X" : c->irq ? "its line" : "polled");
     xsay(c, &l);
     return DRV_OK;
 }

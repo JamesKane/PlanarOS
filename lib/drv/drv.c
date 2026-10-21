@@ -147,6 +147,15 @@ uint64_t drv_wait_irq(struct drv *d, struct drv_dev *dev, uint64_t ms)
 }
 
 /* The next of 'dev's ports, named 'name' (at most 15 bytes). */
+/* The lines of a device the library binds: MSI-X's vectors, every one
+ * if the driver asks, else the first. */
+static uint32_t lines_of(const struct drv *d, const struct drv_dev *dev)
+{
+    if (dev->info->dd_NLines && (dev->info->dd_MsiDoorbell || d->ops->every_line))
+        return dev->info->dd_NLines;
+    return 1;
+}
+
 static int64_t publish(struct drv_dev *dev, const char *name)
 {
     unsigned p = 0, n = 0;
@@ -292,7 +301,7 @@ static void serve(struct drv *d, unsigned pos)
         taken += dev->accepted;
         if (dev->accepted && dev->info->dd_Line != DRV_NOLINE) {
             /* Its line, or its MSI-X vectors' lines from there. */
-            for (uint32_t k = 0; k < (dev->info->dd_NLines ? dev->info->dd_NLines : 1); k++) {
+            for (uint32_t k = 0; k < lines_of(d, dev); k++) {
                 uint32_t line = dev->info->dd_Line + k;
 
                 if (line >= LEASE_IRQS || BindIrq(drv_lease(d), line, SIG_LINE0 + line) != 0)
@@ -363,7 +372,7 @@ static void serve(struct drv *d, unsigned pos)
                 }
         for (unsigned i = 0; i < d->ndev; i++) {
             struct drv_dev *dev = &d->dev[i];
-            uint32_t n = dev->info->dd_NLines ? dev->info->dd_NLines : 1;
+            uint32_t n = lines_of(d, dev);
             uint64_t mine = 0;
 
             if (!dev->line_bound)

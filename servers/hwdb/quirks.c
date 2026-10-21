@@ -73,6 +73,25 @@ const struct hw_quirk hw_quirk_table[] = {
     { "CIXTEK SKY1EDK2", HW_Q_CALL, "/_SB_/SHM0", "0xc2000001" },
 
     /*
+     * The CIX's G720 (drv/gpu-panthor). Its power-on is GPUP's power
+     * resource and memory repair, in its RCSU (its first window), and a
+     * its resets in RST0's page, which also holds the DDR controller's,
+     * the GIC's and the NoCs' resets, and the memory-repair strap (DMRP's
+     * MVCK): the driver reads the strap, and sets its own two reset bits
+     * there, read-modify-write, if they're held, and changes nothing else. The
+     * three nodes that list that page (the power-domain controller, RST0
+     * and CRU0) have no driver, so the page is taken from them.
+     */
+    { "CIXTEK SKY1EDK2", HW_Q_MMIO, "/_SB_/GPU_", "0x16000000 0x1000" },
+    /* Its domain and clocks (SCMI's), which ACPI doesn't name: hwdb votes
+     * for them before the lease, so they stay on until a dead driver's
+     * GPU is stopped (stop_gpu touches its registers). */
+    { "CIXTEK SKY1EDK2", HW_Q_POWER, "/_SB_/GPU_", "gpu" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/PDC0", "0" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/RST0", "0" },
+    { "CIXTEK SKY1EDK2", HW_Q_REGS, "/_SB_/CRU0", "0" },
+
+    /*
      * The CIX's monitor is on DPU4 (through DP04 and the PS185), where
      * the GOP left its framebuffer scaled to the mode it chose. The other
      * four DPUs are dark, and display doesn't wake them.
@@ -224,6 +243,9 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
             g->nodes[id].dma_limit = hex(&c);
             break;
         }
+        case HW_Q_POWER:
+            g->nodes[id].power_set = q->arg;
+            break;
         case HW_Q_CALL: {
             const char *c = q->arg;
 
