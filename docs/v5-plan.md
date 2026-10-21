@@ -126,13 +126,66 @@ No CIX driver references power: ACPI names no SCMI resource, so hwdb votes for n
 
 ## 3. Native scanout
 
-The firmware already lit one output on each board, and both drivers take it over rather than set a mode. Mode setting, EDID and a second monitor come later.
+**Done (2026-10-21), on QEMU and both boards.** `display` takes over the mode the firmware left, without setting one, draws the text console on plane 0, and gives clients an overlay and a cursor plane above it.
 
-- **The CIX.** The monitor is on DPU4, through DP04 and a PS185 DisplayPort-to-HDMI converter. The DPU is komeda's D71 family. `display` walks its 0x200-byte blocks, finds the output block the firmware enabled and reads its timing, as `drm-komeda-kmod/freebsd/komeda_freebsd_bus.c` does. A flip writes a layer's `P0_PTR` and stride, then `GCU_CONFIG_VALID0`. Vblank is the output block's `DOU_IRQ_PL0`. **Never reset it:** a reset drops the DisplayPort link for good. About 300 to 500 lines.
-- **The RV2.** The saturn DPU at `0xc0440000` has 4 RDMA channels and 8 planes, one of them a cursor. U-Boot scans out on RDMA 3. A flip writes its base address and `CTL2_CFG_RDY` (`0x56c`), which the hardware clears when it latches at frame start. Vblank is on line 139. The DPU's MMU stays off (`TBU_Ctrl = 0`, the vendor driver's `contig_mem` path). omega knows the same registers. Reference: the vendor kernel's `drivers/gpu/drm/ky`.
-- **The interface `intuition` will use** (§16.3): a plane takes an Area, a rectangle and a format; a commit is latched at vblank; and each output shares a sync page with `disp_seq` and `safe_seq`, woken by `WakeAddr`. V5 builds the mechanism. The plane planner and screen dragging are V6's (VQ31, VQ39).
-- **Restart without a blank.** A restarted `display` reads the current plane state back from the registers and goes on. While a plane shows an Area, `display` holds it, so a dying client's buffer isn't freed until a vblank has passed (§16.6).
-- **The text console moves onto a plane.** The Shell looks the same.
+- **The class** (`planar/devices/display.h`). Two ports on one output. `con.0` is the console as before. `display.0` handles the planes:
+  - `DISPLAY_INFO` gives the size, the planes' formats and limits, the sync page, and how many buffers are allocated.
+  - `DISPLAY_ALLOC` makes a buffer, as a DMA Area of display's lease that the controller can reach, mapped into the client.
+  - `DISPLAY_COMMIT` sets some planes at once and answers at once with the commit's number. The controller takes it at the next latch, and commits between two latches go together.
+  - `DISPLAY_FREE` frees a buffer the screen no longer shows.
+  - A plane belongs to the client that first commits to it. Plane 0 is the console's.
+  - **The sync page** (§16.3 pillar 4) holds `ds_Vblank`, `ds_Time`, `ds_Disp` and `ds_Safe`, each woken by `WakeAddr`. On these controllers `ds_Safe` moves with `ds_Disp`.
+- **Buffers are the server's**, so a client can't take one from under a scanout (§16.6).
+  - When a client goes, its planes go off at the next latch, and its buffers are freed after that latch.
+  - When display goes, the kernel holds the buffers a client still maps, counted as the lease's quarantine. hwdb's stop method turns every plane off but the console's and waits for the latch. RevokeLease then makes each held buffer an ordinary Area, freed when the client lets go (`area_hold_lent`, `lease_dma_lent`).
+- **Restart without a blank.** hwdb's stop method never resets the controller (`servers/hwdb/display.c`, with `komeda.h` and `saturn.h` shared with display). The restarted display gets `DRVF_AGAIN`, finds the console's text still there, and goes on over its bottom line.
+- **The K1** (`saturn.c`), the HDMI DPU at `0xc0440000`, pipeline 2:
+  - U-Boot's layer is RDMA 3 in composer slot 0. display moves it to slot 7, the bottom.
+  - The overlay is RDMA 2 in slot 6, and the cursor RDMA 0 in slot 0.
+  - The line buffer RDMAs 2 and 3 share, which U-Boot leaves overlapping, is split between them.
+  - A commit ends with `CTL2_CFG_RDY`, which the hardware clears at the latch.
+  - The vblank is the vsync interrupt, line 139, added by a quirk because U-Boot's tree lists none.
+- **The CIX** (`komeda.c`), DPU4, a Linlon-D60:
+  - display walks its blocks.
+  - The planes are layers the GOP left off, fed into compiz inputs above the GOP's.
+  - A commit ends with `GCU_CONFIG_VALID0`. The vblank is the DOU's PL0.
+  - It is never reset. DPU0–3 are excluded.
+- **QEMU** (`fb.c`): the framebuffer alone. The console draws in a copy, and display composes the planes over it at 60 ticks a second. Its buffers are DMA Areas too, so the held-buffer path runs on every QEMU boot.
+- **hwdb**: `HW_Q_SCANOUT` leases a controller and the framebuffer it scans out to one process; `HW_Q_IRQ` adds a line the firmware doesn't list.
+- **The driver library**: a device may publish two ports (`DRV_PORTS`), and `DRVF_AGAIN` tells a driver that it's a restart.
+
+**Tested by** `make display-test` on the host (89 checks):
+- each DPU backend against made-up registers laid out as the firmware leaves them, with a thread standing in for the latch;
+- commits latched at the vblank and not before, and coalescing;
+- clipping at the screen's edges;
+- the refusals;
+- a client's going;
+- hwdb's stop method leaving the firmware's plane alone;
+- fb.c's composition and blending.
+
+On every QEMU boot under edk2, and on both boards, the kill test's `T_DISPLAY` phase runs `conformance/displaytest.c`:
+- the refusals, then 30 flips of the overlay with the cursor moving partly off the screen, each waited for on `ds_Disp`;
+- the client killed, and its buffers checked freed;
+- planes shown again, display killed under them, the client finding its buffers still writable and display back with none of them.
+
+The kill test also kills display as the console's driver, and uses it for the give-up case on the boards.
+
+**Corrected:**
+- **Neither DPU has a cursor in hardware.** The cursor is an ordinary plane on top, clipped by display (§16.7 says otherwise).
+- **The CIX's latch is `GCU_CONFIG_VALID0`**, not `LPU_FLUSH` (§16.3). On the K1 it's `CTL2_CFG_RDY`.
+- **The CIX's DPU isn't coherent** (`_CCA` 0). The AArch64 `drv_dma_clean` and `drv_dma_flush` only ordered writes, on the belief that Planar's Arm machines snoop. They now clean and invalidate by address. The kernel lets EL0 do so and read `CTR_EL0` (`SCTLR_EL1.UCI` and `UCT`).
+- **The boot framebuffer's lease is mapped cached**, not as a device. The console cleans what it draws. Reading a 1920×1080 screen back through a device mapping, to scroll, took seconds on the CIX.
+- **The kernel's wait for hwdb's test** went from 15 s to 40 s. The boards' kill test takes most of 15 s by itself.
+
+**On the CIX** (2026-10-21, `make PLATFORM=uefi-a64 test`):
+- The GOP's mode is 1920×1080 at 60 Hz, one layer straight into compiz input 0, with no scaler.
+- Each flip was on the screen about two frames (33 ms) after its commit.
+- The screen, checked by eye, was right. The first run showed stale memory on the top half: the cache wasn't cleaned.
+
+**On the RV2** (2026-10-21, `make PLATFORM=ky-x1 test`):
+- U-Boot's mode is 1920×1080 at 60 Hz.
+- Each flip was on the screen one frame (16.5 ms) after its commit, as omega measured.
+- The console's move to the bottom slot didn't show. The screen, checked by eye, looked like the CIX's.
 
 ## 4. USB input
 

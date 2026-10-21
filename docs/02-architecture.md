@@ -60,7 +60,7 @@ Not in the kernel: filesystems, ELF loading, device drivers, GPU and NPU schedul
 | `power` | Clocks, regulators, resets and power domains, using SCMI (CIX), the RK806 PMIC with the CRU (RK3588), the K1 PMU, or RPMh (Q8B). The hwdb asks `power` to turn a node on before it grants the node's MMIO lease, so a driver never touches an unpowered device (§11.5; built in V5 step 2 for the K1 and the CIX). CIX raises SError if anything reads a GPU register too early. | all |
 | `dos` + handlers | Namespace and assigns. The FAT32 handler is needed for the EFI system partition. Later a modern native filesystem: journaled or CoW metadata, extents and checksums, but no snapshots or encryption (**VQ14**, **VQ14a**). | RV2 |
 | `blk` drivers | SDHCI, eMMC, NVMe (PCIe), and later UFS. | RV2 / RK3588 |
-| `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. | RV2 (Omega A2 already has flips and a sprite plane) |
+| `display` | Scanout through the DPU, VOP2, Linlon or MDSS: screens and planes, flips at vblank. Built for the K1 and the CIX on the firmware's mode (V5 step 3). | RV2 (Omega A2 already has flips and a sprite plane) |
 | `input` | USB HID through an xHCI/DWC3 driver. | CIX |
 | `audio` | Real-time SIMD voice/stream mixer, Paula-style precedence and exclusive DMA leases over HDA (CIX ALC269), I²S (RK3588/K1) and `virtio-snd` ([§15](15-audio-dsp.md), proposed). | QEMU / CIX |
 | `net` | RTL8125 (PCIe), the K1 EMAC, and a TCP/IP stack (**VQ15**). | later |

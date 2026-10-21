@@ -25,6 +25,7 @@ Taken on 2026-10-20 from the board, for hwdb's tests (docs/v4-plan.md step 2).
 ## Facts found running Planar
 
 - **Power** (V5 step 2): every clock, reset and domain V5 drives is in the APMU's page (`0xd4282000`), which `power` leases alone. The GPU's domain (APMU `0xd0`, status `0xf0` bit 0) comes on by the vendor's software sequence and goes off again. SD's clocks and resets are on from U-Boot, so power keeps them.
+- **The screen** (V5 step 3): the HDMI DPU at `0xc0440000` (the dpu node's second window), U-Boot's layer on RDMA 3, 1920×1080 at 60 Hz. display moves that layer's composer slot from 0 to 7 and splits RDMA 2's and 3's shared line buffer; neither shows. Its vsync is line 139. A commit is on the screen one frame later (16.5 ms).
 - **Svpbmt works** on the X60, though U-Boot's ISA string doesn't list it: the kernel's probe maps uncached memory (V5 step 1).
 
 - **DMA isn't cache-coherent** on the K1 (Linux: `dma-noncoherent` on the SoC bus). The X60 has Zicbom with 64-byte blocks; drivers clean and flush through it.
