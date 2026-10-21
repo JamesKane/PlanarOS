@@ -6,8 +6,8 @@
  * ASID (16 bits where ID_AA64MMFR0 says so, else 8), so switching is one
  * TTBR0 write. The kernel's own domain is an empty table with ASID 0.
  * User pages are non-global, never executable by the kernel (PXN), and
- * normal write-back memory, or Device-nGnRE and never executable for a
- * lease's registers (MAP_DEVICE). TLB invalidation uses the inner-shareable
+ * normal write-back memory, normal non-cacheable memory (MAP_NC), or
+ * Device-nGnRE and never executable for a lease's registers (MAP_DEVICE). TLB invalidation uses the inner-shareable
  * TLBI forms, which reach every CPU.
  */
 #include "aarch64.h"
@@ -20,6 +20,7 @@ constexpr uint64_t DESC_VALID = 1ULL << 0;
 constexpr uint64_t DESC_TABLE = 3;          /* levels 0-2 */
 constexpr uint64_t DESC_PAGE  = 3;          /* level 3 */
 constexpr uint64_t ATTR_DEVICE = 1ULL << 2; /* MAIR index 1: Device-nGnRE */
+constexpr uint64_t ATTR_NC   = 2ULL << 2;  /* MAIR index 2: Normal-NC, which may gather */
 constexpr uint64_t ATTR_NORMAL = 3ULL << 2; /* MAIR index 3 */
 constexpr uint64_t SH_INNER   = 3ULL << 8;
 constexpr uint64_t AF         = 1ULL << 10;
@@ -168,7 +169,8 @@ bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
         return false;
     if (!(e = walk(d, va, true)))
         return false;
-    bits |= flags & MAP_DEVICE ? ATTR_DEVICE | UXN : ATTR_NORMAL | SH_INNER;
+    bits |= flags & MAP_DEVICE ? ATTR_DEVICE | UXN
+            : flags & MAP_NC ? ATTR_NC | SH_INNER : ATTR_NORMAL | SH_INNER;
     bits |= flags & MAP_USER ? AP_EL0 : 0;
     bits |= flags & MAP_WRITE ? 0 : AP_RO;
     bits |= flags & MAP_EXEC && flags & MAP_USER ? 0 : UXN;
@@ -242,4 +244,21 @@ void arch_sync_icache(const void *va, size_t len)
     for (uintptr_t a = start & ~(iline - 1); a < end; a += iline)
         __asm__ volatile("ic ivau, %0" : : "r"(a) : "memory");
     __asm__ volatile("dsb ish\n\tisb" : : : "memory");
+}
+
+bool arch_has_nc(void)
+{
+    return true;
+}
+
+/* Clean and invalidate to the point of coherency (memory), every CPU. */
+void arch_dcache_flush(const void *va, size_t len)
+{
+    uintptr_t line = 4u << ((sysreg_read(ctr_el0) >> 16) & 0xf);
+    uintptr_t start = (uintptr_t)va, end = start + len;
+
+    __asm__ volatile("dsb sy" : : : "memory");
+    for (uintptr_t a = start & ~(line - 1); a < end; a += line)
+        __asm__ volatile("dc civac, %0" : : "r"(a) : "memory");
+    __asm__ volatile("dsb sy" : : : "memory");
 }

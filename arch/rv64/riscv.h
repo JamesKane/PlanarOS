@@ -58,6 +58,9 @@ void trap_init(void);
 /* mmu.c: the hart's ASID width, and a fault on a page another hart just
  * mapped (retry it). */
 void riscv_probe_asids(void);
+
+/* Zicbom's cache-block operations work in the kernel (arch.c finds out). */
+extern bool riscv_zicbom;
 unsigned riscv_asid_bits(void);
 bool riscv_fault_spurious(uint64_t va, uint64_t scause);
 

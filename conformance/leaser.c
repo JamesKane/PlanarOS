@@ -13,6 +13,8 @@
  * grants it to conformance/virtiorng.c and checks it ran; then kills a
  * second driver with DMA outstanding and checks the Areas were
  * quarantined until the device was stopped and the lease revoked.
+ * Last (v5-plan step 1), limits the lease's DMA and grants it to
+ * conformance/doorbell.c's server, which shares its page with the app.
  * Exits 0 if every check passed, otherwise with the number of the
  * first that failed.
  */
@@ -181,6 +183,44 @@ int main(uint64_t arg, uint64_t root_arg)
     CHECK(CloseHandle((Handle)d) == 0);
     Wait(1ULL << 22);
     CHECK(RevokeLease((Handle)l) == 0);
+
+    /* A DMA limit with room for one page below it: the lowest free page,
+     * held while the server is made, then let go. */
+    void *low;
+    int64_t lowa, s, c;
+
+    CHECK(LimitLeaseDma((Handle)l, 1) == ERR_BADARG);
+    CHECK(LimitLeaseDma(root, PAGE) == ERR_BADHANDLE);
+    lowa = AllocArea(PAGE, 0, &low);
+    CHECK(lowa > 0);
+    s = CreateProcess("doorbell", 1 | off / 512 << 8 | (uint64_t)l << 32, 24, PROCF_HELD);
+    CHECK(s > 0);
+    CHECK(LimitLeaseDma((Handle)l, (uint64_t)low + PAGE) == 0);
+    CHECK(QueryLease((Handle)l, &li) == 0 && li.li_DmaLimit == (uint64_t)low + PAGE);
+    CHECK(GrantLease((Handle)l, (Handle)s) == 0);
+    CHECK(LimitLeaseDma((Handle)l, 0) == ERR_BUSY);
+    /* Its app, which reads the device through the shared page, then
+     * faults on it once the server has gone: made now, and started once
+     * the server has its page, so it can't take that page first. */
+    c = CreateProcess("doorbell", 2 | (uint64_t)FindTask(nullptr) << 32, 25, PROCF_HELD);
+    CHECK(c > 0);
+    CHECK(FreeArea((Handle)lowa) == 0);
+    CHECK(StartProcess((Handle)s) == 0);
+    for (unsigned i = 0; i < 1000 && (QueryLease((Handle)l, &li), li.li_DmaPages < 1); i++)
+        sleep_ms(1);
+    CHECK(li.li_DmaPages == 1);
+    CHECK(StartProcess((Handle)c) == 0);
+    for (uint64_t got = 0; got != (1ULL << 24 | 1ULL << 25);)
+        got |= Wait(1ULL << 24 | 1ULL << 25);
+    CHECK(QueryProcess((Handle)s, &pi) == 0 && pi.pi_State == PROCS_EXITED &&
+          pi.pi_ExitCode == 0);
+    CHECK(QueryProcess((Handle)c, &pi) == 0 && pi.pi_State == PROCS_FAULTED &&
+          pi.pi_Fault == PFAULT_READ && pi.pi_FaultAddress == dev + off);
+    CHECK(CloseHandle((Handle)s) == 0 && CloseHandle((Handle)c) == 0);
+    CHECK(QueryLease((Handle)l, &li) == 0 && li.li_State == LEASES_STOPPING &&
+          li.li_Shares == 0 && li.li_QuarantinedPages == 1);
+    CHECK(RevokeLease((Handle)l) == 0);
+    CHECK(LimitLeaseDma((Handle)l, 0) == 0);
 
     CHECK(CloseHandle((Handle)l) == 0);
     CHECK(QueryLease((Handle)l, &li) == ERR_BADHANDLE);

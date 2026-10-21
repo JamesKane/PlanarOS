@@ -59,6 +59,12 @@ void arch_cpu_init(void)
      * doesn't snoop (the K1's) sees in step with the caches. The fields
      * read back 0 where there's no Zicbom. */
     __asm__ volatile("csrs senvcfg, %0" : : "r"(1UL << 6 | 1UL << 4));
+    if (!riscv_zicbom) {
+        uint64_t envcfg;
+
+        __asm__ volatile("csrr %0, senvcfg" : "=r"(envcfg));
+        riscv_zicbom = envcfg & 1UL << 6;
+    }
     /* stimecmp's reset value is unspecified: disarm before the timer
      * interrupt is enabled. Interrupts stay off until arch_irq_enable(). */
     arch_timer_arm(~(uint64_t)0);

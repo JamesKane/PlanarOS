@@ -215,6 +215,8 @@ void hw_leases(struct hw_graph *g)
                 continue;
             }
             l->nodes[l->nnodes++] = s[i].node;
+            if (d->dma_limit && (!l->dma_limit || d->dma_limit < l->dma_limit))
+                l->dma_limit = d->dma_limit;
             for (unsigned k = 0; k < d->nres; k++) {
                 const struct hw_res *q = &d->res[k];
                 bool have = false;
@@ -302,7 +304,8 @@ void hw_lease_late(struct hw_graph *g, hw_id id)
         return;
     }
     l = &g->leases[g->nleases];
-    *l = (struct hw_lease){ .driver = d->driver, .nnodes = 1, .nodes = { id } };
+    *l = (struct hw_lease){ .driver = d->driver, .nnodes = 1, .nodes = { id },
+                            .dma_limit = d->dma_limit };
     for (unsigned k = 0; k < d->nres; k++) {
         const struct hw_res *r = &d->res[k];
 

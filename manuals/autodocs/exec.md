@@ -1,6 +1,6 @@
 # exec: kernel calls
 
-*Checked against V4.*
+*Checked against V4, with V5 step 1's calls (WaitAddr, WakeAddr, `AREAF_NC`).*
 
 The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
@@ -72,13 +72,14 @@ A kernel call.
 
 **INPUTS**
 - `size` -- bytes wanted; more than 0.
-- `flags` -- any of `AREAF_CLEAR`, `AREAF_CONTIG`, `AREAF_EXEC`, `AREAF_RWX`, `AREAF_LARGE`, `AREAF_DMA32`. See [Libraries ch. 3](../libraries/03-areas.md#flags). `AREAF_DMA32` places the Area below 4 GiB, for memory a 32-bit DMA engine must reach.
+- `flags` -- any of `AREAF_CLEAR`, `AREAF_CONTIG`, `AREAF_EXEC`, `AREAF_RWX`, `AREAF_LARGE`, `AREAF_DMA32`, `AREAF_NC`. See [Libraries ch. 3](../libraries/03-areas.md#flags). `AREAF_DMA32` places the Area below 4 GiB, for memory a 32-bit DMA engine must reach. `AREAF_NC` maps it uncached, in every process that maps it, for memory a device reads without snooping the CPU's caches. Writes to it may be gathered, so put a barrier between them and a doorbell.
 - `address` -- where to store the Area's address.
 
 **RESULT**
 The Area's handle (positive), or:
 - `ERR_BADARG` -- `size` is 0, or `flags` has an unknown bit.
 - `ERR_NOMEM` -- out of memory, no run of free pages is long enough (below 4 GiB with `AREAF_DMA32`), or the system's handle table is full. A `size` of more pages than are free fails at once, before anything is allocated.
+- `ERR_NOSYS` -- `AREAF_NC`, on a CPU that can't map memory uncached (RISC-V without Svpbmt).
 - `ERR_LIMIT` -- the calling process already holds 256 handles.
 - `ERR_BADADDR` -- `address` isn't writable. The Area has been freed again.
 - `ERR_BADHANDLE` -- another task of the process freed the new handle before this call returned.
@@ -1262,3 +1263,98 @@ None known.
 
 **SEE ALSO**
 [Signal](#execsignal), [SetSignal](#execsetsignal), [SignalWaitConn](#execsignalwaitconn)
+
+---
+
+## exec/WaitAddr
+
+**NAME**
+WaitAddr -- sleep while a word in memory holds a value
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t WaitAddr(const volatile uint64_t *address, uint64_t value, uint64_t deadline);
+```
+
+**FUNCTION**
+Sleeps while the 64-bit word at `address` holds `value`. The wait ends when `WakeAddr` is called on the word, the deadline passes, or the task is killed. The call returns at once if the word holds something else.
+
+Words are matched by their physical address, so the waiter and the waker may be in different processes, each mapping the word where it is (the identity layout). The kernel lists the waiter before it reads the word, so a `WakeAddr` that comes after the word is changed is never missed.
+
+A kernel call.
+
+**INPUTS**
+- `address` -- the word: 8-byte aligned, in memory the caller maps readable.
+- `value` -- what the word held when the caller last looked.
+- `deadline` -- when to give up, in nanoseconds on `CurrentTime`'s clock; 0 for no deadline.
+
+**RESULT**
+0 when woken, or when the word didn't hold `value`. Otherwise:
+- `ERR_TIMEOUT` -- the deadline passed with the word unchanged.
+- `ERR_BADADDR` -- `address` isn't aligned or isn't mapped.
+- `ERR_NOSYS` -- a deadline, and the kernel found no timer interrupt.
+
+**EXAMPLE**
+Waiting for a sequence number to reach `want`, from `conformance/futex.c`:
+```c
+uint64_t v;
+
+while ((v = __atomic_load_n(seq, __ATOMIC_ACQUIRE)) != want)
+    if (WaitAddr(seq, v, CurrentTime() + 2000 * MS) == ERR_TIMEOUT)
+        return false;
+```
+
+**NOTES**
+- A return of 0 says nothing about the word: look at it again. Waits end early, for instance when any mapping of the word's Area goes. That includes the death of a process that shared it, which may have been the word's only writer.
+- For sequence numbers and other single-writer words only, never as a lock between processes ([docs §12.5](../../docs/12-let-it-crash.md)). A holder that died would leave the others waiting.
+- The word is read through the caller's own mapping, so it may be in an `AREAF_NC` Area that a device writes.
+- A killed task's wait ends, and the task stops on its way back to user mode.
+- On QEMU's TCG, a sequence number passed back and forth between two processes takes 35–50 µs a round trip (`conformance/futex.c` logs it).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[WakeAddr](#execwakeaddr), [Wait](#execwait), [CurrentTime](#execcurrenttime)
+
+---
+
+## exec/WakeAddr
+
+**NAME**
+WakeAddr -- wake tasks waiting on a word
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t WakeAddr(const volatile uint64_t *address, uint32_t count);
+```
+
+**FUNCTION**
+Wakes up to `count` of the tasks sleeping in `WaitAddr` on the word at `address`, in any process. Change the word first, then wake.
+
+A kernel call.
+
+**INPUTS**
+- `address` -- the word: 8-byte aligned, in memory the caller maps.
+- `count` -- the most to wake; `~0u` for all.
+
+**RESULT**
+How many it woke (0 if none were waiting), or:
+- `ERR_BADADDR` -- `address` isn't aligned or isn't mapped.
+
+**EXAMPLE**
+```c
+__atomic_store_n(seq, next, __ATOMIC_RELEASE);
+WakeAddr(seq, 1);
+```
+
+**NOTES**
+- The call always traps. A writer that wants to skip it when nobody sleeps keeps its own flag, as connection rings do with `cr_Waiting` ([docs §4.3](../../docs/04-ipc.md)).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[WaitAddr](#execwaitaddr)

@@ -146,6 +146,8 @@
         kprintf("V4.6 done\n");
         kprintf("V4.7 shell skipped: no tasks\n");
         kprintf("V4.7 done\n");
+        kprintf("V5.1 queue calls skipped: no tasks\n");
+        kprintf("V5.1 done\n");
         arch_halt();
     }
     sched_idle();

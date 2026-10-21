@@ -46,6 +46,7 @@ void lease_release(struct lease *l);
  * device may still write to it), false that area.c frees it as usual.
  */
 void lease_dma_new(struct lease *l, uint64_t pages);
+uint64_t lease_dma_limit(const struct lease *l);    /* 0: anywhere */
 bool lease_dma_gone(struct lease *l, struct area *a, uint64_t pages, bool freed);
 
 /* Leases in existence, and pages quarantined, for leak checks. */
@@ -67,6 +68,9 @@ int64_t lease_firmware_call(uint32_t root, uint64_t info_out);
 int64_t lease_firmware_grant_call(uint32_t root, uint32_t process);
 int64_t lease_console_grant_call(uint32_t root, uint32_t process);
 int64_t lease_console_read_call(uint64_t buf, uint32_t len);
+int64_t lease_share_call(uint32_t lease, uint64_t addr, uint64_t size, uint32_t task);
+int64_t lease_unshare_call(uint32_t lease, uint64_t addr, uint32_t task);
+int64_t lease_limit_dma_call(uint32_t lease, uint64_t limit);
 int64_t lease_msi_call(uint32_t root, uint32_t device, uint32_t count, uint64_t info_out);
 
 #endif /* KERNEL_LEASE_H */

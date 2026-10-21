@@ -12,6 +12,12 @@
  * its leases, as its DMA Areas are quarantined, until RevokeLease says
  * the device is stopped (area_hold_lent).
  *
+ * Shares: the grantee may map pages of its registers into a peer it's
+ * connected to (ShareLease, a CSF doorbell). Each share holds a
+ * reference on the peer's record, and goes when the grantee unshares
+ * it, the grant ends (the grantee's death), or the peer dies; the
+ * peer's leases_closed keeps a share from coming after that.
+ *
  * Interrupts: a bound line is delivered to the bound task as a signal.
  * It is masked when it fires and unmasked by AckWaitIrq, so a level-
  * triggered line can't storm before the driver has dealt with it.
@@ -37,6 +43,7 @@
 #include "lease.h"
 #include "memmap.h"
 #include "pmm.h"
+#include "port.h"
 #include "process.h"
 #include "sched.h"
 #include "spinlock.h"
@@ -51,6 +58,11 @@ struct line {
     bool masked;                    /* it fired, and AckWaitIrq hasn't run */
     struct task *task;              /* bound to (lock) */
     uint64_t sig;
+};
+
+struct share {
+    uint64_t base, size;
+    struct process *peer;           /* holds a reference */
 };
 
 struct quarantined {
@@ -74,6 +86,9 @@ struct lease {
     struct area *lent;              /* held for the device: area_hold_lent */
     uint64_t lent_pages;
     Handle handle;
+    uint64_t dma_limit;             /* LimitLeaseDma's; 0: anywhere */
+    struct share share[LEASE_SHARES];
+    unsigned nshares;
     struct lease *next;
 };
 
@@ -128,6 +143,16 @@ static void unmap_from(struct lease *l)
 {
     area_unmap_phys(l->mapped_in, l->base, l->size);
     l->mapped_in = nullptr;
+}
+
+/* Take share 'i' out of its peer and off the lease. Lock held. */
+static void unshare(struct lease *l, unsigned i)
+{
+    struct share *s = &l->share[i];
+
+    area_unmap_phys(s->peer, s->base, s->size);
+    process_put(s->peer);
+    *s = l->share[--l->nshares];
 }
 
 /* Unbind 'ln', masking it; its source goes in 'detach' for the caller
@@ -212,10 +237,19 @@ void lease_process_died(struct process *p)
         detach_all(detach, n);
     }
     unsigned long was = spin_lock_irqsave(&lock);
+    for (struct lease *l = leases; l; l = l->next)
+        for (unsigned i = l->nshares; i--;)
+            if (l->share[i].peer == p) {
+                /* Its domain goes with it: nothing to unmap. */
+                process_put(p);
+                l->share[i] = l->share[--l->nshares];
+            }
     for (struct lease *l = leases, *next; l; l = next) {
         next = l->next;
         if (l->grantee != p)
             continue;
+        while (l->nshares)
+            unshare(l, l->nshares - 1);
         if (l->mapped_in == p)
             l->mapped_in = nullptr; /* its domain goes with it */
         l->grantee = nullptr;
@@ -264,6 +298,11 @@ void lease_release(struct lease *l)
 }
 
 /* --- DMA Areas. --- */
+
+uint64_t lease_dma_limit(const struct lease *l)
+{
+    return l->dma_limit;            /* set only while idle: no DMA Area is being made */
+}
 
 void lease_dma_new(struct lease *l, uint64_t pages)
 {
@@ -515,7 +554,8 @@ int64_t lease_query_call(uint32_t h, uint64_t info_out)
                                    .li_State = l->state, .li_Irqs = l->nlines,
                                    .li_DmaPages = l->dma_pages,
                                    .li_QuarantinedPages = l->quarantined_pages,
-                                   .li_LentPages = l->lent_pages };
+                                   .li_LentPages = l->lent_pages,
+                                   .li_DmaLimit = l->dma_limit, .li_Shares = l->nshares };
     spin_unlock_irqrestore(&lock, was);
     if (!ok)
         return ERR_BADHANDLE;
@@ -662,6 +702,102 @@ int64_t lease_dma_call(uint32_t h, uint64_t size, uint32_t flags, uint64_t addr_
     if (last)
         kfree(l);
     return r;
+}
+
+int64_t lease_limit_dma_call(uint32_t h, uint64_t limit)
+{
+    struct process *p = task_self()->process;
+    struct lease *l;
+    int64_t err = 0;
+
+    if (limit & (PAGE_SIZE - 1))
+        return ERR_BADARG;
+    unsigned long was = spin_lock_irqsave(&lock);
+    if (!(l = find(h)) || l->owner != p)
+        err = ERR_BADHANDLE;
+    else if (l->state != LEASES_IDLE)
+        err = ERR_BUSY;
+    else
+        l->dma_limit = limit;
+    spin_unlock_irqrestore(&lock, was);
+    return err;
+}
+
+/* A task handle names a live task, so its process is still there; the
+ * reference keeps the record (process_put). */
+static void get_process(void *obj, void *arg)
+{
+    struct process *p = ((struct task *)obj)->process;
+
+    if (p)
+        process_get(p);
+    *(struct process **)arg = p;
+}
+
+int64_t lease_share_call(uint32_t h, uint64_t addr, uint64_t size, uint32_t task)
+{
+    struct process *p = task_self()->process, *peer = nullptr;
+    struct lease *l;
+    int64_t err = 0;
+
+    if (size == 0 || (addr | size) & (PAGE_SIZE - 1) || addr + size < addr)
+        return ERR_BADARG;
+    handle_with(task, HANDLE_TASK, get_process, &peer);
+    if (!peer)
+        return ERR_NOTFOUND;
+    if (peer == p)
+        err = ERR_BADARG;
+    else if (!ipc_connected(p, peer))
+        err = ERR_RIGHTS;           /* only to a peer, as ShareArea (review M10) */
+    if (err) {
+        process_put(peer);
+        return err;
+    }
+    unsigned long was = spin_lock_irqsave(&lock);
+    if (!(l = find(h)) || l->state != LEASES_GRANTED || l->grantee != p)
+        err = ERR_BADHANDLE;
+    else if (addr < l->base || addr + size > l->base + l->size)
+        err = ERR_BADARG;
+    else if (peer->leases_closed || atomic_load(&peer->dying))
+        err = ERR_NOTFOUND;
+    for (unsigned i = 0; !err && i < l->nshares; i++)
+        if (l->share[i].peer == peer && addr < l->share[i].base + l->share[i].size &&
+            addr + size > l->share[i].base)
+            err = ERR_EXISTS;
+    if (!err && l->nshares == LEASE_SHARES)
+        err = ERR_FULL;
+    if (!err && !area_map_phys(peer, addr, size, MAP_USER | MAP_READ | MAP_WRITE | MAP_DEVICE))
+        err = ERR_NOMEM;
+    if (!err)
+        l->share[l->nshares++] = (struct share){ .base = addr, .size = size, .peer = peer };
+    spin_unlock_irqrestore(&lock, was);
+    if (err)
+        process_put(peer);
+    return err;
+}
+
+int64_t lease_unshare_call(uint32_t h, uint64_t addr, uint32_t task)
+{
+    struct process *p = task_self()->process, *peer = nullptr;
+    struct lease *l;
+    int64_t err = ERR_NOTFOUND;
+
+    handle_with(task, HANDLE_TASK, get_process, &peer);
+    if (!peer)
+        return ERR_NOTFOUND;
+    unsigned long was = spin_lock_irqsave(&lock);
+    if (!(l = find(h)) || l->state != LEASES_GRANTED || l->grantee != p)
+        err = ERR_BADHANDLE;
+    else
+        for (unsigned i = 0; i < l->nshares; i++)
+            if (l->share[i].peer == peer && l->share[i].base == addr) {
+                unshare(l, i);
+                err = 0;
+                break;
+            }
+    spin_unlock_irqrestore(&lock, was);
+    process_put(peer);
+    return err;
 }
 
 int64_t lease_msi_call(uint32_t root_h, uint32_t device, uint32_t count, uint64_t info_out)

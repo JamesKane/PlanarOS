@@ -182,7 +182,7 @@ The library also handles death notices on client connections, timers, `STOP`, an
 
 ### Allocation follows the node
 
-§3.3 has the right Area flags (`AREAF_DMA32`, `AREAF_NC`, `AREAF_COHERENT`), but today a driver would choose them itself. §5.2's per-device coherency table is the kind of fact that belongs in the hwdb, not in driver code. **Proposed:** `AllocDmaArea(lease, size, …)` takes the device's constraints from its node: address limit (`dma-ranges`, `_DMA`, a quirk), coherency (`dma-coherent`, `_CCA`, the §5.2 table), and the IOMMU context. The driver can only tighten them. This is busdma's lesson: constraints are inherited, not restated (S§2.2).
+§3.3 has the right Area flags (`AREAF_DMA32`, `AREAF_NC`, `AREAF_COHERENT`), but today a driver would choose them itself. §5.2's per-device coherency table is the kind of fact that belongs in the hwdb, not in driver code. **Proposed:** `AllocDmaArea(lease, size, …)` takes the device's constraints from its node: address limit (`dma-ranges`, `_DMA`, a quirk; **built for the device tree and quirks in V5 step 1**: hwdb gives the lease `LimitLeaseDma`, and every DMA Area of the lease ends below it), coherency (`dma-coherent`, `_CCA`, the §5.2 table), and the IOMMU context. The driver can only tighten them. This is busdma's lesson: constraints are inherited, not restated (S§2.2).
 
 ### Cache maintenance without a trap
 

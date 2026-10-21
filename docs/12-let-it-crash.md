@@ -79,7 +79,7 @@ Worse, §2.2 and §4.1 propose `WaitAddr` and `WakeAddr` (futexes) on words in s
 
 **Proposed:**
 
-1. **No cross-process mutexes.** `WaitAddr` and `WakeAddr` are for tasks *within* the same process, or for single-writer monotonic sequence numbers (such as the 64-bit sync objects in §5.1). When a process dies, step 6 of §2.3 wakes any `WaitAddr` waiters on pages tied to its leases or connections so they can check `PortGone` or the lease fault signal.
+1. **No cross-process mutexes.** `WaitAddr` and `WakeAddr` are for tasks *within* the same process, or for single-writer monotonic sequence numbers (such as the 64-bit sync objects in §5.1). When a process dies, step 6 of §2.3 wakes any `WaitAddr` waiters on pages tied to its leases or connections so they can check `PortGone` or the lease fault signal. **Built (V5 step 1)**, more widely: any mapping of an Area going, a death's among them, wakes the waiters on its words.
 2. **Control stays on connections.** Requests, replies and ownership handoffs go through connection rings, where the kernel sets `ca_Closed` and wakes the peer on death.
 3. **Bulk Areas are single-writer at a time.** When a client lends a buffer Area to a server or driver (`IOF_LEND`), the client does not touch it until the reply arrives (§4.3). If the server crashes during the request, the client gets `ERR_PORT_DIED`, knows the buffer's contents are indeterminate, and either retries the read/write or discards the buffer.
 4. **No pointers or locks in DMA or lent pages.** Shared payload Areas carry raw data or hardware descriptors, never C pointers or library state (§11.8).

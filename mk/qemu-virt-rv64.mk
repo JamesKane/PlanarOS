@@ -9,7 +9,7 @@ PLAT_SRCS := \
 
 QEMU ?= qemu-system-riscv64
 
-RUN_CMD := $(QEMU) -machine virt -cpu rv64,v=true,vlen=256 -smp 4 -m $(QEMU_MEM) \
+RUN_CMD := $(QEMU) -machine virt -cpu rv64,v=true,vlen=256,svpbmt=true -smp 4 -m $(QEMU_MEM) \
 	-global virtio-mmio.force-legacy=false -device virtio-rng-device $(QEMU_DISK) \
 	-nographic -bios default -kernel $(IMAGE) -append '$(BOOTARGS)'
 

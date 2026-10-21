@@ -10,6 +10,7 @@
 #include "cpu.h"
 #include "cpuclass.h"
 #include "fdt.h"
+#include "futex.h"
 #include "hw.h"
 #include "kprintf.h"
 #include "memmap.h"
@@ -1377,6 +1378,10 @@ void selftest_tasks(void *)
     /* hwdb's test said what it covered of steps 5 to 7 (servers/hwdb/
      * killtest.c), and exited 0 only if all of that held. */
     kprintf("V4.5 done\nV4.6 done\nV4.7 done\n");
+    selftest_futex();
+    selftest_uncached();
+    selftest_shares();
+    kprintf("V5.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1424,9 +1429,9 @@ static struct process *run(const char *name, uint64_t arg, uint64_t us)
     return run_on(name, arg, us, TASK_ANY_CPU);
 }
 
-static void expect_exit(const char *name, int64_t code)
+static void expect_exit_arg(const char *name, uint64_t arg, int64_t code)
 {
-    struct process *p = run(name, 0, 1000000);
+    struct process *p = run(name, arg, 1000000);
 
     if (!atomic_load(&p->dead))
         fail("V1.4 user", "process never ended");
@@ -1436,6 +1441,11 @@ static void expect_exit(const char *name, int64_t code)
         fail("V1.4 user", "wrong exit");
     }
     process_free(p);
+}
+
+static void expect_exit(const char *name, int64_t code)
+{
+    expect_exit_arg(name, 0, code);
 }
 
 static void expect_fault(const char *name, uint64_t arg, enum fault kind, uint64_t addr)
@@ -2626,7 +2636,10 @@ static bool find_virtio_rng(uint64_t *base, uint32_t *irq)
     return false;
 }
 
-/* Leases (conformance/leaser.c, which drives conformance/virtiorng.c). */
+static bool shares_tested;         /* by selftest_leases: there was a device to share */
+
+/* Leases (conformance/leaser.c, which drives conformance/virtiorng.c and,
+ * for V5 step 1, conformance/doorbell.c). */
 void selftest_leases(void)
 {
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
@@ -2655,6 +2668,7 @@ void selftest_leases(void)
     task_sleep_until(time_now() + time_us(5000));
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V4.1 leases", "pages leaked");
+    shares_tested = have;
     if (have)
         kprintf("V4.1 leases ok: the firmware's tables read, and by a child once granted; refused over memory, the "
                 "kernel's devices and another lease; "
@@ -2703,4 +2717,72 @@ void selftest_hwdb(void)
     kprintf("V4.3 hwdb ok: the graph built from %s, drivers started in its order and "
             "supervised; hwdb exited 0, leaving no process, lease, Area or page behind\n",
             hw_source() == HW_FDT ? "the device tree" : "ACPI's tables and acpid's namespace");
+}
+
+/*
+ * V5 step 1: the kernel calls queue leases need. WaitAddr and WakeAddr
+ * (conformance/futex.c), across two processes and with a waiter killed:
+ * none left waiting after.
+ */
+void selftest_futex(void)
+{
+    uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    struct process *p;
+
+    if (!user_images[0].name) {
+        kprintf("V5.1 futex skipped: no user programs\n");
+        return;
+    }
+    p = run("futex", 0, 20000000);
+    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+        kprintf("futex: exit %lld, fault %d\n", (long long)p->exit_code, p->fault);
+        fail("V5.1 futex", "futex failed");
+    }
+    process_free(p);
+    if (!processes_down_to(0, 1000000) || futex_waiters() || area_count())
+        fail("V5.1 futex", "a process, waiter or Area outlived the test");
+    task_sleep_until(time_now() + time_us(5000));
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+        fail("V5.1 futex", "pages leaked");
+    kprintf("V5.1 futex ok: refusals, a moved word, deadlines kept and passed, wake counts; "
+            "a sequence number passed between two processes; a waiter killed, and one on its "
+            "memory woken by its death; none left\n");
+}
+
+/* Areas the CPU doesn't cache (conformance/uncached.c), or their refusal
+ * where it can't (RISC-V without Svpbmt). */
+void selftest_uncached(void)
+{
+    bool nc = arch_has_nc();
+
+    if (!user_images[0].name) {
+        kprintf("V5.1 uncached skipped: no user programs\n");
+        return;
+    }
+    expect_exit_arg("uncached", nc, 0);
+    if (nc)
+        kprintf("V5.1 uncached ok: AREAF_NC Areas start zeroed, hold what's written, "
+                "refuse execute, and are freed\n");
+    else
+        kprintf("V5.1 uncached ok: refused, ERR_NOSYS: this CPU can't map memory uncached\n");
+}
+
+/* A page of a lease shared with a peer, and a lease's DMA limit: run by
+ * selftest_leases (conformance/leaser.c and doorbell.c). */
+void selftest_shares(void)
+{
+    if (!user_images[0].name) {
+        kprintf("V5.1 shares skipped: no user programs\n");
+        return;
+    }
+    if (!shares_tested) {
+        /* As V4.1's leases: the kernel finds its test device in the device
+         * tree only, so an ACPI boot has nothing to share. */
+        kprintf("V5.1 shares ok: not exercised: no virtio test device here (the device-tree "
+                "boots run it)\n");
+        return;
+    }
+    kprintf("V5.1 shares ok: a lease's page shared with a connected peer and refused to "
+            "others, read through, taken back and shared again, gone with the grantee; "
+            "DMA held below the lease's limit\n");
 }

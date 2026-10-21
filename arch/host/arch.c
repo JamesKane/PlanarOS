@@ -216,6 +216,15 @@ void arch_sync_icache(const void *, size_t)
 {
 }
 
+bool arch_has_nc(void)
+{
+    return false;
+}
+
+void arch_dcache_flush(const void *, size_t)
+{
+}
+
 /* A host process can't take a fault and carry on. */
 bool arch_probe_read(uint64_t, uint64_t *)
 {

@@ -20,6 +20,10 @@ const struct hw_quirk hw_quirk_table[] = {
     /* Its GPIOs: the SD slot's card detect is one, which sdhci does
      * without (it asks the card). */
     { "ky,x1", HW_Q_FIRMWARE, "/soc/gpio@d4019000", "U-Boot's, until a GPIO driver" },
+    /* The display sits behind dram_range1 (Linux's k1.dtsi), where memory
+     * above 4 GiB is seen 2 GiB lower and only the first 2 GiB where it
+     * is; U-Boot's tree has no dram_range buses to say so. */
+    { "ky,x1", HW_Q_DMA_LIMIT, "/soc/dpu@c0340000", "0x80000000" },
 
     /* The CIX P1 has no SPCR. The kernel takes DBG2's port as its
      * console (kernel/acpi.c's quirk), so the node is the kernel's. */
@@ -84,6 +88,14 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
         case HW_Q_EXCLUDE:
             g->nodes[id].exclude = q->arg;
             break;
+        case HW_Q_DMA_LIMIT: {
+            uint64_t v = 0;
+
+            for (const char *c = q->arg + 2; *c; c++)
+                v = v << 4 | (uint64_t)(*c <= '9' ? *c - '0' : (*c | 0x20) - 'a' + 10);
+            g->nodes[id].dma_limit = v;
+            break;
+        }
         case HW_Q_ALIAS: {
             hw_id to = hw_find_path(g, q->arg, hw_strlen(q->arg));
 

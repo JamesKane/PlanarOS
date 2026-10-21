@@ -43,6 +43,7 @@ PORTABLE_SRCS := \
 	kernel/cpuclass.c \
 	kernel/devmem.c \
 	kernel/fdt.c \
+	kernel/futex.c \
 	kernel/handle.c \
 	kernel/hw.c \
 	kernel/intc.c \
@@ -72,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V4.7 done
+EXPECT := V5.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 

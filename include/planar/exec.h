@@ -31,6 +31,11 @@ void FreeSignal(int64_t bit);
  * Areas (docs §3.3): page-rounded memory, mapped at the same address in
  * every process that maps it. Allocated readable and writable; AREAF_EXEC
  * lets ProtectArea make it executable instead, AREAF_RWX both at once.
+ * AREAF_NC is for memory a device reads without snooping the CPU's
+ * caches (docs §5.2): every mapping of it is normal memory the CPU
+ * doesn't cache, whose writes may be gathered (write-combined); a
+ * barrier orders them before a doorbell. ERR_NOSYS where the CPU can't
+ * map memory so (RISC-V without Svpbmt).
  */
 #define AREAF_CLEAR     (1u << 0)   /* zero-filled (they always are) */
 #define AREAF_CONTIG    (1u << 1)   /* physically contiguous (they always are) */
@@ -38,6 +43,7 @@ void FreeSignal(int64_t bit);
 #define AREAF_RWX       (1u << 3)   /* may be writable and executable at once */
 #define AREAF_LARGE     (1u << 4)   /* 2 MiB-aligned */
 #define AREAF_DMA32     (1u << 5)   /* below 4 GiB: for a device with 32-bit DMA */
+#define AREAF_NC        (1u << 6)   /* not cached by the CPU; its writes may combine */
 
 #define AREAR_READ      (1u << 0)
 #define AREAR_WRITE     (1u << 1)
@@ -148,5 +154,24 @@ struct SystemInfo {
 };
 
 int64_t QuerySystem(struct SystemInfo *info);
+
+/*
+ * Waiting on a word in memory (docs §4.1, §5.1): a sequence number
+ * that a device, a server or another task advances. WaitAddr sleeps
+ * while the 64-bit word at 'address' (8-byte aligned, readable) holds
+ * 'value', until WakeAddr is called on it, the deadline (CurrentTime's
+ * nanoseconds; 0 for none) passes, or the task is killed. It returns 0
+ * at once if the word holds something else, and 0 when woken, which
+ * may be early: the caller looks at the word again. ERR_TIMEOUT if the
+ * deadline passed. Words are matched by physical address, so the
+ * waiter and the waker may be in different processes, each mapping the
+ * word where it is (the identity layout). WakeAddr wakes up to 'count'
+ * tasks waiting on the word and returns how many it woke.
+ *
+ * For sequence numbers only, never as a lock between processes (§12.5):
+ * a holder that dies would leave the others waiting.
+ */
+int64_t WaitAddr(const volatile uint64_t *address, uint64_t value, uint64_t deadline);
+int64_t WakeAddr(const volatile uint64_t *address, uint32_t count);
 
 #endif /* PLANAR_EXEC_H */

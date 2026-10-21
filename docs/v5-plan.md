@@ -10,7 +10,7 @@
 - `drv_dma_clean` and `drv_dma_flush` for devices that don't snoop (the K1's), and `AREAF_DMA32`.
 - hwdb sees every device this plan drives: on the CIX `GPU_`/`GPUP` (CIXH5000/5001), `DPU0`–`DPU4` (CIXH5010), `SCMI` (CIXHA006) and `USB0`–`USB9` (PNP0D10); on the RV2 the GPU at `0xcac00000`, the DPU at `0xc0440000`, and the DWC3 at `0xc0a00000`. All are "no driver" today.
 
-**Not built, and needed here:**
+**Not built, and needed here** (all three built in step 1):
 - `WaitAddr`/`WakeAddr` ([docs §4.1](04-ipc.md)): the sleeping wait on a sync object (§5.1), and on V6's `safe_seq`/`disp_seq` (§16.3 pillar 4).
 - Mapping one page of a device to an app: a CSF doorbell (§5.1's `AREAF_DEVICE`). Today only hwdb makes leases, and only drivers hold them.
 - Non-cacheable and write-combining Areas ([docs §3.3](03-memory.md)): the G720 doesn't see CPU writes that are still in cache (below).
@@ -40,12 +40,23 @@ Steps 2 to 4 are independent of each other and can run in any order. Step 5 need
 
 ## 1. The kernel calls queue leases need
 
-- **Futexes.** `WaitAddr(address, value, deadline)` sleeps while a 64-bit word holds `value`. `WakeAddr(address, count)` wakes sleepers. Keyed by physical address, so it works across processes in the identity layout. Never for cross-process locks (§12.5): for sequence numbers only.
-- **A page of a lease for an app.** A server holding a granted lease gives a client one page of it, a CSF doorbell, mapped as device memory. The kernel checks the page lies in the server's lease, and revokes the client's mapping with the lease. The client gets no line and no DMA.
-- **Cache attributes.** `AREAF_NC` and `AREAF_WC` for Areas a device reads without snooping. The G720 snoops the CPU's caches, but CPU writes still in cache don't reach its L2: FreeBSD's port saw stale command streams with cacheable mappings (`DATA_INVALID_FAULT`), so the GPU maps them non-cacheable and the CPU write-combined.
-- **A device's address window.** The K1's GPU and DPU sit behind `dram_range1`: memory above 4 GiB is at 2 GiB lower to them (`sysconfig.c` `phys_cpu2gpu`). Under VQ3 an Area's address is its DMA address only below 4 GiB, so on the K1 their memory comes from `AREAF_DMA32`. hwdb records the window from `dma-ranges`, and `AllocDmaArea` applies it.
+**Done (2026-10-20).** Five calls, 46 to 50, on both ISAs and every QEMU boot.
 
-**Tested by** conformance programs on both ISAs: a futex across two processes, a wake that races the sleep, a doorbell page outside the lease refused, and a client's page gone after `RevokeLease`.
+- **Futexes.** `WaitAddr(address, value, deadline)` sleeps while a 64-bit word holds `value`, and `WakeAddr(address, count)` wakes up to `count` sleepers and returns how many it woke. The deadline is `CurrentTime`'s, and `ERR_TIMEOUT` (new, -13) says it passed. Words are keyed by physical address, looked up in the caller's own domain, so this works across processes in the identity layout. The waiter is listed before it reads the word, so a wake can't fall between the read and the sleep. The word is read through the caller's mapping, never the direct map, because it may be in an `AREAF_NC` Area. A wait may end early, and so does every wait on an Area when any mapping of it goes, including at a death (§12.5's rule, carried out more widely). Never for cross-process locks (§12.5): for sequence numbers only. `kernel/futex.c`.
+- **A page of a lease for a peer.** `ShareLease(lease, address, size, task)` maps whole pages of the grantee's registers into a connected peer's process as device memory, and `UnshareLease(lease, address, task)` takes them back. They go anyway with the grant (the grantee's death) or with the peer. Refused: the grantee itself, a process it isn't connected to (`ERR_RIGHTS`, as `ShareArea`), pages outside the lease, and the same page twice (`ERR_EXISTS`). There are at most `LEASE_SHARES` (32) shares per lease, which bounds decision 6 per GPU. The peer gets no line and no DMA. `QueryLease` counts the shares.
+- **Cache attributes. Corrected: one flag, `AREAF_NC`,** not `AREAF_NC` and `AREAF_WC`. On both ISAs the uncached memory type for RAM is the one whose writes may combine: Arm Normal-NC (MAIR index 2, already set) and RISC-V Svpbmt's NC. The only stronger type is Device memory, which faults on the unaligned accesses `memcpy` makes. Every mapping of an NC Area is NC. The kernel's direct map still caches its pages, so the kernel flushes the alias as the Area starts (it was zeroed through it) and as it ends. RISC-V needs Svpbmt, which the kernel finds by trying it in a scratch domain (a faulting kernel read goes to the copy's fixup), because the K1's U-Boot tree says only `rv64imafdcv` though the X60 has it. QEMU's CPU gets `svpbmt=true`. Without it, `ERR_NOSYS`. NC with `AREAF_EXEC` is refused.
+- **A device's address window.** `LimitLeaseDma(lease, limit)`, by the owner while the lease is idle: every DMA Area of the lease then ends at or below `limit`. hwdb takes the limit from the identity part of the `dma-ranges` that apply to the node: those of the bus its `interconnects` name first (the K1's `dram_range` buses), or else of the nearest bus above it. hwdb records it on the node (`dma below` in the report) and gives it to the lease. U-Boot's tree has no `dram_range` buses, so a `ky,x1` quirk (`HW_Q_DMA_LIMIT`) gives the DPU 2 GiB. The GPU's node isn't in that tree at all: step 6 adds it, with the same quirk.
+
+**Tested by** `conformance/futex.c`: the refusals; a word already moved; deadlines to come and passed; wake counts over three tasks; 2,000 round trips of a sequence number in a connection's arena, between two processes (35–46 µs each on QEMU TCG); a waiter killed; and one woken by its peer's death. `conformance/uncached.c` covers an NC Area zeroed, written and read, and refused as code. `conformance/doorbell.c`, driven by `leaser.c`, covers:
+- each refusal of a share;
+- the virtio device read through a shared page;
+- the page unshared and shared again;
+- a peer that faults on the page once the grantee has died;
+- a DMA limit with room for one page that allows one page and not a second.
+
+hwdb's own tests check `dma-ranges` on a hand-built tree of the K1's shape, and the quirk. Mutation-tested: without the limit, or without revoking shares at the grantee's death, the leaser fails.
+
+**Not yet on the boards.** On the RV2 the Svpbmt probe and the DPU's limit are untried, and on the CIX nothing here touches hardware until step 5. Both boards boot this build at the next step that needs them.
 
 ## 2. `power`
 
@@ -129,6 +140,7 @@ The BXE-2-32 is Rogue core **36.29.52.182**, with a MIPS firmware processor. The
 ## Corrections to the design
 
 - **§5.1 and §5.3:** panthor has no user doorbells, and Planar's are its own (step 5). §16.5's "zero kernel trap" holds only on hardware with doorbell pages, and the RV2 isn't one.
+- **§3.3:** `AREAF_WC` folds into `AREAF_NC` (step 1).
 - **§5.2:** the G720 snoops one way only, and its rings are non-cacheable to it. The K1's GPU and DPU snoop not at all.
 - **§16.7:** the CIX's G720 has no SMMU, and the RV2's GPU and DPU see memory above 4 GiB at another address.
 - **VQ17:** vendor sources exist (DDK 24.2). Whether the 2 TOPS are in the cores is still open.

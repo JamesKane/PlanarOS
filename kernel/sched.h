@@ -40,6 +40,8 @@ constexpr unsigned SIGB_SLEEP = 2;
 constexpr uint64_t SIGF_SLEEP = 1ULL << SIGB_SLEEP;
 constexpr unsigned SIGB_KILL = 3;           /* wakes a killed task from Wait */
 constexpr uint64_t SIGF_KILL = 1ULL << SIGB_KILL;
+constexpr unsigned SIGB_WAKE = 4;           /* WakeAddr's (kernel/futex.c) */
+constexpr uint64_t SIGF_WAKE = 1ULL << SIGB_WAKE;
 
 enum task_state : uint8_t {
     TASK_READY,

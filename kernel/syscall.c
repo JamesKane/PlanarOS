@@ -6,6 +6,7 @@
 #include "arch.h"
 #include "area.h"
 #include "cpu.h"
+#include "futex.h"
 #include "handle.h"
 #include "irq.h"
 #include "kprintf.h"
@@ -24,7 +25,7 @@ constexpr unsigned KLOG_PER_S = 20;
 static atomic_uint_fast64_t klog_drops;
 
 /* Signals a user task may not wait for, send or change: the kernel's. */
-constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL;
+constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL | SIGF_WAKE;
 
 bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
 {
@@ -278,6 +279,16 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_console_grant_call((uint32_t)a[0], (uint32_t)a[1]);
     case SYS_READ_CONSOLE:
         return lease_console_read_call(a[0], (uint32_t)a[1]);
+    case SYS_WAIT_ADDR:
+        return futex_wait_call(a[0], a[1], a[2]);
+    case SYS_WAKE_ADDR:
+        return futex_wake_call(a[0], (uint32_t)a[1]);
+    case SYS_SHARE_LEASE:
+        return lease_share_call((uint32_t)a[0], a[1], a[2], (uint32_t)a[3]);
+    case SYS_UNSHARE_LEASE:
+        return lease_unshare_call((uint32_t)a[0], a[1], (uint32_t)a[2]);
+    case SYS_LIMIT_LEASE_DMA:
+        return lease_limit_dma_call((uint32_t)a[0], a[1]);
     case SYS_ALLOC_MSI:
         return lease_msi_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2], a[3]);
     default:

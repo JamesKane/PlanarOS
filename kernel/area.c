@@ -14,11 +14,18 @@
  * Mapping re-checks, under the lock, that the handle still names the
  * Area and that the process isn't being reclaimed (docs/10-code-review.md
  * C1).
+ *
+ * An AREAF_NC Area is mapped uncached in every process that maps it, so
+ * no two of its mappings disagree. The kernel's direct map still caches
+ * its pages, and is used only to zero them (pmm.c) and to load an
+ * image, which is never NC: the alias is flushed as the Area starts and
+ * as it ends (arch_dcache_flush).
  */
 #include <planar/exec.h>
 #include <planar/syscalls.h>
 
 #include "area.h"
+#include "futex.h"
 #include "handle.h"
 #include "kmalloc.h"
 #include "kstring.h"
@@ -29,7 +36,7 @@
 #include "sched.h"
 
 constexpr uint32_t AREAF_ALL = AREAF_CLEAR | AREAF_CONTIG | AREAF_EXEC | AREAF_RWX | AREAF_LARGE |
-                               AREAF_DMA32;
+                               AREAF_DMA32 | AREAF_NC;
 constexpr uint32_t AREAR_ALL = AREAR_READ | AREAR_WRITE | AREAR_EXEC;
 constexpr uint64_t LARGE_ALIGN = 2ULL << 20;
 
@@ -89,12 +96,15 @@ unsigned area_count(void)
 
 /* --- Backing. --- */
 
-struct area *area_new(uint64_t pages, uint32_t flags, bool guard)
+/* area_new, ending at or below 'limit' (0: anywhere): a lease's DMA. */
+static struct area *new_below(uint64_t pages, uint32_t flags, bool guard, uint64_t limit)
 {
     uint64_t total = pages + guard;
     uint64_t align = flags & AREAF_LARGE ? LARGE_ALIGN : PAGE_SIZE;
     struct area *a;
 
+    if (flags & AREAF_DMA32 && (!limit || limit > 1ULL << 32))
+        limit = 1ULL << 32;
     if (pages == 0 || (flags & ~AREAF_ALL))
         return nullptr;
     if (guard && (flags & AREAF_LARGE))
@@ -102,18 +112,27 @@ struct area *area_new(uint64_t pages, uint32_t flags, bool guard)
     if (!(a = kmalloc(sizeof *a)))
         return nullptr;
     *a = (struct area){ .size = pages * PAGE_SIZE, .flags = flags, .guard = guard };
-    if (!(a->run_pa = pmm_alloc_contig_below(total, align, flags & AREAF_DMA32 ? 1ULL << 32 : ~0ULL))) {
+    if (!(a->run_pa = pmm_alloc_contig_below(total, align, limit ? limit : ~0ULL))) {
         kfree(a);
         return nullptr;
     }
     a->run_pages = total;
     a->va = a->run_pa + guard * PAGE_SIZE;
+    if (flags & AREAF_NC)
+        arch_dcache_flush(phys_to_virt(a->run_pa), total * PAGE_SIZE);    /* the zeroes */
     atomic_fetch_add(&live, 1);
     return a;
 }
 
+struct area *area_new(uint64_t pages, uint32_t flags, bool guard)
+{
+    return new_below(pages, flags, guard, 0);
+}
+
 static void free_area(struct area *a)
 {
+    if (a->flags & AREAF_NC)
+        arch_dcache_flush(phys_to_virt(a->run_pa), a->run_pages * PAGE_SIZE);
     for (uint64_t i = 0; i < a->run_pages; i++)
         pmm_free(a->run_pa + i * PAGE_SIZE);
     kfree(a);
@@ -174,9 +193,9 @@ void area_unhold(struct area *list)
 
 /* --- Mapping. --- */
 
-static uint32_t map_flags(uint32_t rights)
+static uint32_t map_flags(const struct area *a, uint32_t rights)
 {
-    uint32_t f = MAP_USER;
+    uint32_t f = a->flags & AREAF_NC ? MAP_USER | MAP_NC : MAP_USER;
 
     f |= rights & AREAR_READ ? MAP_READ : 0;
     f |= rights & AREAR_WRITE ? MAP_WRITE : 0;
@@ -192,7 +211,7 @@ static bool map_pages(struct mapping *m)
     for (uint64_t off = 0; off < a->size; off += PAGE_SIZE) {
         uint32_t rights = off < m->exec_bytes ? AREAR_READ | AREAR_EXEC : m->rights;
 
-        if (!arch_map(&m->proc->domain, a->va + off, area_pa(a, off), map_flags(rights)))
+        if (!arch_map(&m->proc->domain, a->va + off, area_pa(a, off), map_flags(a, rights)))
             return false;
     }
     return true;
@@ -213,11 +232,18 @@ static struct mapping *find(struct area *a, struct process *p)
     return nullptr;
 }
 
-/* Unlink 'm' from its Area and its process. Lock held. */
+/*
+ * Unlink 'm' from its Area and its process. Lock held. Anyone waiting on
+ * a word in the Area is woken (WaitAddr may return early): the process
+ * going may have been the word's only writer, dead now (§12.5), or the
+ * waiter may be in it, its word unmapped.
+ */
 static void unlink_mapping(struct mapping *m)
 {
     struct mapping **pp;
 
+    if (futex_waiters())
+        futex_wake_range(m->area->va, m->area->size);
     for (pp = &m->area->maps; *pp != m; pp = &(*pp)->next_in_area)
         ;
     *pp = m->next_in_area;
@@ -486,9 +512,14 @@ static int64_t alloc(uint64_t size, uint32_t flags, uint64_t addr_out, struct le
 
     if (size == 0 || (flags & ~AREAF_ALL))
         return ERR_BADARG;
+    if ((flags & AREAF_NC) && (flags & (AREAF_EXEC | AREAF_RWX)))
+        return ERR_BADARG;          /* code is fetched through the caches */
+    if ((flags & AREAF_NC) && !arch_has_nc())
+        return ERR_NOSYS;
     if (size / PAGE_SIZE + (size % PAGE_SIZE != 0) > pmm_free_pages())
         return ERR_NOMEM;           /* can't be had: say so before zeroing it all */
-    if (!(a = area_new((size + PAGE_SIZE - 1) / PAGE_SIZE, flags, false)))
+    if (!(a = new_below((size + PAGE_SIZE - 1) / PAGE_SIZE, flags, false,
+                        l ? lease_dma_limit(l) : 0)))
         return ERR_NOMEM;
     a->owner = p;
     a->refs = 1;                    /* ours, until the call is done */

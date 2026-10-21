@@ -40,6 +40,9 @@ struct LeaseInfo {
     uint64_t li_DmaPages;           /* in live DMA Areas */
     uint64_t li_QuarantinedPages;   /* waiting for RevokeLease */
     uint64_t li_LentPages;          /* others' memory its dead grantee mapped, held as well */
+    uint64_t li_DmaLimit;           /* its DMA Areas end below this; 0: anywhere */
+    uint32_t li_Shares;             /* pages of it the grantee shares with peers */
+    uint32_t li_Pad;
 };
 
 int64_t CreateLease(Handle root, uint64_t base, uint64_t size, const uint32_t *irqs,
@@ -53,6 +56,33 @@ int64_t MapLease(Handle lease, void **address);
 int64_t BindIrq(Handle lease, uint32_t line, int64_t sigbit);
 uint64_t AckWaitIrq(Handle lease, uint32_t line, uint64_t mask);
 int64_t AllocDmaArea(Handle lease, uint64_t size, uint32_t flags, void **address);
+
+/*
+ * Where the device can reach memory (v5-plan step 1). Under the identity
+ * layout an Area's address is its DMA address only where the device's
+ * bus doesn't move memory: the K1's GPU and display see memory above
+ * 2 GiB at another address (its dram_range1). The owner, while the
+ * lease is idle, says where that stops: every DMA Area of the lease
+ * then ends at or below 'limit' (a page multiple; 0: anywhere). hwdb
+ * takes it from the device's dma-ranges.
+ */
+int64_t LimitLeaseDma(Handle lease, uint64_t limit);
+
+/*
+ * A page of a lease for a peer (v5-plan step 1, §5.1): the grantee maps
+ * 'size' bytes of its device's registers at 'address' (whole pages,
+ * inside the lease) into the process of 'task', which must be connected
+ * to it, as device memory, readable and writable. A CSF doorbell is the
+ * case: the app rings its queue's own. The peer gets no lines and no
+ * DMA. UnshareLease takes the pages at 'address' back; they go anyway
+ * when the grantee's grant does (its death), or the peer dies. A peer
+ * holds one share of a lease at a time per address (ERR_EXISTS);
+ * LEASE_SHARES at most per lease (ERR_FULL).
+ */
+#define LEASE_SHARES    32
+
+int64_t ShareLease(Handle lease, uint64_t address, uint64_t size, Handle task);
+int64_t UnshareLease(Handle lease, uint64_t address, Handle task);
 
 /*
  * The firmware's description, for the device root's holder: the DTB, or

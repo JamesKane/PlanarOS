@@ -200,6 +200,7 @@
 /soc/dpu@c0340000 [ky,dpu]: no driver
   mmio 0xc0340000+0x2a000
   mmio 0xc0440000+0x2a000
+  dma below 0x80000000
   needs /soc (parent)
 /soc/mipi@d421a800 [ky,mipi-dsi]: disabled
 /soc/panel [ky,panel]: disabled

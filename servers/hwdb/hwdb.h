@@ -128,6 +128,8 @@ struct hw_node {
     uint32_t phandle;
     uint16_t lease;                 /* its index in hw_graph.leases; HW_NOLEASE */
     uint16_t unit;                  /* its number among its driver's nodes */
+    uint64_t dma_limit;             /* its DMA sees memory where the CPU does only below this
+                                     * (dma-ranges, or a quirk); 0: everywhere */
 };
 
 constexpr uint16_t HW_NODRV = UINT16_MAX;
@@ -154,6 +156,7 @@ struct hw_lease {
     struct hw_range ranges[HW_LEASE_RANGES];
     hw_id nodes[HW_LEASE_NODES];
     uint32_t lines[HW_LEASE_LINES];
+    uint64_t dma_limit;             /* the lowest of its nodes'; 0: none (LimitLeaseDma) */
 };
 
 /* --- Match tables (§11.6). --- */
@@ -268,13 +271,15 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_PIN,           /* bind to this driver only */
     HW_Q_EXCLUDE,       /* never to this driver */
     HW_Q_ALIAS,         /* the device at 'arg' described again: its registers are that one's */
+    HW_Q_DMA_LIMIT,     /* its DMA sees memory where the CPU does only below 'arg' */
 };
 
 struct hw_quirk {
     const char *board;
     enum hw_quirk_kind kind;
     const char *path;
-    const char *arg;    /* the driver, for PIN and EXCLUDE; else why */
+    const char *arg;    /* the driver, for PIN and EXCLUDE; the limit, in hex, for
+                         * DMA_LIMIT; else why */
 };
 
 extern const struct hw_quirk hw_quirk_table[];

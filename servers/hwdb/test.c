@@ -6,6 +6,7 @@
  * references dropped, a phandle that names nothing, a disabled supplier,
  * consumers looked at again and nothing else, ranks, ties and quirks,
  * and acpid's records merged into a static graph, damaged ones too.
+ * A tree built here checks where devices' DMA stops (dma-ranges).
  * Then damaged blobs and tables, which must be refused or read in part,
  * never read past (run under the address sanitizer).
  */
@@ -217,6 +218,7 @@ static void test_quirks(void)
         { "board", HW_Q_DISABLE, "/bus", nullptr },
         { "board", HW_Q_FIRMWARE, "/fw", "left on" },
         { "board", HW_Q_CONSOLE, "/con", nullptr },
+        { "board", HW_Q_DMA_LIMIT, "/user", "0x8000F000" },
         { "other", HW_Q_DISABLE, "/m", nullptr },
         { "board", HW_Q_DISABLE, "/absent", nullptr },
     };
@@ -234,7 +236,8 @@ static void test_quirks(void)
     con = dev("con", "zzz");
     user = dev("user", "a");
     need(user, fw, true);
-    CHECK(hw_quirks(&g, q, sizeof q / sizeof q[0]) == 5);
+    CHECK(hw_quirks(&g, q, sizeof q / sizeof q[0]) == 6);
+    CHECK(g.nodes[user].dma_limit == 0x8000f000);
     CHECK(g.broken == 1);                           /* /absent */
     run();
     CHECK(hw_streq(drivers[g.nodes[m].driver].name, "drv-a"));
@@ -275,6 +278,170 @@ static uint32_t rnd(void)
 /* Every source, damaged: each blob cut short at many lengths and with
  * bytes changed at random, copied to exactly its length so a read past
  * it is the sanitizer's to catch. */
+/* --- A device tree built by hand (FDT v17), for what no capture has. --- */
+
+static struct fdtb {
+    uint8_t blob[8192];
+    uint32_t len;                   /* of the structure block so far */
+    char strings[1024];
+    uint32_t nstrings;
+} fb;
+
+static void fb_u32(uint32_t v)
+{
+    for (int i = 3; i >= 0; i--)
+        fb.blob[40 + fb.len++] = (uint8_t)(v >> (8 * i));
+}
+
+static void fb_pad(void)
+{
+    while (fb.len % 4)
+        fb.blob[40 + fb.len++] = 0;
+}
+
+static void fb_begin(const char *name)
+{
+    fb_u32(1);
+    memcpy(&fb.blob[40 + fb.len], name, strlen(name) + 1);
+    fb.len += (uint32_t)strlen(name) + 1;
+    fb_pad();
+}
+
+static void fb_prop(const char *name, const void *v, uint32_t n)
+{
+    uint32_t off = 0;
+
+    while (off < fb.nstrings && strcmp(&fb.strings[off], name))
+        off += (uint32_t)strlen(&fb.strings[off]) + 1;
+    if (off >= fb.nstrings) {
+        memcpy(&fb.strings[fb.nstrings], name, strlen(name) + 1);
+        fb.nstrings += (uint32_t)strlen(name) + 1;
+    }
+    fb_u32(3);
+    fb_u32(n);
+    fb_u32(off);
+    memcpy(&fb.blob[40 + fb.len], v, n);
+    fb.len += n;
+    fb_pad();
+}
+
+/* A property of 32-bit cells, big-endian. */
+static void fb_cells(const char *name, const uint32_t *c, unsigned n)
+{
+    uint8_t v[64];
+
+    for (unsigned i = 0; i < n; i++)
+        for (int b = 0; b < 4; b++)
+            v[4 * i + b] = (uint8_t)(c[i] >> (24 - 8 * b));
+    fb_prop(name, v, 4 * n);
+}
+
+static void fb_str(const char *name, const char *s)
+{
+    fb_prop(name, s, (uint32_t)strlen(s) + 1);
+}
+
+static void fb_end(void)
+{
+    fb_u32(2);
+}
+
+static uint32_t fb_finish(void)
+{
+    uint32_t total, off = 40 + fb.len + 4;
+    uint32_t hdr[10] = { 0xd00dfeed, 0, 40, 0, 40, 17, 16, 0, fb.nstrings, 0 };
+
+    fb_u32(9);                      /* FDT_END */
+    memcpy(&fb.blob[off], fb.strings, fb.nstrings);
+    total = off + fb.nstrings;
+    hdr[1] = total;
+    hdr[3] = off;
+    hdr[9] = fb.len;
+    for (unsigned i = 0; i < 10; i++)
+        for (int b = 0; b < 4; b++)
+            fb.blob[4 * i + b] = (uint8_t)(hdr[i] >> (24 - 8 * b));
+    return total;
+}
+
+static void fb_bus(void)
+{
+    static const uint32_t two[] = { 2 };
+
+    fb_cells("#address-cells", two, 1);
+    fb_cells("#size-cells", two, 1);
+    fb_prop("ranges", nullptr, 0);
+}
+
+static void fb_dev(const char *name, const char *compat, uint32_t reg, int interconnect)
+{
+    uint32_t r[] = { 0, reg, 0, 0x1000 }, ic[] = { (uint32_t)interconnect };
+
+    fb_begin(name);
+    fb_str("compatible", compat);
+    fb_cells("reg", r, 4);
+    if (interconnect)
+        fb_cells("interconnects", ic, 1);
+    fb_end();
+}
+
+/*
+ * The K1's shape: a soc bus whose dma-ranges reach 4 GiB where memory
+ * is; a dram bus that also moves memory above 4 GiB down (dram_range1);
+ * one that only moves it (none where it is); and a bus with no
+ * dma-ranges at all.
+ */
+static void test_dma(void)
+{
+    static const uint32_t soc[] = { 0, 0, 0, 0, 1, 0 };
+    static const uint32_t range1[] = { 0, 0, 0, 0, 0, 0x80000000, 0, 0x80000000, 1, 0, 3, 0x80000000 };
+    static const uint32_t moved[] = { 0, 0, 1, 0, 0, 0x80000000 };
+    static const uint32_t ph1[] = { 1 }, ph2[] = { 2 };
+    uint32_t len;
+    hw_id gpu, sd, odd, plain;
+
+    fb = (struct fdtb){ 0 };
+    fb_begin("");
+    fb_str("compatible", "test,dma");
+    fb_bus();
+    fb_begin("soc");
+    fb_str("compatible", "simple-bus");
+    fb_bus();
+    fb_cells("dma-ranges", soc, 6);
+    fb_begin("dram@1");
+    fb_cells("phandle", ph1, 1);
+    fb_bus();
+    fb_cells("dma-ranges", range1, 12);
+    fb_end();
+    fb_begin("dram@2");
+    fb_cells("phandle", ph2, 1);
+    fb_bus();
+    fb_cells("dma-ranges", moved, 6);
+    fb_end();
+    fb_dev("gpu@1000", "test,gpu", 0x1000, 1);
+    fb_dev("sd@2000", "test,sd", 0x2000, 0);
+    fb_dev("odd@3000", "test,odd", 0x3000, 2);
+    fb_end();
+    fb_begin("plain");
+    fb_str("compatible", "simple-bus");
+    fb_bus();
+    fb_dev("dev@4000", "test,plain", 0x4000, 0);
+    fb_end();
+    fb_end();
+    len = fb_finish();
+
+    empty();
+    CHECK(hw_from_fdt(&g, fb.blob, len));
+    gpu = hw_find_path(&g, "/soc/gpu@1000", 13);
+    sd = hw_find_path(&g, "/soc/sd@2000", 12);
+    odd = hw_find_path(&g, "/soc/odd@3000", 13);
+    plain = hw_find_path(&g, "/plain/dev@4000", 15);
+    CHECK(gpu != HW_NONE && g.nodes[gpu].dma_limit == 0x80000000);    /* its interconnect's */
+    CHECK(sd != HW_NONE && g.nodes[sd].dma_limit == 1ULL << 32);       /* its bus's */
+    CHECK(odd != HW_NONE && g.nodes[odd].dma_limit == 0x1000);         /* nowhere */
+    CHECK(plain != HW_NONE && g.nodes[plain].dma_limit == 0);           /* no limit */
+    CHECK(g.broken == 0);
+}
+
 static void test_damage(const char *dtb, const char *const *tables, unsigned ntables)
 {
     uint32_t len;
@@ -681,6 +848,7 @@ int main(int argc, char **argv)
     test_leases();
     test_late();
     test_namespace();
+    test_dma();
     if (argc >= 3)
         test_damage(argv[1], (const char *const *)argv + 2, (unsigned)(argc - 2));
     printf("hwdb-test: %u of %u checks failed\n", failures, checks);

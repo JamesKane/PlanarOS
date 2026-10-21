@@ -179,6 +179,13 @@ static void resources(const struct hw_graph *g, const struct hw_node *n, hw_prin
         }
         out(ctx, l.text);
     }
+    if (n->dma_limit) {
+        struct hw_line l = { 0 };
+
+        hw_put(&l, "  dma below ");
+        hw_put_hex(&l, n->dma_limit);
+        out(ctx, l.text);
+    }
 }
 
 /* The leases serving more than one device: the pages they shared. */

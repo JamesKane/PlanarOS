@@ -142,6 +142,7 @@ constexpr uint32_t MAP_WRITE = 1u << 1;
 constexpr uint32_t MAP_EXEC  = 1u << 2;
 constexpr uint32_t MAP_USER  = 1u << 3;
 constexpr uint32_t MAP_DEVICE = 1u << 4;    /* device registers, not memory */
+constexpr uint32_t MAP_NC = 1u << 5;        /* memory the CPU doesn't cache (AREAF_NC) */
 
 bool arch_domain_create(struct arch_domain *d);
 unsigned arch_asid_bits(void);                      /* 0: none, every switch flushes */
@@ -176,6 +177,17 @@ bool arch_copy_to_user(uint64_t dst, const void *src, size_t n);
 /* Make every CPU's instruction fetch see code just written through the
  * kernel's mapping at [va, va + len). */
 void arch_sync_icache(const void *va, size_t len);
+
+/*
+ * Memory mapped MAP_NC (v5-plan step 1). arch_has_nc: whether this CPU
+ * can (RISC-V needs Svpbmt, found by trying it). arch_dcache_flush
+ * writes back and drops every cache line of [va, va + len) to memory,
+ * through the kernel's mapping: an uncached Area's pages have a cached
+ * alias in the direct map, cleaned as the Area starts (it was zeroed
+ * through it) and as it ends (lines fetched meanwhile are stale).
+ */
+bool arch_has_nc(void);
+void arch_dcache_flush(const void *va, size_t len);
 
 /* Read 64 bits at kernel address 'addr' if that doesn't fault: true and
  * the value, or false. For self-tests and probes. */

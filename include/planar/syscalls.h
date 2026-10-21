@@ -53,6 +53,11 @@
 #define SYS_CREATE_PROCESS_IMAGE 43
 #define SYS_GRANT_CONSOLE   44
 #define SYS_READ_CONSOLE    45
+#define SYS_WAIT_ADDR       46
+#define SYS_WAKE_ADDR       47
+#define SYS_SHARE_LEASE     48
+#define SYS_UNSHARE_LEASE   49
+#define SYS_LIMIT_LEASE_DMA 50
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)
@@ -66,5 +71,6 @@
 #define ERR_PORT_DIED       (-10)       /* the other end of a connection went */
 #define ERR_LIMIT           (-11)       /* a per-process limit (handles, tasks, connections) */
 #define ERR_BUSY            (-12)       /* in use: a lease granted or stopping */
+#define ERR_TIMEOUT         (-13)       /* a deadline passed first */
 
 #endif /* PLANAR_SYSCALLS_H */

@@ -286,6 +286,48 @@ static bool translate(const struct hw_graph *g, hw_id bus, uint64_t *addr)
     return true;
 }
 
+/*
+ * Where the node's DMA stops seeing memory at the CPU's addresses, which
+ * under the identity layout are its Areas' (v5-plan step 1): the end of
+ * the identity entries of the dma-ranges that apply to it, those of the
+ * bus its interconnects name first (the K1's dram_range buses), or else
+ * of the nearest bus above it that has any. An empty dma-ranges, or none,
+ * is no limit; entries that move memory are left out, as memory it can't
+ * be given.
+ */
+static void read_dma(struct hw_graph *g, hw_id id)
+{
+    hw_id bus = HW_NONE;
+    uint32_t len, cac, pac, csc, entry;
+    const uint8_t *r = hw_fdt_prop(g, id, "interconnects", &len);
+    uint64_t limit = 0;
+
+    if (r && len >= 4)
+        bus = by_phandle(g, be32(r));
+    for (hw_id b = g->nodes[id].parent; bus == HW_NONE && b != HW_NONE; b = g->nodes[b].parent)
+        if (hw_fdt_prop(g, b, "dma-ranges", &len))
+            bus = b;
+    if (bus == HW_NONE || g->nodes[bus].parent == HW_NONE ||
+        !(r = hw_fdt_prop(g, bus, "dma-ranges", &len)) || len == 0)
+        return;
+    cac = prop_u32(g, bus, "#address-cells", 2);
+    csc = prop_u32(g, bus, "#size-cells", 1);
+    pac = prop_u32(g, g->nodes[bus].parent, "#address-cells", 2);
+    entry = 4 * (cac + pac + csc);
+    if (cac > 2 || pac > 2 || csc > 2 || entry == 0) {
+        g->broken++;
+        return;
+    }
+    for (uint32_t o = 0; o + entry <= len; o += entry) {
+        uint64_t cbase = cells_value(r + o, cac), pbase = cells_value(r + o + 4 * cac, pac);
+        uint64_t size = cells_value(r + o + 4 * (cac + pac), csc);
+
+        if (cbase == pbase && pbase + size > limit)
+            limit = pbase + size;
+    }
+    g->nodes[id].dma_limit = limit ? limit : 0x1000;    /* none where it is: no page will do */
+}
+
 static void read_reg(struct hw_graph *g, hw_id id)
 {
     hw_id bus = g->nodes[id].parent;
@@ -699,6 +741,7 @@ bool hw_from_fdt(struct hw_graph *g, const void *blob, uint32_t size)
         if (g->nodes[i].nkeys == 0)
             continue;
         read_reg(g, i);
+        read_dma(g, i);
         read_pci_host(g, i);
         read_interrupts(g, i);
         read_refs(g, i);

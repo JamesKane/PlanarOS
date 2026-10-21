@@ -1,6 +1,6 @@
 # lease: device leases
 
-*Checked against V4.*
+*Checked against V4, with V5 step 1's calls (LimitLeaseDma, ShareLease, UnshareLease).*
 
 The calls a driver and its supervisor use, in alphabetical order, with the serial console's input and MSIs, which the device root also governs. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
@@ -109,14 +109,15 @@ A kernel call.
 **INPUTS**
 - `lease` -- the lease's handle, granted to the calling process.
 - `size` -- bytes wanted; more than 0. Rounded up to whole pages.
-- `flags` -- as for `AllocArea`. `AREAF_DMA32` places it below 4 GiB, for a device whose DMA addresses are 32 bits (SDHCI's ADMA2).
+- `flags` -- as for `AllocArea`. `AREAF_DMA32` places it below 4 GiB, for a device whose DMA addresses are 32 bits (SDHCI's ADMA2). `AREAF_NC` maps it uncached, for a device that doesn't snoop the CPU's caches. Wherever it's placed, it ends at or below the lease's DMA limit (`LimitLeaseDma`), if there is one.
 - `address` -- where to store the Area's address.
 
 **RESULT**
 The Area's handle (positive), or:
 - `ERR_BADHANDLE` -- `lease` isn't granted to the calling process, or another task of the process freed the new handle before this call returned.
 - `ERR_BADARG` -- `size` is 0, or `flags` has an unknown bit.
-- `ERR_NOMEM` -- out of memory, no run of free pages is long enough (below 4 GiB with `AREAF_DMA32`), or the system's handle table is full.
+- `ERR_NOMEM` -- out of memory, no run of free pages is long enough (below 4 GiB with `AREAF_DMA32`, below the lease's limit), or the system's handle table is full.
+- `ERR_NOSYS` -- `AREAF_NC`, on a CPU that can't map memory uncached.
 - `ERR_LIMIT` -- the calling process already holds 256 handles.
 - `ERR_BADADDR` -- `address` isn't writable. The Area has been freed again.
 
@@ -406,6 +407,46 @@ None known.
 
 ---
 
+## lease/LimitLeaseDma
+
+**NAME**
+LimitLeaseDma -- say where a lease's device can reach memory
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t LimitLeaseDma(Handle lease, uint64_t limit);
+```
+
+**FUNCTION**
+Every DMA Area allocated against `lease` from now on ends at or below `limit`. Under the identity layout an Area's address is the address the device must be given. That holds only where the device's bus doesn't move memory. The K1's GPU and display see memory above 4 GiB at 2 GiB lower, and the first 2 GiB where it is, so their leases are limited to 2 GiB.
+
+hwdb calls it as it makes a driver's lease. The limit comes from the identity part of the device's `dma-ranges` (those of the bus its `interconnects` name, or else of the nearest bus above it), or from a quirk where the tree doesn't say (`servers/hwdb/quirks.c`). `hwdb` reports it as `dma below` on the node.
+
+A kernel call.
+
+**INPUTS**
+- `lease` -- a lease the calling process owns, idle.
+- `limit` -- a page multiple; 0 for no limit.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- the calling process doesn't own `lease`.
+- `ERR_BUSY` -- the lease is granted or stopping.
+- `ERR_BADARG` -- `limit` isn't a page multiple.
+
+**NOTES**
+- It is checked when an Area is allocated, so it's set only while nobody can allocate one.
+- `AREAF_DMA32` still means below 4 GiB. With both, the lower limit holds.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[AllocDmaArea](#leaseallocdmaarea), [CreateLease](#leasecreatelease), [QueryLease](#leasequerylease)
+
+---
+
 ## lease/MapFirmware
 
 **NAME**
@@ -525,6 +566,8 @@ Fills in `info` for a lease the calling process owns or holds:
 | `li_DmaPages` | Pages in its live DMA Areas |
 | `li_QuarantinedPages` | Pages waiting for `RevokeLease` |
 | `li_LentPages` | Pages of others' Areas its dead grantee mapped, held as well until `RevokeLease` |
+| `li_DmaLimit` | Where its DMA Areas must end (`LimitLeaseDma`); 0 if anywhere |
+| `li_Shares` | Ranges of it the grantee has shared with peers (`ShareLease`) |
 
 A kernel call.
 
@@ -645,3 +688,83 @@ None known.
 
 **SEE ALSO**
 [AllocDmaArea](#leaseallocdmaarea), [GrantLease](#leasegrantlease), [KillProcess](exec.md#execkillprocess)
+
+---
+
+## lease/ShareLease
+
+**NAME**
+ShareLease -- give a connected peer pages of a device's registers
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t ShareLease(Handle lease, uint64_t address, uint64_t size, Handle task);
+```
+
+**FUNCTION**
+Maps `size` bytes of the lease's registers at `address` into the process of `task`, readable and writable, as device memory at their physical address. The grantee keeps its own mapping. A CSF doorbell is the case this is for: the GPU server gives an app its queue's doorbell page, and the app rings its own queue with no kernel call ([docs §5.1](../../docs/05-coprocessors.md)).
+
+The peer gets the pages and nothing else: no lines, no DMA, no right to the lease. Its pages go when the grantee calls `UnshareLease`, when the grant ends (the grantee's death), or when the peer dies.
+
+A kernel call.
+
+**INPUTS**
+- `lease` -- a lease granted to the calling process.
+- `address`, `size` -- whole pages, inside the lease.
+- `task` -- a task in the peer's process, which must be connected to the caller (either end of a connection). The peer can send its handle, `FindTask(nullptr)`, in a message.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `lease` isn't granted to the calling process.
+- `ERR_NOTFOUND` -- `task` names no live task, or its process is ending.
+- `ERR_RIGHTS` -- the caller isn't connected to `task`'s process.
+- `ERR_BADARG` -- the pages aren't whole, aren't inside the lease, or `task` is the caller's own.
+- `ERR_EXISTS` -- the peer already has some of these pages from this lease.
+- `ERR_FULL` -- the lease already has `LEASE_SHARES` (32) shares.
+- `ERR_NOMEM` -- no memory for the peer's page tables.
+
+**NOTES**
+- Only registers a device lets each client have to itself should be shared: a page is all or nothing.
+- A peer that touches its pages after they've gone faults, as with any unmapped page (`conformance/doorbell.c` checks it).
+- `li_Shares` in `QueryLease` counts the shares.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[UnshareLease](#leaseunsharelease), [MapLease](#leasemaplease), [ShareArea](exec.md#execsharearea)
+
+---
+
+## lease/UnshareLease
+
+**NAME**
+UnshareLease -- take back pages shared with a peer
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t UnshareLease(Handle lease, uint64_t address, Handle task);
+```
+
+**FUNCTION**
+Unmaps the pages `ShareLease` gave `task`'s process at `address`. On return the peer can't reach them.
+
+A kernel call.
+
+**INPUTS**
+- `lease` -- a lease granted to the calling process.
+- `address` -- where the share starts, as given to `ShareLease`.
+- `task` -- a task in the peer's process.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `lease` isn't granted to the calling process.
+- `ERR_NOTFOUND` -- `task` names no live task, or there is no such share.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[ShareLease](#leasesharelease)

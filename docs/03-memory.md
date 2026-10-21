@@ -50,8 +50,8 @@ The kernel image is RX/RO/RW with W^X. It reaches user memory only through check
 |---|---|
 | `AREAF_CLEAR` | Zero-fill on allocation |
 | `AREAF_DEVICE` | MMIO; device memory attributes |
-| `AREAF_NC` | Normal non-cacheable memory, for non-coherent DMA |
-| `AREAF_WC` | Write-combining (Arm Normal-NC, RISC-V Svpbmt NC); used for framebuffers |
+| `AREAF_NC` | **Built (V5 step 1).** Normal memory the CPU doesn't cache, whose writes may combine: Arm Normal-NC, RISC-V Svpbmt NC. For rings and buffers a device reads without snooping, and framebuffers. Every mapping of the Area has it, and the kernel cleans the direct map's cached alias as the Area starts and ends. `ERR_NOSYS` on a CPU without it (found by trying Svpbmt, since the K1's U-Boot tree doesn't list it) |
+| ~~`AREAF_WC`~~ | Folded into `AREAF_NC` (V5 step 1): neither ISA has an uncached memory type that doesn't combine, and Device memory breaks unaligned copies |
 | `AREAF_EXEC` | Executable; never writable at the same time |
 | `AREAF_RWX` | Explicitly opt out of W^X (P1) |
 | `AREAF_DMA32` | Must sit below 4 GiB (Q8B scanout, some PCIe devices) |

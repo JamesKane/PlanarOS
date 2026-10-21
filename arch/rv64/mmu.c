@@ -14,6 +14,8 @@
  * which riscv_fault_spurious() recognises and retries. From omega's
  * arch/riscv64/mmu.c.
  */
+#include <stdatomic.h>
+
 #include "arch.h"
 #include "cpu.h"
 #include "pmm.h"
@@ -29,6 +31,7 @@ constexpr uint64_t PTE_U  = 1ULL << 4;
 constexpr uint64_t PTE_A  = 1ULL << 6;
 constexpr uint64_t PTE_D  = 1ULL << 7;
 constexpr uint64_t PTE_LEAF = PTE_R | PTE_W | PTE_X;
+constexpr uint64_t PTE_PBMT_NC = 1ULL << 61;   /* Svpbmt: non-cacheable, idempotent memory */
 constexpr uint64_t SATP_SV39 = 8ULL << 60;
 constexpr unsigned SATP_ASID_SHIFT = 44;
 
@@ -211,7 +214,9 @@ bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
     bits |= flags & MAP_EXEC ? PTE_X : 0;
     bits |= flags & MAP_USER ? PTE_U : 0;
     /* MAP_DEVICE needs nothing: the platform's PMAs make device ranges
-     * uncached I/O, on QEMU and the K1 alike (Svpbmt isn't relied on). */
+     * uncached I/O, on QEMU and the K1 alike. MAP_NC is Svpbmt's, which
+     * area.c asks for only once arch_has_nc() has said it works. */
+    bits |= flags & MAP_NC ? PTE_PBMT_NC : 0;
     if (*pte & PTE_V) {
         /* Changing a live mapping: every hart may cache the old one, so
          * take it away everywhere before the new one goes in (review H2). */
@@ -291,6 +296,60 @@ void arch_domain_switch(struct arch_domain *d)
         csr_write_satp(SATP_SV39 | virt_to_phys(boot_root) >> PAGE_SHIFT);
     if (asid_count == 1)
         sfence_vma_all();
+}
+
+bool riscv_zicbom;
+
+/*
+ * Svpbmt, tried rather than read from the device tree: the K1 has it but
+ * its U-Boot's tree says only "rv64imafdcv". A hart without it, or whose
+ * M-mode left menvcfg.PBMTE clear, takes a page fault on a leaf with
+ * PBMT bits set; a kernel-mode fault goes to the copy's fixup, never to
+ * the spurious-fault retry. So: map one page so in a scratch domain and
+ * read it once.
+ */
+bool arch_has_nc(void)
+{
+    static atomic_int known;        /* 1 yes, -1 no, 0 not tried */
+    struct arch_domain d;
+    uint64_t page, v;
+    bool ok;
+    int k = atomic_load(&known);
+
+    if (k)
+        return k > 0;
+    if (!riscv_zicbom || !(page = pmm_alloc()))
+        return false;               /* without Zicbom, the direct map's alias can't be cleaned */
+    if (!arch_domain_create(&d)) {
+        pmm_free(page);
+        return false;
+    }
+    if ((ok = page < ARCH_USER_TOP && arch_map(&d, page, page, MAP_USER | MAP_READ | MAP_NC))) {
+        unsigned long was = arch_irq_save();
+        const struct arch_domain *old = this_cpu()->loaded_domain;
+
+        arch_domain_switch(&d);
+        ok = arch_copy_from_user(&v, page, sizeof v);
+        arch_domain_switch((struct arch_domain *)old);
+        arch_irq_restore(was);
+    }
+    arch_domain_destroy(&d);
+    pmm_free(page);
+    atomic_store(&known, ok ? 1 : -1);
+    return ok;
+}
+
+/* cbo.flush: write back and invalidate, 64-byte blocks (the K1's and QEMU's). */
+void arch_dcache_flush(const void *va, size_t len)
+{
+    uintptr_t a = (uintptr_t)va & ~63ULL, end = (uintptr_t)va + len;
+
+    if (!riscv_zicbom)
+        return;
+    __asm__ volatile("fence rw, rw" : : : "memory");
+    for (; a < end; a += 64)
+        __asm__ volatile(".insn i 0x0f, 2, x0, 2(%0)" : : "r"(a) : "memory");
+    __asm__ volatile("fence rw, rw" : : : "memory");
 }
 
 void arch_sync_icache(const void *, size_t)

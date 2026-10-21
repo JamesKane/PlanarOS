@@ -299,9 +299,14 @@ static void start(struct unit *u)
     for (unsigned r = 0; r < ls->nranges; r++) {
         int64_t h = u->lease[r];
 
-        if (!h)
+        if (!h) {
             h = CreateLease(hwdb.root, ls->ranges[r].base, ls->ranges[r].size,
                             r == 0 ? ls->lines : nullptr, r == 0 ? ls->nlines : 0);
+            if (h > 0 && ls->dma_limit && LimitLeaseDma((Handle)h, ls->dma_limit) != 0) {
+                CloseHandle((Handle)h);
+                h = ERR_BADARG;
+            }
+        }
         if (h < 0 || GrantLease((Handle)h, (Handle)p) != 0) {
             CloseHandle((Handle)p);
             fail_unit(u, h < 0 ? "the kernel refused its lease" : "its lease couldn't be granted");

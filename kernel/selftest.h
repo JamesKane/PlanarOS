@@ -68,4 +68,9 @@ void selftest_time(void);
 void selftest_leases(void);
 void selftest_hwdb(void);
 
+/* V5 step 1: the kernel calls queue leases need. Called from selftest_tasks. */
+void selftest_futex(void);
+void selftest_uncached(void);
+void selftest_shares(void);
+
 #endif /* KERNEL_SELFTEST_H */
