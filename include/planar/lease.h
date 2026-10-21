@@ -12,6 +12,8 @@
  *
  * When the driver dies, its lines are masked at once, and the DMA Areas
  * it hadn't freed are quarantined: the device may still write to them.
+ * So may it to memory others lent the driver (its clients' buffers):
+ * every Area the driver mapped but didn't own is held too.
  * The lease is then stopping. Its owner stops the device (it may map the
  * registers itself now) and calls RevokeLease, which frees the
  * quarantined Areas and leaves the lease ready to grant again.
@@ -37,6 +39,7 @@ struct LeaseInfo {
     uint32_t li_Irqs;
     uint64_t li_DmaPages;           /* in live DMA Areas */
     uint64_t li_QuarantinedPages;   /* waiting for RevokeLease */
+    uint64_t li_LentPages;          /* others' memory its dead grantee mapped, held as well */
 };
 
 int64_t CreateLease(Handle root, uint64_t base, uint64_t size, const uint32_t *irqs,
@@ -68,5 +71,23 @@ int64_t MapFirmware(Handle root, struct FirmwareInfo *info);
 /* The same tables, mapped into a process the caller created (acpid,
  * which runs the AML in them): the root's holder grants them. */
 int64_t GrantFirmware(Handle root, Handle process);
+
+/*
+ * MSIs (v4-plan step 5), for the device root's holder: 'count' interrupt
+ * sources for the device whose writes carry MSI device ID 'device' (a
+ * PCI requester ID, as the msi-map or IORT translates it), its events 0
+ * to count - 1, which a lease may then carry as lines. Each source is
+ * edge-triggered: a driver's AckWaitIrq has nothing to unmask. A device
+ * gets its sources once (ERR_EXISTS after); ERR_NOTFOUND if the
+ * interrupt controller has no MSIs at all (a PLIC), ERR_FULL if it can't
+ * give these (no ITS in use, or none left).
+ */
+struct MsiInfo {
+    uint64_t mi_Doorbell;           /* where the device writes an event's number */
+    uint32_t mi_First;              /* the source event 0 raises; then 1, ... */
+    uint32_t mi_Count;
+};
+
+int64_t AllocMsi(Handle root, uint32_t device, uint32_t count, struct MsiInfo *info);
 
 #endif /* PLANAR_LEASE_H */

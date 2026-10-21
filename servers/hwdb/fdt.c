@@ -313,6 +313,54 @@ static void read_reg(struct hw_graph *g, hw_id id)
     }
 }
 
+/*
+ * A PCI host bridge's (device_type "pci", PCI Bus Binding to IEEE 1275):
+ * its reg is ECAM, with bus-range's buses, and each ranges entry is a
+ * window, three cells of PCI address (space and flags, then the bus
+ * address) to the parent's.
+ */
+static void read_pci_host(struct hw_graph *g, hw_id id)
+{
+    struct hw_node *n = &g->nodes[id];
+    uint32_t len, pac = prop_u32(g, n->parent, "#address-cells", 2);
+    uint32_t sc = prop_u32(g, id, "#size-cells", 2), entry = 4 * (3 + pac + sc);
+    const char *type = hw_fdt_prop(g, id, "device_type", &len);
+    const uint8_t *p;
+
+    if (!type || len != 4 || !hw_streq(type, "pci") || !hw_has_key(n, "pci-host-ecam-generic") ||
+        n->nres == 0 || n->res[0].kind != HW_MMIO)
+        return;
+    n->res[0].kind = HW_ECAM;
+    n->res[0].ncells = 3;
+    n->res[0].cells[0] = prop_u32(g, id, "linux,pci-domain", 0);
+    n->res[0].cells[1] = 0;
+    n->res[0].cells[2] = (uint32_t)((n->res[0].size >> 20) - 1);
+    if ((p = hw_fdt_prop(g, id, "bus-range", &len)) && len == 8) {
+        n->res[0].cells[1] = be32(p);
+        n->res[0].cells[2] = be32(p + 4);
+    }
+    if (!(p = hw_fdt_prop(g, id, "ranges", &len)) || pac > 2 || sc > 2)
+        return;
+    for (uint32_t o = 0; o + entry <= len; o += entry) {
+        uint32_t space = be32(p + o) >> 24 & 3;     /* 1 I/O, 2 32-bit memory, 3 64-bit */
+        uint64_t bus = cells_value(p + o + 4, 2), cpu = cells_value(p + o + 12, pac);
+        struct hw_res *r;
+
+        if (space == 0 || !(r = hw_res_add(g, id)))
+            continue;
+        r->kind = HW_WINDOW;
+        r->base = cpu;
+        r->size = cells_value(p + o + 12 + 4 * pac, sc);
+        r->ncells = 3;
+        r->cells[0] = (space >= 2 ? HW_WIN_MEM : 0) | (space == 3 ? HW_WIN_64 : 0) |
+                      (be32(p + o) & 1u << 30 ? HW_WIN_PREFETCH : 0);
+        r->cells[1] = (uint32_t)(bus >> 32);
+        r->cells[2] = (uint32_t)bus;
+        if (!translate(g, n->parent, &r->base))
+            g->broken++;
+    }
+}
+
 /* --- Pass 2: interrupts. --- */
 
 /* The line a lease would name, for the controllers the kernel drives. */
@@ -498,6 +546,16 @@ static void id_map(struct hw_graph *g, hw_id id, const char *prop, const uint8_t
         uint32_t ph = be32(p + o + 4);
         bool seen = false;
         struct hw_ref *r;
+        struct hw_res *m;
+
+        if (kind == HW_REF_MSI && (m = hw_res_add(g, id))) {
+            m->kind = HW_MSIMAP;
+            m->base = be32(p + o);
+            m->size = be32(p + o + 12);
+            m->ncells = 1;
+            m->cells[0] = be32(p + o + 8);
+            m->ctlr = by_phandle(g, ph);
+        }
 
         for (unsigned i = 0; i < g->nodes[id].nrefs; i++)
             seen |= g->nodes[id].refs[i].kind == kind && g->nodes[id].refs[i].handle == ph;
@@ -641,6 +699,7 @@ bool hw_from_fdt(struct hw_graph *g, const void *blob, uint32_t size)
         if (g->nodes[i].nkeys == 0)
             continue;
         read_reg(g, i);
+        read_pci_host(g, i);
         read_interrupts(g, i);
         read_refs(g, i);
         if (g->nodes[i].parent != HW_NONE && g->nodes[i].parent != 0) {

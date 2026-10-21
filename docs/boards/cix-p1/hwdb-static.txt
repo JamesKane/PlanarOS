@@ -1,24 +1,27 @@
 /MADT/gicd@e010000 [arm,gic-v3]: kernel, driven by the kernel
   mmio 0xe010000+0x10000
   mmio 0xe090000+0x300000
-/MADT/its@e050000 [arm,gic-v3-its]: no driver
+/MADT/its@e050000 [arm,gic-v3-its]: kernel, driven by the kernel
   mmio 0xe050000+0x20000
 /MCFG/pci@0,192 [PNP0A08]: pci, bound 1
   ecam 0x2c000000+0x4000000 segment 0 buses 192-255
-  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@e050000
+  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi optional)
 /MCFG/pci@0,96 [PNP0A08]: pci, bound 2
   ecam 0x26000000+0x2000000 segment 0 buses 96-127
-  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@e050000
+  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi optional)
 /MCFG/pci@0,48 [PNP0A08]: pci, bound 3
   ecam 0x23000000+0x2000000 segment 0 buses 48-79
-  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@e050000
+  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi optional)
 /IORT/smmu@b010000 [arm,smmu-v3]: no driver
   mmio 0xb010000+0x20000
   irq 107 on /MADT/gicd@e010000
   irq 116 on /MADT/gicd@e010000
   irq 112 on /MADT/gicd@e010000
   irq 108 on /MADT/gicd@e010000
-  needs /MADT/gicd@e010000 (interrupts); /MADT/its@e050000 (msi dropped)
+  needs /MADT/gicd@e010000 (interrupts); /MADT/its@e050000 (msi optional)
 /IORT/smmu@b1b0000 [arm,smmu-v3]: no driver
   mmio 0xb1b0000+0x20000
   irq 141 on /MADT/gicd@e010000
@@ -67,4 +70,4 @@
   mmio 0x16008000+0x1000
   irq 408 on /MADT/gicd@e010000
   needs /MADT/gicd@e010000 (interrupts)
-hwdb: CIXTEK SKY1EDK2: 4 kernel, 14 namespace, 3 no driver, 3 bound, 0 broken
+hwdb: CIXTEK SKY1EDK2: 5 kernel, 14 namespace, 2 no driver, 3 bound, 0 broken

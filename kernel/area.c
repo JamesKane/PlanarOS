@@ -47,6 +47,8 @@ struct area {
     bool guard;
     bool freed;                     /* its owner called FreeArea (lock) */
     struct lease *lease;            /* a device's DMA memory (kernel/lease.c) */
+    bool held;                      /* lent to a dead driver's device: area_hold_lent */
+    struct area *held_next;
     uint64_t run_pa, run_pages;     /* the whole run, guard included */
     unsigned sharers;
     unsigned refs;                  /* calls using it (lock held) */
@@ -129,6 +131,44 @@ void area_destroy(struct area *a)
 void area_unquarantine(struct area *a)
 {
     free_area(a);
+}
+
+uint64_t area_hold_lent(struct process *p, struct area **list)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    uint64_t pages = 0;
+
+    for (struct mapping *m = p->maps; m; m = m->next_in_proc) {
+        struct area *a = m->area;
+
+        if (a->owner == p || a->lease || a->held)
+            continue;
+        a->held = true;
+        a->refs++;
+        a->held_next = *list;
+        *list = a;
+        pages += a->size / PAGE_SIZE;
+    }
+    spin_unlock_irqrestore(&lock, was);
+    return pages;
+}
+
+void area_unhold(struct area *list)
+{
+    while (list) {
+        struct area *a = list, *next = a->held_next;
+        unsigned long was = spin_lock_irqsave(&lock);
+        bool last;
+
+        a->held = false;
+        a->held_next = nullptr;
+        a->refs--;
+        last = unused(a);
+        spin_unlock_irqrestore(&lock, was);
+        if (last)
+            area_destroy(a);
+        list = next;
+    }
 }
 
 /* --- Mapping. --- */

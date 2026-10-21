@@ -412,6 +412,53 @@ static void test_leases(void)
     CHECK(strstr(line_for("hwdb: one drv-a"), "for 2 devices sharing 0x1000+0x1000: a1 a2"));
 }
 
+/* Nodes a bus driver adds once the graph is running (hw_add_late): a
+ * function behind a host bridge gets its own lease and binds after the
+ * bridge; one on another device's pages fails, saying whose. */
+static void test_late(void)
+{
+    hw_id bridge, uart, f1, f2, f3;
+    struct hw_ref *r;
+
+    fresh();
+    bridge = dev("pcie", "a");
+    reg(bridge, HW_ECAM, 0x40000000, 0x1000000);
+    uart = dev("uart", "k");
+    reg(uart, HW_MMIO, 0x10002000, 0x100);
+    hw_match(&g, drivers, 3);
+    hw_leases(&g);
+    hw_order_start(&g);
+    CHECK(hw_next(&g) == bridge);   /* ready; not yet bound */
+
+    f1 = hw_node_new(&g, bridge, "00:01.0");
+    hw_key_add(&g, f1, "b");
+    reg(f1, HW_MMIO, 0x10004000, 0x4000);
+    reg(f1, HW_IRQ, 8192, 0);
+    reg(f1, HW_IRQ, 8193, 0);
+    r = hw_ref_add(&g, f1, HW_REF_PARENT, "parent", true);
+    r->target = r->supplier = bridge;
+    hw_add_late(&g, f1);
+    CHECK(g.nodes[f1].state == HW_S_WAITING && g.nodes[f1].lease == g.nleases - 1);
+    CHECK(g.leases[g.nodes[f1].lease].nranges == 1 && g.leases[g.nodes[f1].lease].nlines == 2 &&
+          g.leases[g.nodes[f1].lease].lines[1] == 8193);
+    CHECK(hw_next(&g) == HW_NONE);  /* waits for the bridge */
+    hw_bound(&g, bridge);
+    CHECK(hw_next(&g) == f1 && g.nodes[f1].state == HW_S_READY);
+
+    f2 = hw_node_new(&g, bridge, "00:02.0");    /* the uart's page */
+    hw_key_add(&g, f2, "b");
+    reg(f2, HW_MMIO, 0x10002800, 0x100);
+    hw_add_late(&g, f2);
+    CHECK(g.nodes[f2].state == HW_S_FAILED && g.nodes[f2].lease == HW_NOLEASE);
+    CHECK(strstr(line_for("/pcie/00:02.0"), "shares pages with /uart"));
+    CHECK(g.nodes[f2].unit == 1);   /* numbered all the same */
+
+    f3 = hw_node_new(&g, bridge, "00:03.0");    /* no driver takes it */
+    hw_key_add(&g, f3, "pciclass,0600");
+    hw_add_late(&g, f3);
+    CHECK(g.nodes[f3].state == HW_S_NODRIVER);
+}
+
 /* --- acpid's records (namespace.c). --- */
 
 static struct AcpidDevice rec;
@@ -552,8 +599,10 @@ static void test_namespace(void)
     CHECK(hw_find_moved(&g, "/SPCR/serial@9000000") == uart);
     CHECK(hw_find_path(&g, "/_SB_/DPU0", 10) == dpu && g.nodes[dpu].state == HW_S_STRUCTURE &&
           g.nodes[dpu].nres == 1 && g.nodes[dpu].res[0].base == 0x14000000);
-    CHECK(hw_find_path(&g, "/_SB_/PCI0", 10) == pci && g.nodes[pci].nres == 1 &&
+    CHECK(hw_find_path(&g, "/_SB_/PCI0", 10) == pci && g.nodes[pci].nres == 2 &&
           g.nodes[pci].res[0].kind == HW_ECAM && g.nodes[pci].nkeys == 2);
+    CHECK(g.nodes[pci].res[1].kind == HW_WINDOW && g.nodes[pci].res[1].base == 0x10000000 &&
+          g.nodes[pci].res[1].cells[0] == HW_WIN_MEM);     /* its window, which the MCFG lacks */
 
     /* Interrupts on the GIC, and on a controller named by path. */
     gpio = hw_find_path(&g, "/_SB_/GPI0", 10);
@@ -630,6 +679,7 @@ int main(int argc, char **argv)
     test_match();
     test_quirks();
     test_leases();
+    test_late();
     test_namespace();
     if (argc >= 3)
         test_damage(argv[1], (const char *const *)argv + 2, (unsigned)(argc - 2));

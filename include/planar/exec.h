@@ -112,4 +112,19 @@ int64_t CloseHandle(Handle handle);
 uint64_t CurrentTime(void);
 int64_t ArmTimer(uint64_t deadline, int64_t sigbit);
 
+/*
+ * The whole machine's counts since boot, for measuring what an operation
+ * costs (docs §11.8: traps and crossings per I/O). Each is summed over
+ * the CPUs, so a count read while others run is approximate.
+ */
+struct SystemInfo {
+    uint64_t si_Calls;              /* kernel calls */
+    uint64_t si_Interrupts;         /* from the interrupt controller and the timer */
+    uint64_t si_Switches;           /* task switches */
+    uint64_t si_Crossings;          /* of those, from one process's domain to another */
+    uint64_t si_Quarantined;        /* DMA pages waiting for their device to stop */
+};
+
+int64_t QuerySystem(struct SystemInfo *info);
+
 #endif /* PLANAR_EXEC_H */

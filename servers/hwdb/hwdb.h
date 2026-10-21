@@ -42,7 +42,16 @@ enum hw_res_kind : uint8_t {
     HW_IRQ,             /* ctlr, cells; base is the line, or HW_NOLINE */
     HW_BUSADDR,         /* base: an address on a bus that isn't memory (I2C, SPI) */
     HW_ECAM,            /* base, size; cells: segment, first bus, last bus */
+    HW_WINDOW,          /* a host bridge's: base, size (the CPU's); cells: HW_WIN_*, bus address hi, lo */
+    HW_MSIMAP,          /* a host bridge's: requester IDs base to base + size become
+                           MSI device IDs from cells[0] (msi-map, the IORT) */
+    HW_MSIX,            /* a PCI function's: its MSI-X table at base, size vectors */
 };
+
+/* HW_WINDOW's cells[0]. */
+constexpr uint32_t HW_WIN_MEM = 1u << 0;        /* else I/O space */
+constexpr uint32_t HW_WIN_64 = 1u << 1;         /* above 4 GiB on the bus */
+constexpr uint32_t HW_WIN_PREFETCH = 1u << 2;
 
 struct hw_res {
     enum hw_res_kind kind;
@@ -192,9 +201,9 @@ struct hw_graph {
     struct hw_move { const char *from; hw_id node; } *moves;
     uint32_t nmoves, maxmoves;
 
-    /* Leases (lease.c). */
+    /* Leases (lease.c), with room for HW_LATE_LEASES more (hw_add_late). */
     struct hw_lease *leases;
-    uint32_t nleases;
+    uint32_t nleases, maxleases;
 
     /* Ordering. */
     hw_id *queue;                   /* ready nodes, in the order they became ready */
@@ -282,10 +291,22 @@ hw_id hw_child(const struct hw_graph *g, hw_id parent, const char *name, size_t 
 /* Matching (match.c): each enabled device gets the best driver for its
  * most specific key that any driver takes. */
 void hw_match(struct hw_graph *g, const struct hw_driver *drivers, unsigned n);
+void hw_match_node(struct hw_graph *g, hw_id id);     /* one more, with the same drivers */
 
 /* Group the process drivers' nodes into leases by the pages they share,
  * after hw_match; a node that can't be leased fails, saying why. */
 void hw_leases(struct hw_graph *g);
+
+/*
+ * A node a bus driver published once the graph was running (the pci
+ * server's functions, step 5): matched, numbered among its driver's
+ * units, leased on its own, and queued once its references are met. Its
+ * pages mustn't touch another device's: if they do, it fails, saying
+ * which. Leases past HW_LATE_LEASES fail it too.
+ */
+constexpr unsigned HW_LATE_LEASES = 64;
+void hw_add_late(struct hw_graph *g, hw_id id);
+void hw_lease_late(struct hw_graph *g, hw_id id);     /* lease.c's half */
 
 /* The drivers hwdb knows (drivers.c). */
 extern const struct hw_driver hw_drivers[];

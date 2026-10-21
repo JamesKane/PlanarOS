@@ -490,10 +490,11 @@ static void reclaim(struct process *p)
     lease_process_died(p);      /* stopping: its DMA Areas are quarantined as they go */
     area_process_died(p);
     arch_domain_destroy(&p->domain);
-    /* Its own reference, before 'dead': from then on the watcher may
-     * let the record go. */
-    process_put(p);
+    /* 'dead' while its own reference still holds the record: the other
+     * holder may have let go already (a handle closed while it ran), and
+     * then this put frees it. Then the watcher, who may let it go too. */
     atomic_store(&p->dead, true);
+    process_put(p);
     if (watcher)
         task_signal(watcher, sig);
     else if (watch_task)

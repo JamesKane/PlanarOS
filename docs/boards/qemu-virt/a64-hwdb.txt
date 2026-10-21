@@ -136,8 +136,12 @@
   irq 39 on /intc@8000000
   needs /intc@8000000 (interrupts); /apb-pclk (clock)
 /pcie@10000000 [pci-host-ecam-generic]: pci, bound 34
-  mmio 0x4010000000+0x10000000
-  needs /intc@8000000 (interrupts); /intc@8000000/its@8080000 (msi dropped)
+  ecam 0x4010000000+0x10000000 segment 0 buses 0-255
+  window io 0x3eff0000+0x10000 at 0x0 on the bus
+  window mem32 0x10000000+0x2eff0000
+  window mem64 0x8000000000+0x8000000000
+  msi 0x0+0x10000 as 0x0 on /intc@8000000/its@8080000
+  needs /intc@8000000 (interrupts); /intc@8000000/its@8080000 (msi optional)
 /pl031@9010000 [arm,pl031]: rtc-pl031, bound 36
   mmio 0x9010000+0x1000
   irq 34 on /intc@8000000
@@ -152,7 +156,7 @@
 /intc@8000000 [arm,gic-v3]: kernel, driven by the kernel
   mmio 0x8000000+0x10000
   mmio 0x80a0000+0xf60000
-/intc@8000000/its@8080000 [arm,gic-v3-its]: no driver
+/intc@8000000/its@8080000 [arm,gic-v3-its]: kernel, driven by the kernel
   mmio 0x8080000+0x20000
   needs /intc@8000000 (parent)
 /flash@0 [cfi-flash]: no driver
@@ -177,4 +181,4 @@ hwdb: one virtio-mmio for 8 devices sharing 0xa000000+0x1000: virtio_mmio@a00000
 hwdb: one virtio-mmio for 8 devices sharing 0xa001000+0x1000: virtio_mmio@a001000 virtio_mmio@a001200 virtio_mmio@a001400 virtio_mmio@a001600 virtio_mmio@a001800 virtio_mmio@a001a00 virtio_mmio@a001c00 virtio_mmio@a001e00
 hwdb: one virtio-mmio for 8 devices sharing 0xa002000+0x1000: virtio_mmio@a002000 virtio_mmio@a002200 virtio_mmio@a002400 virtio_mmio@a002600 virtio_mmio@a002800 virtio_mmio@a002a00 virtio_mmio@a002c00 virtio_mmio@a002e00
 hwdb: one virtio-mmio for 8 devices sharing 0xa003000+0x1000: virtio_mmio@a003000 virtio_mmio@a003200 virtio_mmio@a003400 virtio_mmio@a003600 virtio_mmio@a003800 virtio_mmio@a003a00 virtio_mmio@a003c00 virtio_mmio@a003e00
-hwdb: linux,dummy-virt: 8 kernel, 6 no driver, 36 bound, 0 broken
+hwdb: linux,dummy-virt: 9 kernel, 5 no driver, 36 bound, 0 broken

@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** Steps 1 to 4 are done. The four decisions at the end are made, as leaned.
+**Status: in progress (2026-10-20).** Steps 1 to 4 are done, and step 5 is under way. The four decisions at the end are made, as leaned.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -204,6 +204,16 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 - The "shares pages with" reason now names a device whose pages overlap, not just one in the same run. On the RV2 that's the clock controller at `0xd4050000`, which U-Boot set up.
 
 ## 5. Storage
+
+**Progress (2026-10-20): QEMU's half is built.** Still to come: the CIX's SSD, SDHCI on the RV2, and the step's exit line.
+- **`pci`** (`drv/pci`, `servers/hwdb/pci.c`) is an hwdb source. It asks hwdb for the bridge's buses and windows (`HWDB_PCI_HOST`), walks config space, gives BARs the firmware left empty an address in a window (QEMU booted without firmware), and sends each function (`HWDB_PCI_FUNCTION`). hwdb adds a node per function, keyed `pciVVVV,DDDD` then `pciclass,CCSSPP`, and leases, matches and starts it like any other (`hw_add_late`). A BAR outside the bridge's windows is refused.
+- **The ITS** (`arch/aarch64/its.c`) is the kernel's. hwdb asks for a function's LPIs (`AllocMsi`, call 41) by the MSI device ID its bridge's `msi-map` or IORT gives, and leases them as lines. LPIs are edge-triggered, so nothing masks one as it fires.
+- **NVMe** (`drv/nvme`) has an admin queue and one I/O queue, takes MSI-X (or polls without), and serves the block class. hwdb's stop method for it is `CC.EN = 0`.
+- **The block class** (`planar/devices/block.h`, `lib/blk`): batches per message, and buffers in the connection's heap, which the device reads and writes with no copy. A dying driver's lent memory (the Areas it mapped but didn't own) is now held with its quarantine until `RevokeLease` (`area_hold_lent`).
+- **Measured** by `conformance/blkbench`, which hwdb's test mode runs before the kill test. `QuerySystem` (call 42) gives the calls, interrupts and crossings per I/O.
+- **The kill test** has a block client, which reads at random and checks each block holds its own number (`tools/mkdisk.py`). It passes on QEMU under the device tree, edk2's device tree and ACPI.
+- **Fixed on the way:** `reclaim()` stored `dead` after dropping the process's last reference, so a process whose handle was closed while it ran wrote into its freed record. Programs growing (`lib/blk`) made the freed page come back as a page table, and RV64 then crashed in about 1 boot in 4.
+- **Not as planned:** partitions are in `lib/blk`, not a multiplexer server. A server between a client and the driver would have to copy, since the client's heap isn't the driver's. Clients of one disk trust each other until a second kind of client comes.
 
 - **`pci`:** an hwdb source (§11.6). It takes ECAM from MCFG or the device tree's host bridge node, and publishes a node per function with its BARs and MSI-X. Both boards' firmware trains the links, so V4 drives only generic ECAM. MSI-X needs the GIC's ITS on the CIX and QEMU (deferred from V3).
 - **NVMe:** on QEMU (`-device nvme`) and the CIX (its SSD is the board's boot disk). One admin queue, and one I/O queue per CPU class to start.

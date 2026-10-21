@@ -23,6 +23,7 @@ ARCH_SRCS := \
 	arch/aarch64/arch.c \
 	arch/aarch64/efi.c \
 	arch/aarch64/gicv3.c \
+	arch/aarch64/its.c \
 	arch/aarch64/lazy.c \
 	arch/aarch64/lazy.S \
 	arch/aarch64/mmu.c \

@@ -91,26 +91,31 @@ static void add_consumer(struct hw_graph *g, hw_id s, hw_id c)
     n->consumers[n->nconsumers++] = c;
 }
 
+/* Its references, as hw_order_start takes each node's. */
+static void order_one(struct hw_graph *g, hw_id id)
+{
+    struct hw_node *n = &g->nodes[id];
+
+    for (unsigned k = 0; k < n->nrefs; k++) {
+        struct hw_ref *r = &n->refs[k];
+
+        if (!r->required && hopeless(g, r->supplier))
+            r->dropped = true;
+        if (r->supplier != HW_NONE)
+            add_consumer(g, r->supplier, id);
+    }
+}
+
 void hw_order_start(struct hw_graph *g)
 {
-    g->queue = hw_alloc(g->arena, (g->count ? g->count : 1) * sizeof *g->queue);
+    g->queue = hw_alloc(g->arena, (g->cap ? g->cap : 1) * sizeof *g->queue);   /* hw_add_late's too */
     g->qhead = g->qtail = g->bound = 0;
     if (!g->queue) {
         g->full = true;
         return;
     }
-    for (hw_id i = 0; i < g->count; i++) {
-        struct hw_node *n = &g->nodes[i];
-
-        for (unsigned k = 0; k < n->nrefs; k++) {
-            struct hw_ref *r = &n->refs[k];
-
-            if (!r->required && hopeless(g, r->supplier))
-                r->dropped = true;
-            if (r->supplier != HW_NONE)
-                add_consumer(g, r->supplier, i);
-        }
-    }
+    for (hw_id i = 0; i < g->count; i++)
+        order_one(g, i);
     for (hw_id i = 0; i < g->count; i++)
         examine(g, i);
 }
@@ -170,6 +175,26 @@ void hw_bind_all(struct hw_graph *g)
         while ((n = hw_next(g)) != HW_NONE)
             hw_bound(g, n);
     while (hw_unstick(g));
+}
+
+void hw_add_late(struct hw_graph *g, hw_id id)
+{
+    struct hw_node *n = &g->nodes[id];
+
+    hw_match_node(g, id);
+    if (n->driver != HW_NODRV) {
+        uint16_t unit = 0;
+
+        for (hw_id i = 1; i < g->count; i++)
+            if (i != id && g->nodes[i].driver == n->driver && g->nodes[i].unit >= unit)
+                unit = (uint16_t)(g->nodes[i].unit + 1);
+        n->unit = unit;
+    }
+    n->lease = HW_NOLEASE;
+    if (n->state == HW_S_WAITING)
+        hw_lease_late(g, id);
+    order_one(g, id);
+    examine(g, id);
 }
 
 void hw_prepare(struct hw_graph *g)

@@ -4,9 +4,15 @@
  * The kernel starts hwdb with HWDB_TEST. Once every driver that can bind
  * has, this:
  *
+ * 0. Measures each block device with blkbench (conformance/blkbench.c),
+ *    one at a time, while nothing else runs.
  * 1. Starts a client task per class port the drivers published. Each
  *    reads its device over and over, and when its connection dies with
- *    ERR_PORT_DIED, reconnects, as a class library would (§11.9).
+ *    ERR_PORT_DIED, reconnects, as a class library would (§11.9). A
+ *    block device's client is lib/blk itself, reading at random in the
+ *    disk's second partition with no pause, so that kills come with
+ *    I/O in flight; every block it gets must hold its own number
+ *    (tools/mkdisk.py).
  * 2. Kills the units that serve them, in turn, ROUNDS times each, at
  *    random points: some while still binding, most while serving. Each
  *    death goes through server.c's teardown, which checks the kernel
@@ -25,6 +31,7 @@
  */
 #include <stddef.h>
 
+#include <planar/blk.h>
 #include <planar/syscalls.h>
 
 #include "server.h"
@@ -37,14 +44,17 @@ constexpr uint64_t Y2020 = 1577836800;
 constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
-enum phase : uint8_t { T_SETTLE, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
+enum phase : uint8_t { T_SETTLE, T_BENCH, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
+
+enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK };
 
 struct client {
     char port[16];
-    bool rtc;
+    enum kind kind;
     struct unit *unit;
     _Atomic bool stop, done;
     unsigned answers, deaths, recovered, bad, busy;
+    int64_t last_bad;               /* the last error it saw, for the report */
 };
 
 static struct client clients[CLIENTS];
@@ -52,7 +62,9 @@ static unsigned nclients;
 static enum phase phase;
 static struct unit *live[64], *victim;
 static unsigned nlive, round, rounds, binding, victim_starts;
-static uint64_t wake, phase_at, seed;
+static uint64_t wake, phase_at, seed, all_done_at;
+static Handle bench;                /* blkbench, measuring a block device */
+static unsigned benched;            /* clients whose devices it has measured */
 static uint32_t handles;            /* hwdb's, before the clients */
 
 static uint64_t rnd(void)
@@ -81,7 +93,7 @@ static bool plausible(const struct client *c, const struct DrvRequest *r)
     uint64_t v = 0;
     unsigned nonzero = 0;
 
-    if (c->rtc) {
+    if (c->kind == K_RTC) {
         if (r->dr_Len != 8)
             return false;
         for (unsigned i = 0; i < 8; i++)
@@ -93,10 +105,85 @@ static bool plausible(const struct client *c, const struct DrvRequest *r)
     return r->dr_Len == 32 && nonzero > 16;
 }
 
+/* lib/blk's reads, which reconnect and retry by themselves: a death
+ * shows as a reconnect, and a recovery as a good read after one. */
+static uint8_t blocks[CLIENTS][8 * 4096];
+
+static void block_client(struct client *c, uint8_t *buf)
+{
+    struct blk b;
+    uint32_t seen = 0, lost = 0;
+    uint64_t r = (uint64_t)buf | 1;     /* its own: the clients run at once */
+
+    /* Opening may meet a kill too: tried again for as long as a restart takes. */
+    for (uint64_t since = CurrentTime();;) {
+        int64_t e = blk_open(&b, c->port, SIG_CLIENT, 256 * 1024);
+
+        if (e == 0 && (e = blk_partition(&b, 2)) == 0 && b.block_size <= 4096)
+            break;
+        if (e == 0)
+            blk_close(&b);
+        if (c->stop || CurrentTime() - since > BLK_GONE_MS * MS) {
+            c->bad++;
+            c->last_bad = e;
+            c->done = true;
+            ExitTask(0);
+        }
+        nap(1);
+    }
+    while (!c->stop) {
+        uint32_t n;
+        uint64_t at;
+        bool good;
+
+        r ^= r << 13;
+        r ^= r >> 7;
+        r ^= r << 17;
+        n = 1 + (uint32_t)(r % 8);
+        at = (r >> 8) % (b.blocks - n);
+
+        int64_t e = blk_read(&b, at, n, buf);
+
+        if (e != 0) {
+            c->bad++;
+            c->last_bad = e;
+            nap(1);
+            continue;
+        }
+        good = true;
+        for (uint32_t k = 0; k < n; k++) {
+            uint64_t v = 0;
+
+            for (unsigned i = 0; i < 8; i++)
+                v |= (uint64_t)buf[k * b.block_size + i] << 8 * i;
+            good &= v == b.first + at + k;
+        }
+        if (b.reconnects != seen) {
+            c->deaths += b.reconnects - seen;
+            lost += b.reconnects - seen;
+            seen = b.reconnects;
+        }
+        if (good) {
+            c->answers++;
+            c->recovered += lost;
+            lost = 0;
+        } else {
+            c->bad++;
+            c->last_bad = 1;        /* a block that wasn't its own */
+        }
+    }
+    blk_close(&b);
+    c->done = true;
+    ExitTask(0);
+}
+
 /* A class library's loop, at its simplest: read; on a death, reconnect. */
 static void client(uint64_t arg)
 {
     struct client *c = &clients[arg];
+
+    if (c->kind == K_BLOCK)
+        block_client(c, blocks[arg]);
     struct MsgPort mp;
     struct DrvRequest *m = nullptr;
     bool open = false, lost = false;
@@ -110,6 +197,7 @@ static void client(uint64_t arg)
             if (e == ERR_NOTFOUND) {
                 if (CurrentTime() - since > 3000 * MS) {
                     c->bad++;           /* gone for longer than any restart takes */
+                    c->last_bad = ERR_NOTFOUND;
                     since = CurrentTime();
                 }
                 nap(1);
@@ -117,6 +205,7 @@ static void client(uint64_t arg)
             }
             if (e != 0 || !(m = AllocMsg(&mp, sizeof *m))) {
                 c->bad++;
+                c->last_bad = e ? e : ERR_NOMEM;
                 if (e == 0)
                     ClosePort(&mp);
                 nap(1);
@@ -130,7 +219,7 @@ static void client(uint64_t arg)
         memset(m, 0, sizeof *m);
         m->dr_Msg.mn_Length = sizeof *m;
         m->dr_Op = DRV_READ;
-        m->dr_Len = c->rtc ? 8 : 32;
+        m->dr_Len = c->kind == K_RTC ? 8 : 32;
         e = DoMsg(&mp, &m->dr_Msg);
         if (e == ERR_PORT_DIED || m->dr_Msg.mn_Error == ERR_PORT_DIED) {
             c->deaths++;
@@ -145,7 +234,7 @@ static void client(uint64_t arg)
         else if (m->dr_Msg.mn_Error == ERR_BUSY)
             c->busy++;
         else
-            c->bad++;
+            c->bad++, c->last_bad = e ? e : m->dr_Msg.mn_Error ? m->dr_Msg.mn_Error : 1;
         nap(1);
     }
     if (open)
@@ -195,7 +284,9 @@ static void settle(void)
                 continue;
             for (unsigned q = 0; q < sizeof c->port; q++)
                 c->port[q] = u->ports[k][q];
-            c->rtc = hw_strneq(u->ports[k], "rtc.", 4);
+            c->kind = hw_strneq(u->ports[k], "rtc.", 4)    ? K_RTC
+                      : hw_strneq(u->ports[k], "nvme.", 5) ? K_BLOCK
+                                                           : K_RNG;
             c->unit = u;
             nclients++;
             any = true;
@@ -208,6 +299,41 @@ static void settle(void)
         phase = T_STOP;
         return;
     }
+    phase = T_BENCH;
+}
+
+/* Each block device measured in turn, then the clients started. */
+static void bench_step(void)
+{
+    struct ProcessInfo pi;
+
+    if (bench) {
+        if (QueryProcess(bench, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+            return;
+        if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+            fail("blkbench failed");
+        CloseHandle(bench);
+        bench = 0;
+    }
+    for (; benched < nclients; benched++) {
+        const struct client *c = &clients[benched];
+        uint64_t unit = 0;
+        int64_t p;
+
+        if (c->kind != K_BLOCK)
+            continue;
+        for (const char *d = c->port + 5; *d >= '0' && *d <= '9'; d++)
+            unit = unit * 10 + (uint64_t)(*d - '0');
+        if ((p = CreateProcess("blkbench", unit, SIG_DEAD, 0)) < 0) {
+            fail("blkbench couldn't be started");
+            continue;
+        }
+        bench = (Handle)p;
+        benched++;
+        phase_at = hwdb.now;
+        return;
+    }
+
     handles = own_handles();
     for (unsigned i = 0; i < nclients; i++)
         if (CreateTask(client, i) < 0)      /* its handle goes when it ends */
@@ -331,6 +457,12 @@ static void drain(void)
         all &= clients[i].done;
     if (!all)
         return;
+    /* A client says it's done just before it ends, and its handle goes
+     * as it ends: give the last a moment to. */
+    if (!all_done_at)
+        all_done_at = hwdb.now;
+    if (own_handles() != handles && hwdb.now < all_done_at + 250 * MS)
+        return;
     for (unsigned i = 0; i < nclients; i++) {
         const struct client *c = &clients[i];
 
@@ -340,8 +472,19 @@ static void drain(void)
             fail("a client saw no answers, or no deaths");
         if (c->recovered != c->deaths)
             fail("a client didn't recover from every death");
-        if (c->bad)
-            fail("a client had a wrong answer, or no driver for 3 s");
+        if (c->bad) {
+            struct hw_line l = { 0 };
+
+            hw_put(&l, "the client of ");
+            hw_put(&l, c->port);
+            hw_put(&l, " had ");
+            hw_put_dec(&l, c->bad);
+            hw_put(&l, " wrong answers, or no driver for 3 s; the last ");
+            if (c->last_bad < 0)
+                hw_put(&l, "-");
+            hw_put_dec(&l, c->last_bad < 0 ? (uint64_t)-c->last_bad : (uint64_t)c->last_bad);
+            fail(l.text);
+        }
     }
     if (own_handles() != handles) {
         struct hw_line l = { 0 };
@@ -415,6 +558,9 @@ static void step(void)
         if (!hwdb_busy())
             settle();
         break;
+    case T_BENCH:
+        bench_step();
+        break;
     case T_ROUNDS:
         kill_rounds();
         break;
@@ -440,6 +586,7 @@ uint64_t test_deadline(void)
         if (victim)
             return hwdb.now + MS / 4;
         return wake > hwdb.now ? wake : hwdb.now + 1 * MS;
+    case T_BENCH:
     case T_RETRY:
     case T_DRAIN:
         return hwdb.now + 5 * MS;

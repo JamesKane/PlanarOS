@@ -48,6 +48,8 @@
 #define SYS_ALLOC_DMA_AREA  38
 #define SYS_MAP_FIRMWARE    39
 #define SYS_GRANT_FIRMWARE  40
+#define SYS_ALLOC_MSI       41
+#define SYS_QUERY_SYSTEM    42
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

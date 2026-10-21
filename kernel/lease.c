@@ -7,6 +7,11 @@
  * can go. A lease lives while its owner's handle, its grant or any of
  * its DMA Areas (live or quarantined) needs it.
  *
+ * Lent memory: when a grantee dies, the Areas it mapped but doesn't own
+ * (its clients' buffers, in connection arenas) are held on the first of
+ * its leases, as its DMA Areas are quarantined, until RevokeLease says
+ * the device is stopped (area_hold_lent).
+ *
  * Interrupts: a bound line is delivered to the bound task as a signal.
  * It is masked when it fires and unmasked by AckWaitIrq, so a level-
  * triggered line can't storm before the driver has dealt with it.
@@ -64,6 +69,8 @@ struct lease {
     uint64_t dma_pages;
     struct quarantined *quarantine;
     uint64_t quarantined_pages;
+    struct area *lent;              /* held for the device: area_hold_lent */
+    uint64_t lent_pages;
     Handle handle;
     struct lease *next;
 };
@@ -146,10 +153,16 @@ static void detach_all(const uint32_t *detach, unsigned n)
 void lease_process_dying(struct process *p)
 {
     unsigned long was = spin_lock_irqsave(&lock);
+    bool held = false;
 
     for (struct lease *l = leases; l; l = l->next) {
         if (l->grantee != p)
             continue;
+        if (!held && !l->lent) {
+            /* Before its connections close and let go of the arenas. */
+            l->lent_pages = area_hold_lent(p, &l->lent);
+            held = true;
+        }
         for (unsigned i = 0; i < l->nlines; i++)
             if (l->line[i].bound) {
                 intc_set(l->line[i].source, 0);
@@ -229,9 +242,9 @@ void lease_release(struct lease *l)
 
     if (l->mapped_in && l->mapped_in == l->owner)
         unmap_from(l);
-    if (l->quarantine)
+    if (l->quarantine || l->lent)
         kprintf("planar: lease %p: its owner is gone; %llu pages stay quarantined\n",
-                (void *)l->base, (unsigned long long)l->quarantined_pages);
+                (void *)l->base, (unsigned long long)(l->quarantined_pages + l->lent_pages));
     l->owner = nullptr;
     l->handle = 0;
     last = put(l);
@@ -298,10 +311,12 @@ static void line_fire(void *data)
 {
     struct line *ln = data;
     unsigned long was = spin_lock_irqsave(&lock);
+    bool edge = intc_edge(ln->source);     /* an MSI: no level to hold it up */
 
-    intc_set(ln->source, 0);
+    if (!edge)
+        intc_set(ln->source, 0);
     if (ln->bound) {
-        ln->masked = true;
+        ln->masked = !edge;
         task_signal(ln->task, ln->sig);
     }
     spin_unlock_irqrestore(&lock, was);
@@ -423,6 +438,7 @@ int64_t lease_revoke_call(uint32_t h)
 {
     struct process *p = task_self()->process;
     struct quarantined *q = nullptr;
+    struct area *lent = nullptr;
     struct lease *l;
     int64_t err = 0;
     unsigned n = 0;
@@ -435,6 +451,9 @@ int64_t lease_revoke_call(uint32_t h)
     if (!err) {
         q = l->quarantine;
         l->quarantine = nullptr;
+        lent = l->lent;
+        l->lent = nullptr;
+        l->lent_pages = 0;
         atomic_fetch_sub(&quarantined_total, l->quarantined_pages);
         l->quarantined_pages = 0;
         l->state = LEASES_IDLE;
@@ -444,6 +463,7 @@ int64_t lease_revoke_call(uint32_t h)
     if (err)
         return err;
     /* The device is stopped: its memory can go back. */
+    area_unhold(lent);
     while (q) {
         struct quarantined *next = q->next;
 
@@ -471,7 +491,8 @@ int64_t lease_query_call(uint32_t h, uint64_t info_out)
         info = (struct LeaseInfo){ .li_Base = l->base, .li_Size = l->size,
                                    .li_State = l->state, .li_Irqs = l->nlines,
                                    .li_DmaPages = l->dma_pages,
-                                   .li_QuarantinedPages = l->quarantined_pages };
+                                   .li_QuarantinedPages = l->quarantined_pages,
+                                   .li_LentPages = l->lent_pages };
     spin_unlock_irqrestore(&lock, was);
     if (!ok)
         return ERR_BADHANDLE;
@@ -618,6 +639,44 @@ int64_t lease_dma_call(uint32_t h, uint64_t size, uint32_t flags, uint64_t addr_
     if (last)
         kfree(l);
     return r;
+}
+
+int64_t lease_msi_call(uint32_t root_h, uint32_t device, uint32_t count, uint64_t info_out)
+{
+    struct process *p = task_self()->process;
+    static uint32_t given[64];      /* devices given theirs */
+    static unsigned ngiven;
+    static spinlock_t msi_lock;
+    struct MsiInfo info = { 0 };
+    int64_t err = 0;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, p))
+        return ERR_BADHANDLE;
+    if (count == 0 || count > LEASE_IRQS)
+        return ERR_BADARG;
+    if (!intc() || !intc()->msi_alloc)
+        return ERR_NOTFOUND;
+    unsigned long was = spin_lock_irqsave(&msi_lock);
+    for (unsigned i = 0; i < ngiven; i++)
+        if (given[i] == device)
+            err = ERR_EXISTS;
+    if (!err && ngiven == sizeof given / sizeof given[0])
+        err = ERR_FULL;
+    if (!err)
+        given[ngiven++] = device;   /* claimed, so no other call maps it meanwhile */
+    spin_unlock_irqrestore(&msi_lock, was);
+    if (err)
+        return err;
+    if (!intc_msi_alloc(device, count, &info.mi_First, &info.mi_Doorbell)) {
+        was = spin_lock_irqsave(&msi_lock);
+        for (unsigned i = 0; i < ngiven; i++)
+            if (given[i] == device)
+                given[i] = given[--ngiven];
+        spin_unlock_irqrestore(&msi_lock, was);
+        return ERR_FULL;
+    }
+    info.mi_Count = count;
+    return arch_copy_to_user(info_out, &info, sizeof info) ? 0 : ERR_BADADDR;
 }
 
 /* The DTB, or the ACPI tables, mapped read-only where they are, into p. */

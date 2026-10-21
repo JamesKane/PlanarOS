@@ -1,11 +1,14 @@
 /MADT/gicd@8000000 [arm,gic-v3]: kernel, driven by the kernel
   mmio 0x8000000+0x10000
   mmio 0x80a0000+0xf60000
-/MADT/its@8080000 [arm,gic-v3-its]: no driver
+/MADT/its@8080000 [arm,gic-v3-its]: kernel, driven by the kernel
   mmio 0x8080000+0x20000
 /_SB_/PCI0 [PNP0A08]: pci, bound 1
   ecam 0x4010000000+0x10000000 segment 0 buses 0-255
-  needs /MADT/its@8080000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@8080000
+  window mem32 0x10000000+0x2eff0000
+  window mem64 0x8000000000+0x8000000000
+  needs /MADT/its@8080000 (msi optional)
 /_SB_/COM0 [ARMH0011]: kernel, the console
   mmio 0x9000000+0x1000
   irq 33 on /MADT/gicd@8000000
@@ -165,6 +168,7 @@
   irq 38 on /MADT/gicd@8000000
   needs /MADT/gicd@8000000 (interrupts)
 /_SB_/PCI0/RES0 [PNP0C02]: hwdb, bound 34
+  window mem64 0x4010000000+0x10000000
 /_SB_/GED_ [ACPI0013]: no driver
   irq 41 on /MADT/gicd@8000000
   needs /MADT/gicd@8000000 (interrupts)
@@ -174,4 +178,4 @@ hwdb: one virtio-mmio for 8 devices sharing 0xa000000+0x1000: VR00 VR01 VR02 VR0
 hwdb: one virtio-mmio for 8 devices sharing 0xa001000+0x1000: VR08 VR09 VR10 VR11 VR12 VR13 VR14 VR15
 hwdb: one virtio-mmio for 8 devices sharing 0xa002000+0x1000: VR16 VR17 VR18 VR19 VR20 VR21 VR22 VR23
 hwdb: one virtio-mmio for 8 devices sharing 0xa003000+0x1000: VR24 VR25 VR26 VR27 VR28 VR29 VR30 VR31
-hwdb: BOCHS BXPC: 7 kernel, 10 no driver, 34 bound, 0 broken
+hwdb: BOCHS BXPC: 8 kernel, 9 no driver, 34 bound, 0 broken

@@ -73,6 +73,21 @@ void intc_complete(uint32_t source)
         drv->complete(source);
 }
 
+bool intc_msi_alloc(uint32_t dev, uint32_t n, uint32_t *first, uint64_t *doorbell)
+{
+    return drv && drv->msi_alloc && drv->msi_alloc(dev, n, first, doorbell);
+}
+
+uint64_t intc_msi_pages(void)
+{
+    return drv && drv->msi_pages ? drv->msi_pages() : 0;
+}
+
+bool intc_edge(uint32_t source)
+{
+    return drv && drv->edge && drv->edge(source);
+}
+
 uint32_t intc_fdt_irq(int32_t node, uint32_t index)
 {
     if (drv)

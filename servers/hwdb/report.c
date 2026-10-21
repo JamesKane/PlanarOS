@@ -146,6 +146,36 @@ static void resources(const struct hw_graph *g, const struct hw_node *n, hw_prin
             hw_put(&l, " on ");
             hw_put_path(&l, g, r->ctlr);
             break;
+        case HW_WINDOW:
+            hw_put(&l, r->cells[0] & HW_WIN_MEM ? "  window mem" : "  window io");
+            hw_put(&l, r->cells[0] & HW_WIN_64 ? "64 " : r->cells[0] & HW_WIN_MEM ? "32 " : " ");
+            hw_put_hex(&l, r->base);
+            hw_put(&l, "+");
+            hw_put_hex(&l, r->size);
+            if (r->cells[0] & HW_WIN_PREFETCH)
+                hw_put(&l, " prefetchable");
+            if (((uint64_t)r->cells[1] << 32 | r->cells[2]) != r->base) {
+                hw_put(&l, " at ");
+                hw_put_hex(&l, (uint64_t)r->cells[1] << 32 | r->cells[2]);
+                hw_put(&l, " on the bus");
+            }
+            break;
+        case HW_MSIMAP:
+            hw_put(&l, "  msi ");
+            hw_put_hex(&l, r->base);
+            hw_put(&l, "+");
+            hw_put_hex(&l, r->size);
+            hw_put(&l, " as ");
+            hw_put_hex(&l, r->cells[0]);
+            hw_put(&l, " on ");
+            hw_put_path(&l, g, r->ctlr);
+            break;
+        case HW_MSIX:
+            hw_put(&l, "  msi-x ");
+            hw_put_dec(&l, r->size);
+            hw_put(&l, " vectors, table at ");
+            hw_put_hex(&l, r->base);
+            break;
         }
         out(ctx, l.text);
     }

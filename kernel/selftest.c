@@ -2639,6 +2639,7 @@ void selftest_leases(void)
 void selftest_hwdb(void)
 {
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
+    uint64_t msi_before = intc_msi_pages();
     struct process *p;
 
     if (!user_images[0].name) {
@@ -2658,7 +2659,9 @@ void selftest_hwdb(void)
     if (!processes_down_to(0, 1000000) || lease_count() || lease_quarantined() || area_count())
         fail("V4.3 hwdb", "a process, lease or Area outlived hwdb");
     task_sleep_until(time_now() + time_us(5000));
-    if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
+    /* The ITS's tables for the devices that got MSIs stay: theirs. */
+    if (pmm_free_pages() + (kmalloc_pages() - heap_before) + (intc_msi_pages() - msi_before) !=
+        free_before)
         fail("V4.3 hwdb", "pages leaked");
     kprintf("V4.3 hwdb ok: the graph built from %s, drivers started in its order and "
             "supervised; hwdb exited 0, leaving no process, lease, Area or page behind\n",

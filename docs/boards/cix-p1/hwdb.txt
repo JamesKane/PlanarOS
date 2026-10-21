@@ -1,24 +1,33 @@
 /MADT/gicd@e010000 [arm,gic-v3]: kernel, driven by the kernel
   mmio 0xe010000+0x10000
   mmio 0xe090000+0x300000
-/MADT/its@e050000 [arm,gic-v3-its]: no driver
+/MADT/its@e050000 [arm,gic-v3-its]: kernel, driven by the kernel
   mmio 0xe050000+0x20000
 /_SB_/PCI0 [PNP0A08]: pci, failed: shares pages with /_SB_/PRC0
   ecam 0x2c000000+0x4000000 segment 0 buses 192-255
-  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@e050000
+  window mem32 0x60000000+0x20000000
+  window mem64 0x1800000000+0x400000000
+  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi optional)
 /_SB_/PCI2 [PNP0A08]: pci, failed: shares pages with /_SB_/PRC2
   ecam 0x26000000+0x2000000 segment 0 buses 96-127
-  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@e050000
+  window mem32 0x40000000+0x10000000
+  window mem64 0x1000000000+0x400000000
+  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi optional)
 /_SB_/PCI3 [PNP0A08]: pci, failed: shares pages with /_SB_/PRC3
   ecam 0x23000000+0x2000000 segment 0 buses 48-79
-  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi dropped)
+  msi 0x0+0x10000 as 0x0 on /MADT/its@e050000
+  window mem32 0x38000000+0x8000000
+  window mem64 0xc00000000+0x400000000
+  needs /IORT/smmu@b010000 (iommu dropped); /MADT/its@e050000 (msi optional)
 /IORT/smmu@b010000 [arm,smmu-v3]: no driver
   mmio 0xb010000+0x20000
   irq 107 on /MADT/gicd@e010000
   irq 116 on /MADT/gicd@e010000
   irq 112 on /MADT/gicd@e010000
   irq 108 on /MADT/gicd@e010000
-  needs /MADT/gicd@e010000 (interrupts); /MADT/its@e050000 (msi dropped)
+  needs /MADT/gicd@e010000 (interrupts); /MADT/its@e050000 (msi optional)
 /IORT/smmu@b1b0000 [arm,smmu-v3]: no driver
   mmio 0xb1b0000+0x20000
   irq 141 on /MADT/gicd@e010000
@@ -281,7 +290,11 @@
 /_SB_/I3C0 [CIXH200C]: disabled
 /_SB_/I3C1 [CIXH200C]: disabled
 /_SB_/PCI1 [PNP0A08]: pci, bound 1
+  window mem32 0x50000000+0x10000000
+  window mem64 0x1400000000+0x400000000
 /_SB_/PCI4 [PNP0A08]: pci, bound 2
+  window mem32 0x30000000+0x8000000
+  window mem64 0x800000000+0x400000000
 /_SB_/RES0 [PNP0C02]: hwdb, bound 3
   mmio 0x20000000+0x10000000
 /_SB_/PRC0 [CIXH2020]: no driver
@@ -295,6 +308,8 @@
   irq 437 on /MADT/gicd@e010000
   irq 438 on /MADT/gicd@e010000
   irq 443 on /MADT/gicd@e010000
+  window mem32 0x60200000+0xfe00000
+  window mem64 0x1800000000+0x400000000
   needs /MADT/gicd@e010000 (interrupts); /_SB_/GPI4 (gpio)
 /_SB_/PCP0 [CIXH2023]: no driver
   mmio 0xa020000+0x40000
@@ -309,6 +324,8 @@
   irq 447 on /MADT/gicd@e010000
   irq 448 on /MADT/gicd@e010000
   irq 453 on /MADT/gicd@e010000
+  window mem32 0x50200000+0xfe00000
+  window mem64 0x1400000000+0x400000000
   needs /MADT/gicd@e010000 (interrupts); /_SB_/GPI4 (gpio)
 /_SB_/PCP1 [CIXH2023]: no driver
   mmio 0xa080000+0x40000
@@ -323,6 +340,8 @@
   irq 457 on /MADT/gicd@e010000
   irq 458 on /MADT/gicd@e010000
   irq 483 on /MADT/gicd@e010000
+  window mem32 0x40200000+0xfe00000
+  window mem64 0x1000000000+0x400000000
   needs /MADT/gicd@e010000 (interrupts); /_SB_/GPI4 (gpio)
 /_SB_/PRC3 [CIXH2020]: no driver
   mmio 0xa0e0000+0x10000
@@ -335,6 +354,8 @@
   irq 475 on /MADT/gicd@e010000
   irq 476 on /MADT/gicd@e010000
   irq 482 on /MADT/gicd@e010000
+  window mem32 0x38200000+0x7e00000
+  window mem64 0xc00000000+0x400000000
   needs /MADT/gicd@e010000 (interrupts); /_SB_/GPI4 (gpio)
 /_SB_/PRC4 [CIXH2020]: no driver
   mmio 0xa0d0000+0x10000
@@ -347,6 +368,8 @@
   irq 466 on /MADT/gicd@e010000
   irq 467 on /MADT/gicd@e010000
   irq 481 on /MADT/gicd@e010000
+  window mem32 0x30200000+0x7e00000
+  window mem64 0x800000000+0x400000000
   needs /MADT/gicd@e010000 (interrupts); /_SB_/GPI4 (gpio)
 /_SB_/PCP2 [CIXH2023]: no driver
   mmio 0xa0f0000+0x40000
@@ -731,4 +754,4 @@
   needs /_SB_/C000/C005 (parent)
 /_SB_/C000/C005/CPUB [ACPI0007]: kernel, a CPU
   needs /_SB_/C000/C005 (parent)
-hwdb: CIXTEK SKY1EDK2: 54 disabled, 16 kernel, 178 no driver, 3 bound, 3 failed, 0 broken
+hwdb: CIXTEK SKY1EDK2: 54 disabled, 17 kernel, 177 no driver, 3 bound, 3 failed, 0 broken

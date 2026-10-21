@@ -7,6 +7,7 @@
 #include "area.h"
 #include "cpu.h"
 #include "handle.h"
+#include "irq.h"
 #include "kprintf.h"
 #include "ktime.h"
 #include "lease.h"
@@ -262,6 +263,17 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_firmware_call((uint32_t)a[0], a[1]);
     case SYS_GRANT_FIRMWARE:
         return lease_firmware_grant_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_QUERY_SYSTEM: {
+        struct SystemInfo si = {
+            .si_Calls = syscall_count(), .si_Interrupts = irq_count(),
+            .si_Switches = sched_switches(), .si_Crossings = sched_crossings(),
+            .si_Quarantined = lease_quarantined(),
+        };
+
+        return arch_copy_to_user(a[0], &si, sizeof si) ? 0 : ERR_BADADDR;
+    }
+    case SYS_ALLOC_MSI:
+        return lease_msi_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2], a[3]);
     default:
         return ERR_NOSYS;
     }

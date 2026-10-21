@@ -182,11 +182,12 @@ void hw_leases(struct hw_graph *g)
                     fail(g, s[k].node, g->nodes[s[i].node].why);
 
     /* One lease per remaining set: its ranges, nodes and lines. */
-    g->leases = hw_alloc(a, (n ? n : 1) * sizeof *g->leases);
+    g->leases = hw_alloc(a, (n + HW_LATE_LEASES) * sizeof *g->leases);
     if (!g->leases) {
         g->full = true;
         return;
     }
+    g->maxleases = n + HW_LATE_LEASES;
     for (uint32_t i = 0; i < n; i++) {
         struct hw_node *d = &g->nodes[s[i].node];
         struct hw_lease *l;
@@ -255,4 +256,86 @@ void hw_leases(struct hw_graph *g)
             }
         }
     }
+}
+
+/* A late node's own lease: its pages may touch no other device's. */
+void hw_lease_late(struct hw_graph *g, hw_id id)
+{
+    struct hw_node *d = &g->nodes[id];
+    struct hw_lease *l;
+
+    for (unsigned k = 0; k < d->nres; k++) {
+        const struct hw_res *r = &d->res[k];
+        uint64_t first = r->base >> 12, last = (r->base + r->size - 1) >> 12;
+
+        if (r->kind != HW_MMIO || r->size == 0)
+            continue;
+        if (r->base + r->size < r->base) {
+            fail(g, id, "its registers wrap");
+            return;
+        }
+        for (hw_id i = 1; i < g->count; i++) {
+            const struct hw_node *o = &g->nodes[i];
+
+            if (i == id || !o->nkeys || !o->enabled || o->state == HW_S_DISABLED)
+                continue;
+            for (unsigned q = 0; q < o->nres; q++) {
+                const struct hw_res *x = &o->res[q];
+
+                if ((x->kind != HW_MMIO && x->kind != HW_ECAM) || x->size == 0 ||
+                    first > (x->base + x->size - 1) >> 12 || x->base >> 12 > last)
+                    continue;
+                struct hw_line line = { 0 };
+                hw_put(&line, "shares pages with ");
+                hw_put_path(&line, g, i);
+                fail(g, id, hw_strdup(g, line.text, line.len));
+                return;
+            }
+        }
+    }
+    if (g->nleases == g->maxleases) {
+        fail(g, id, "no room for another lease");
+        return;
+    }
+    l = &g->leases[g->nleases];
+    *l = (struct hw_lease){ .driver = d->driver, .nnodes = 1, .nodes = { id } };
+    for (unsigned k = 0; k < d->nres; k++) {
+        const struct hw_res *r = &d->res[k];
+
+        if (r->kind == HW_IRQ && r->base != HW_NOLINE) {
+            if (l->nlines == HW_LEASE_LINES) {
+                fail(g, id, "too many interrupt lines");
+                return;
+            }
+            l->lines[l->nlines++] = (uint32_t)r->base;
+        } else if (r->kind == HW_MMIO && r->size) {
+            uint64_t base = r->base & ~0xfffULL, end = (r->base + r->size + 0xfff) & ~0xfffULL;
+            bool merged = false;
+
+            for (unsigned q = 0; q < l->nranges && !merged; q++) {
+                struct hw_range *rg = &l->ranges[q];
+
+                if (base <= rg->base + rg->size && end >= rg->base) {
+                    uint64_t lo = base < rg->base ? base : rg->base;
+                    uint64_t hi = end > rg->base + rg->size ? end : rg->base + rg->size;
+
+                    rg->base = lo;
+                    rg->size = hi - lo;
+                    merged = true;
+                }
+            }
+            if (!merged) {
+                if (l->nranges == HW_LEASE_RANGES) {
+                    fail(g, id, "registers in too many places");
+                    return;
+                }
+                l->ranges[l->nranges++] = (struct hw_range){ base, end - base };
+            }
+        }
+    }
+    if (l->nranges == 0) {
+        fail(g, id, "it has no registers to lease");
+        return;
+    }
+    d->lease = (uint16_t)g->nleases++;
 }

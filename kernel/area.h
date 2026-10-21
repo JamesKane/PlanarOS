@@ -32,6 +32,18 @@ struct area *area_new(uint64_t pages, uint32_t flags, bool guard);
 void area_destroy(struct area *a);
 void area_unquarantine(struct area *a);
 
+/*
+ * A dying driver's lent memory (v4-plan step 5): every Area 'p' maps
+ * that is neither its own nor a DMA Area, such as a connection's arena
+ * holding a client's buffers, which its device may still be writing
+ * into. Each is held, linked on '*list', and not freed until
+ * area_unhold, whoever lets go of it meanwhile. One already held for
+ * another lease is left to that one. The pages held. The caller holds
+ * the lease lock (lease.c's, which comes before this file's).
+ */
+uint64_t area_hold_lent(struct process *p, struct area **list);
+void area_unhold(struct area *list);
+
 /* Map 'a' into 'p' with 'rights' (AREAR_*). An image passes the bytes of
  * code at its start, mapped read and execute whatever 'rights' says. */
 bool area_map(struct area *a, struct process *p, uint32_t rights, uint64_t exec_bytes);

@@ -10,9 +10,10 @@
 
 #include <stdint.h>
 
-/* Largest source number + 1 on any target: GIC SPIs go to 1019, and a
- * PLIC may have up to 1023 sources. */
-constexpr uint32_t IRQ_SOURCES = 1024;
+/* Largest source number + 1 on any target: GIC SPIs go to 1019, a PLIC
+ * may have up to 1023 sources, and the first 1024 LPIs (from 8192) are
+ * what the ITS hands out for MSIs (arch/aarch64/its.c). */
+constexpr uint32_t IRQ_SOURCES = 8192 + 1024;
 
 typedef void (*irq_handler_t)(void *data);
 

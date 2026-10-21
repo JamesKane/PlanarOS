@@ -112,6 +112,11 @@ bool acpid_reap(void);              /* true if it had died: its leases are taken
 void acpid_finish(void);            /* its devices are all in: resolve them, say so */
 void acpid_stop(void);              /* at the end: kill it, take its leases back */
 
+/* --- pci (pci.c): a host bridge's driver, while it binds. --- */
+
+bool pci_host(const struct unit *u, struct HwdbMsg *m);            /* fills m->hm_Host */
+int64_t pci_function(const struct unit *u, const struct HwdbMsg *m);  /* 0, or why not */
+
 /* The kill test (killtest.c): a step each time round the loop, and when
  * it next wants one (0: no time). */
 void test_step(void);

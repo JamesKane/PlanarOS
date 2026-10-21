@@ -19,6 +19,7 @@ static const struct hw_match kernel[] = {
     { "riscv,plic0",            HW_DEFAULT },
     { "sifive,plic-1.0.0",      HW_SPECIFIC },
     { "arm,gic-v3",             HW_SPECIFIC },
+    { "arm,gic-v3-its",         HW_SPECIFIC },  /* MSIs, through AllocMsi */
     { "arm,armv8-timer",        HW_SPECIFIC },
     { "arm,psci-1.0",           HW_SPECIFIC },
     { "arm,psci-0.2",           HW_SPECIFIC },
@@ -68,6 +69,12 @@ static const struct hw_match pci[] = {
     { nullptr, 0 },
 };
 
+/* Functions pci finds behind a host bridge (drv/pci, servers/hwdb/pci.c). */
+static const struct hw_match nvme[] = {
+    { "pciclass,010802",        HW_GENERIC },   /* any NVMe controller */
+    { nullptr, 0 },
+};
+
 static const struct hw_match sdhci_k1[] = {
     { "ky,x1-sdhci",            HW_SPECIFIC },  /* the vendor's U-Boot tree */
     { "spacemit,k1-sdhci",      HW_SPECIFIC },  /* Linux's */
@@ -93,6 +100,7 @@ const struct hw_driver hw_drivers[] = {
     { "rtc-goldfish",   HW_DRV_PROCESS,     rtc_goldfish },
     { "rtc-pl031",      HW_DRV_PROCESS,     rtc_pl031 },
     { "pci",            HW_DRV_PROCESS,     pci },
+    { "nvme",           HW_DRV_PROCESS,     nvme },
     { "sdhci-k1",       HW_DRV_PROCESS,     sdhci_k1 },
     { "display",        HW_DRV_PROCESS,     display },
     { "power-k1",       HW_DRV_PROCESS,     power_k1 },

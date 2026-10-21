@@ -45,6 +45,18 @@ struct intc_driver {
     /* Print where the controller is, after its name, for hw_report()'s
      * line (kernel/hw.h); nullptr to print the name alone. */
     void (*describe)(void);
+
+    /* MSIs (the GIC's ITS): 'n' sources for device 'dev', its events 0 to
+     * n - 1, and the address it writes them to. False if there's no room
+     * or nothing to translate them; nullptr if the controller can't. */
+    bool (*msi_alloc)(uint32_t dev, uint32_t n, uint32_t *first, uint64_t *doorbell);
+    /* Pages msi_alloc took for its tables: a device keeps its MSIs for
+     * the boot, whoever asked for them. */
+    uint64_t (*msi_pages)(void);
+
+    /* An edge-triggered source (an MSI): nothing to mask while its driver
+     * deals with it. nullptr if none is. */
+    bool (*edge)(uint32_t source);
 };
 
 /* Find and set up the controller, and the boot CPU's side of it. */
@@ -60,5 +72,8 @@ void intc_set(uint32_t source, unsigned level);
 uint32_t intc_claim(void);
 void intc_complete(uint32_t source);
 uint32_t intc_fdt_irq(int32_t node, uint32_t index);
+bool intc_msi_alloc(uint32_t dev, uint32_t n, uint32_t *first, uint64_t *doorbell);
+bool intc_edge(uint32_t source);
+uint64_t intc_msi_pages(void);
 
 #endif /* KERNEL_INTC_H */

@@ -344,6 +344,35 @@ static bool stop_virtio(struct unit *u)
     return true;
 }
 
+/* NVMe's is clearing CC.EN, which resets the controller: once CSTS.RDY
+ * is clear it has stopped processing commands (NVMe 2.0 §3.7.2). */
+static bool stop_nvme(struct unit *u)
+{
+    const struct hw_lease *ls = lease_of(u);
+
+    for (unsigned r = 0; r < ls->nranges; r++) {
+        void *at;
+        int64_t e = MapLease(u->lease[r], &at);
+
+        if (e != 0 && e != ERR_EXISTS)
+            return false;
+    }
+    for (unsigned i = 0; i < ls->nnodes; i++) {
+        const struct hw_node *n = &hwdb.g.nodes[ls->nodes[i]];
+        volatile uint32_t *regs;
+        uint64_t until = CurrentTime() + 10000 * MS;
+
+        if (n->nres == 0 || n->res[0].kind != HW_MMIO || n->res[0].size < 0x2000)
+            continue;
+        regs = (volatile uint32_t *)n->res[0].base;
+        regs[0x14 / 4] = 0;
+        while (regs[0x1c / 4] & 1)
+            if (regs[0x1c / 4] == ~0u || CurrentTime() > until)
+                return false;
+    }
+    return true;
+}
+
 /* True if the device can't reach memory any more. */
 static bool stop(struct unit *u, uint64_t quarantined)
 {
@@ -351,6 +380,8 @@ static bool stop(struct unit *u, uint64_t quarantined)
 
     if (hw_streq(name, "virtio-mmio"))
         return stop_virtio(u);
+    if (hw_streq(name, "nvme"))
+        return stop_nvme(u);
     return quarantined == 0;    /* none: only a device that kept no DMA is safe (VQ24) */
 }
 
@@ -515,11 +546,19 @@ static void bind_reply(struct unit *u, struct HwdbMsg *m)
                 d->dd_Base = r->base;
                 d->dd_Size = r->size;
             }
+            if (r->kind == HW_MSIX) {
+                d->dd_MsixTable = r->base;
+                d->dd_MsiDoorbell = r->ncells == 2 ? (uint64_t)r->cells[0] << 32 | r->cells[1] : 0;
+            }
             if (r->kind == HW_IRQ && r->base != HW_NOLINE && d->dd_Line == DRV_NOLINE)
                 for (unsigned l = 0; l < ls->nlines; l++)
                     if (ls->lines[l] == r->base)
                         d->dd_Line = l;
         }
+        /* MSI-X's: its lines, in order from dd_Line (hw_lease_late's order). */
+        if (d->dd_MsiDoorbell && d->dd_Line != DRV_NOLINE)
+            for (unsigned q = 0; q < n->nres; q++)
+                d->dd_NLines += n->res[q].kind == HW_IRQ && n->res[q].base != HW_NOLINE;
         for (; key[k] && k < sizeof d->dd_Key - 1; k++)
             d->dd_Key[k] = key[k];
     }
@@ -562,6 +601,13 @@ static void serve(unsigned c)
             bind_reply(u, m);
         } else if (u && op == HWDB_STARTED && conn_unit[c] == idx) {
             started(u, m);
+        } else if (u && op == HWDB_PCI_HOST && conn_unit[c] == idx &&
+                   hw_streq(unit_driver(u), "pci")) {
+            if (!pci_host(u, m))
+                m->hm_Msg.mn_Error = (int32_t)ERR_BADARG;
+        } else if (u && op == HWDB_PCI_FUNCTION && conn_unit[c] == idx &&
+                   hw_streq(unit_driver(u), "pci")) {
+            m->hm_Msg.mn_Error = (int32_t)pci_function(u, m);
         } else {
             m->hm_Msg.mn_Error = (int32_t)ERR_BADARG;
         }
@@ -761,7 +807,7 @@ int main(uint64_t arg, uint64_t root)
     hwdb.port = (Handle)port;
     settle_acpid();
     hw_prepare(&hwdb.g);
-    hwdb.units = hw_alloc(&hwdb.arena, (hwdb.g.nleases ? hwdb.g.nleases : 1) * sizeof *hwdb.units);
+    hwdb.units = hw_alloc(&hwdb.arena, (hwdb.g.maxleases ? hwdb.g.maxleases : 1) * sizeof *hwdb.units);
     if (hwdb.g.full || !hwdb.units) {
         say("hwdb: out of memory for the graph");
         return 2;

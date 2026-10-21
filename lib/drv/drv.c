@@ -21,9 +21,64 @@ constexpr int64_t SIG_LINE0 = 32;
 constexpr uint64_t MS = 1000000;
 
 static struct drv the;
-static struct MsgPort clients[DRV_CLIENTS];
-static uint8_t client_dev[DRV_CLIENTS];
-static unsigned nclients;
+
+/*
+ * Clients. The live connections are kept packed, for WaitPorts; each has
+ * a number that stays its own (drv_reply's), and a client that went with
+ * messages still unanswered moves out of the live ones until it's
+ * answered them all, then closes.
+ */
+static struct MsgPort live[DRV_CLIENTS];
+static uint8_t live_id[DRV_CLIENTS];
+static unsigned nlive;
+static struct {
+    bool used;
+    int pos;                    /* in live[], or -1 once gone */
+    uint8_t dev;
+    unsigned pending;           /* messages given the driver, not yet answered */
+    struct MsgPort gone;        /* its connection, once gone */
+} client[DRV_CLIENTS];
+
+static struct MsgPort *port_of(unsigned c)
+{
+    return client[c].pos >= 0 ? &live[client[c].pos] : &client[c].gone;
+}
+
+bool drv_in_heap(const struct drv *, unsigned c, uint64_t addr, uint64_t size)
+{
+    const struct MsgPort *mp;
+
+    if (c >= DRV_CLIENTS || !client[c].used)
+        return false;
+    mp = port_of(c);
+    return addr >= mp->mp_HeapLo && addr <= mp->mp_HeapHi && size <= mp->mp_HeapHi - addr;
+}
+
+void drv_reply(struct drv *, unsigned c, struct Message *m)
+{
+    if (c >= DRV_CLIENTS || !client[c].used || client[c].pending == 0)
+        return;
+    client[c].pending--;
+    if (client[c].pos >= 0) {
+        ReplyMsgLater(&live[client[c].pos], m);
+    } else if (client[c].pending == 0) {
+        ClosePort(&client[c].gone);
+        client[c].used = false;
+    }
+}
+
+/* Take live[pos] out of the packed ones. */
+static void unlive(unsigned pos)
+{
+    unsigned c = live_id[pos];
+
+    client[c].pos = -1;
+    if (--nlive != pos) {
+        live[pos] = live[nlive];
+        live_id[pos] = live_id[nlive];
+        client[live_id[pos]].pos = (int)pos;
+    }
+}
 
 void drv_log(const struct drv *d, const struct drv_dev *dev, const char *text)
 {
@@ -50,6 +105,26 @@ void drv_log(const struct drv *d, const struct drv_dev *dev, const char *text)
         line[n++] = *text;
     line[n] = '\0';
     KLog(line);
+}
+
+static struct HwdbMsg *spare;
+
+struct HwdbMsg *drv_hwdb_msg(struct drv *d, uint32_t op)
+{
+    if (!spare && !(spare = AllocMsg(&d->hwdb, sizeof *spare)))
+        return nullptr;
+    memset(spare, 0, sizeof *spare);
+    spare->hm_Msg.mn_Length = sizeof *spare;
+    spare->hm_Op = op;
+    spare->hm_Token = d->token;
+    return spare;
+}
+
+int64_t drv_hwdb(struct drv *d, struct HwdbMsg *m)
+{
+    int64_t e = DoMsg(&d->hwdb, &m->hm_Msg);
+
+    return e ? e : m->hm_Msg.mn_Error;
 }
 
 Handle drv_lease(const struct drv *d)
@@ -112,19 +187,31 @@ static bool take_info(struct drv *d, const struct HwdbMsg *m)
                 dd->dd_Base - rg->dr_Base <= rg->dr_Size - dd->dd_Size)
                 inside = true;
         }
-        if (!inside || (dd->dd_Line != DRV_NOLINE && dd->dd_Line >= LEASE_IRQS))
+        if (!inside || (dd->dd_Line != DRV_NOLINE && dd->dd_Line >= LEASE_IRQS) ||
+            dd->dd_NLines > LEASE_IRQS || (dd->dd_NLines && dd->dd_Line + dd->dd_NLines > LEASE_IRQS))
             return false;
         d->dev[i].info = dd;
     }
     return true;
 }
 
-static void serve(struct drv *d, unsigned c)
+static void serve(struct drv *d, unsigned pos)
 {
-    struct drv_dev *dev = &d->dev[client_dev[c]];
+    unsigned c = live_id[pos];
+    struct drv_dev *dev = &d->dev[client[c].dev];
     struct DrvRequest *m;
 
-    while ((m = (struct DrvRequest *)GetMsgSized(&clients[c], sizeof *m))) {
+    if (d->ops->message) {
+        struct Message *msg;
+        uint32_t size = d->ops->message_size < sizeof *msg ? sizeof *msg : d->ops->message_size;
+
+        while (client[c].pos >= 0 && (msg = GetMsgSized(&live[client[c].pos], size))) {
+            client[c].pending++;
+            d->ops->message(d, dev, c, msg);
+        }
+        return;
+    }
+    while ((m = (struct DrvRequest *)GetMsgSized(&live[pos], sizeof *m))) {
         struct DrvRequest r;
 
         memcpy(&r, m, sizeof r);
@@ -138,7 +225,7 @@ static void serve(struct drv *d, unsigned c)
         m->dr_Len = r.dr_Len;
         memcpy(m->dr_Data, r.dr_Data, sizeof m->dr_Data);
         m->dr_Msg.mn_Error = r.dr_Msg.mn_Error;
-        ReplyMsgLater(&clients[c], &m->dr_Msg);
+        ReplyMsgLater(&live[pos], &m->dr_Msg);
     }
 }
 
@@ -150,7 +237,8 @@ static void serve(struct drv *d, unsigned c)
     unsigned taken = 0;
 
     d->ops = ops;
-    if (ConnectPort(&d->hwdb, "hwdb", SIG_HWDB, 4, 4096) != 0 ||
+    d->token = (uint32_t)token;
+    if (ConnectPort(&d->hwdb, "hwdb", SIG_HWDB, 4, 3 * sizeof *m) != 0 ||
         !(m = AllocMsg(&d->hwdb, sizeof *m)))
         ExitProcess(-1);
     memset(m, 0, sizeof *m);
@@ -181,10 +269,15 @@ static void serve(struct drv *d, unsigned c)
         dev->accepted = rc == DRV_OK;
         taken += dev->accepted;
         if (dev->accepted && dev->info->dd_Line != DRV_NOLINE) {
-            if (BindIrq(drv_lease(d), dev->info->dd_Line, SIG_LINE0 + dev->info->dd_Line) != 0)
-                ExitProcess(-4);
+            /* Its line, or its MSI-X vectors' lines from there. */
+            for (uint32_t k = 0; k < (dev->info->dd_NLines ? dev->info->dd_NLines : 1); k++) {
+                uint32_t line = dev->info->dd_Line + k;
+
+                if (line >= LEASE_IRQS || BindIrq(drv_lease(d), line, SIG_LINE0 + line) != 0)
+                    ExitProcess(-4);
+                lines |= 1ULL << (SIG_LINE0 + line);
+            }
             dev->line_bound = true;
-            lines |= 1ULL << (SIG_LINE0 + dev->info->dd_Line);
         }
     }
     for (unsigned i = 0; i < d->ndev; i++)
@@ -207,43 +300,71 @@ static void serve(struct drv *d, unsigned c)
         ExitProcess(0);
 
     for (;;) {
-        uint64_t got = WaitPorts(clients, nclients,
-                                 lines | 1ULL << SIG_ACCEPT | 1ULL << SIG_CLIENT | 1ULL << SIG_HWDB);
+        uint64_t want = lines | 1ULL << SIG_ACCEPT | 1ULL << SIG_CLIENT | 1ULL << SIG_HWDB, got;
 
+        if (ops->poll && ops->poll(d)) {
+            /* Work outstanding on a polled device: look, but don't sleep. */
+            for (unsigned i = 0; i < nlive; i++)
+                FlushPort(&live[i]);
+            got = want;
+        } else {
+            got = WaitPorts(live, nlive, want);
+        }
         if (PortGone(&d->hwdb))
             ExitProcess(0);
         if (got & 1ULL << SIG_ACCEPT)
             for (unsigned i = 0; i < d->ndev; i++)
                 while (d->dev[i].port) {
                     struct MsgPort mp;
+                    unsigned c = 0;
 
                     if (AcceptPort(&mp, d->dev[i].port, SIG_CLIENT) != 0)
                         break;
-                    if (nclients == DRV_CLIENTS) {
+                    while (c < DRV_CLIENTS && client[c].used)
+                        c++;
+                    if (c == DRV_CLIENTS) {
                         ClosePort(&mp);
                         continue;
                     }
-                    client_dev[nclients] = (uint8_t)i;
-                    clients[nclients++] = mp;
+                    client[c].used = true;
+                    client[c].dev = (uint8_t)i;
+                    client[c].pending = 0;
+                    client[c].pos = (int)nlive;
+                    live_id[nlive] = (uint8_t)c;
+                    live[nlive++] = mp;
                 }
         for (unsigned i = 0; i < d->ndev; i++) {
             struct drv_dev *dev = &d->dev[i];
+            uint32_t n = dev->info->dd_NLines ? dev->info->dd_NLines : 1;
+            uint64_t mine = 0;
 
-            if (!dev->line_bound || !(got & 1ULL << (SIG_LINE0 + dev->info->dd_Line)))
+            if (!dev->line_bound)
+                continue;
+            for (uint32_t k = 0; k < n; k++)
+                mine |= 1ULL << (SIG_LINE0 + dev->info->dd_Line + k);
+            if (!(got & mine))
                 continue;
             if (ops->interrupt)
                 ops->interrupt(d, dev);
-            AckWaitIrq(drv_lease(d), dev->info->dd_Line, 0);
+            for (uint32_t k = 0; k < n; k++)
+                if (got & 1ULL << (SIG_LINE0 + dev->info->dd_Line + k))
+                    AckWaitIrq(drv_lease(d), dev->info->dd_Line + k, 0);
         }
-        for (unsigned c = 0; c < nclients;) {
-            serve(d, c);
-            if (PortGone(&clients[c])) {
-                ClosePort(&clients[c]);
-                clients[c] = clients[--nclients];
-                client_dev[c] = client_dev[nclients];
-            } else {
-                c++;
+        for (unsigned pos = 0; pos < nlive;) {
+            unsigned c = live_id[pos];
+
+            serve(d, pos);
+            if (!PortGone(&live[pos])) {
+                pos++;
+                continue;
             }
+            if (client[c].pending == 0) {
+                ClosePort(&live[pos]);
+                client[c].used = false;
+            } else {
+                client[c].gone = live[pos];     /* until its answers are given */
+            }
+            unlive(pos);
         }
     }
 }

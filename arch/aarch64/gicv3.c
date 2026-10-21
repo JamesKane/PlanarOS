@@ -19,6 +19,7 @@
 #include "devmem.h"
 #include "fdt.h"
 #include "intc.h"
+#include "its.h"
 #include "kprintf.h"
 
 /* Distributor */
@@ -124,6 +125,8 @@ static bool setup(uint64_t pa)
     dist_wait();
     *d32(GICD_CTLR) = GICD_CTLR_ARE_NS | GICD_CTLR_GRP1A;
     dist_wait();
+    if (!its_init() && its_address())
+        kprintf("planar: GICv3: the ITS can't be used; no MSIs\n");
     return true;
 }
 
@@ -183,6 +186,8 @@ static void describe(void)
     kprintf(" dist %p redist", (void *)dist_pa);
     for (unsigned i = 0; i < nregions; i++)
         kprintf(" %p+%llx", (void *)regions[i].base, (unsigned long long)regions[i].size);
+    if (its_is_lpi(8192))
+        kprintf(" ITS %p", (void *)its_address());
 }
 
 static bool init_cpu(uint64_t cpu)
@@ -206,6 +211,7 @@ static bool init_cpu(uint64_t cpu)
     sysreg_write(ICC_CTLR_EL1, 0);          /* EOI drops priority and deactivates */
     sysreg_write(ICC_IGRPEN1_EL1, 1);
     isb();
+    its_init_cpu(rdist, virt_to_phys((const void *)rdist));
     return true;
 }
 
@@ -213,6 +219,10 @@ static void set(uint32_t source, unsigned level)
 {
     uint32_t bit = 1u << (source % 32);
 
+    if (its_is_lpi(source)) {
+        its_set(source, level);
+        return;
+    }
     if (source >= nlines)
         return;
     if (source < 32) {
@@ -280,4 +290,7 @@ const struct intc_driver gicv3_driver = {
     .complete = complete,
     .fdt_irq = fdt_irq,
     .describe = describe,
+    .msi_alloc = its_msi_alloc,
+    .msi_pages = its_pages,
+    .edge = its_is_lpi,
 };

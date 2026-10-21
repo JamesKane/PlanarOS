@@ -339,6 +339,8 @@ static void schedule_locked(struct cpu *c, unsigned long was)
         atomic_store_explicit(&next->on_cpu, true, memory_order_relaxed);   /* off every queue: ours */
         next->runs++;
         cpu_count(&c->switches);
+        if (next->domain != prev->domain)
+            cpu_count(&c->crossings);
         c->switched_from = prev;
         prof_mark(P_X2);
         /* A kernel task runs in the kernel's domain alone, so a domain
@@ -762,6 +764,15 @@ uint64_t sched_switches(void)
 
     for (unsigned i = 0; i < ncpus; i++)
         n += atomic_load_explicit(&cpus[i].switches, memory_order_relaxed);
+    return n;
+}
+
+uint64_t sched_crossings(void)
+{
+    uint64_t n = 0;
+
+    for (unsigned i = 0; i < ncpus; i++)
+        n += atomic_load_explicit(&cpus[i].crossings, memory_order_relaxed);
     return n;
 }
 

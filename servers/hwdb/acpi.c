@@ -282,6 +282,73 @@ static void mappings(struct hw_graph *g, const struct iort *io, unsigned i, cons
     }
 }
 
+/* An ITS group's first ITS's node, for an MSI map's controller. */
+static hw_id group_its(const struct iort *io, unsigned grp, const struct madt *m)
+{
+    uint32_t off = io->off[grp];
+
+    if (rd32(io->t, off + 16) == 0 || off + 24 > io->len)
+        return HW_NONE;
+    for (unsigned i = 0; i < m->nits; i++)
+        if (m->its_id[i] == rd32(io->t, off + 20))
+            return m->its[i];
+    return HW_NONE;
+}
+
+static void msi_map(struct hw_graph *g, hw_id bridge, uint32_t in, uint32_t n, uint32_t out,
+                    hw_id its)
+{
+    struct hw_res *r = hw_res_add(g, bridge);
+
+    if (!r)
+        return;
+    r->kind = HW_MSIMAP;
+    r->base = in;
+    r->size = n;
+    r->ncells = 1;
+    r->cells[0] = out;
+    r->ctlr = its;
+}
+
+/* A root complex's requester IDs as the ITS sees them: its ID mappings
+ * (each 'count' is the IDs less one), through an SMMU's own when they
+ * lead to one. Single mappings are a node's own MSIs, not its devices'. */
+static void msi_maps(struct hw_graph *g, const struct iort *io, unsigned rc, const struct madt *m,
+                     hw_id bridge)
+{
+    uint32_t off = io->off[rc], count = rd32(io->t, off + 8), map = rd32(io->t, off + 12);
+    uint32_t nlen = rd16(io->t, off + 1);
+
+    for (uint32_t k = 0; k < count && map <= nlen && map + 20 * (k + 1) <= nlen; k++) {
+        uint32_t e = off + map + 20 * k, in = rd32(io->t, e), n = rd32(io->t, e + 4) + 1;
+        uint32_t out = rd32(io->t, e + 8);
+        int to = iort_index(io, rd32(io->t, e + 12));
+
+        if (to < 0 || rd32(io->t, e + 16) & 1)
+            continue;
+        if (io->type[to] == IORT_ITS_GROUP) {
+            msi_map(g, bridge, in, n, out, group_its(io, (unsigned)to, m));
+            continue;
+        }
+        if (io->type[to] != IORT_SMMU_V3)
+            continue;
+        uint32_t so = io->off[to], sc = rd32(io->t, so + 8), sm = rd32(io->t, so + 12);
+        uint32_t slen = rd16(io->t, so + 1);
+
+        for (uint32_t q = 0; q < sc && sm <= slen && sm + 20 * (q + 1) <= slen; q++) {
+            uint32_t f = so + sm + 20 * q, sin = rd32(io->t, f), sn = rd32(io->t, f + 4) + 1;
+            uint64_t lo = out > sin ? out : sin;
+            uint64_t hi = (uint64_t)out + n < (uint64_t)sin + sn ? (uint64_t)out + n : (uint64_t)sin + sn;
+            int its = iort_index(io, rd32(io->t, f + 12));
+
+            if (rd32(io->t, f + 16) & 1 || its < 0 || io->type[its] != IORT_ITS_GROUP || lo >= hi)
+                continue;
+            msi_map(g, bridge, (uint32_t)(in + (lo - out)), (uint32_t)(hi - lo),
+                    (uint32_t)(rd32(io->t, f + 8) + (lo - sin)), group_its(io, (unsigned)its, m));
+        }
+    }
+}
+
 static void read_iort(struct hw_graph *g, const struct tables *ts, const struct madt *m)
 {
     struct iort io = { 0 };
@@ -333,8 +400,10 @@ static void read_iort(struct hw_graph *g, const struct tables *ts, const struct 
 
             for (hw_id b = 0; b < g->count; b++)
                 if (g->nodes[b].nres && g->nodes[b].res[0].kind == HW_ECAM &&
-                    g->nodes[b].res[0].cells[0] == seg)
+                    g->nodes[b].res[0].cells[0] == seg) {
                     mappings(g, &io, i, m, b, 0);
+                    msi_maps(g, &io, i, m, b);
+                }
         } else if (io.node[i] != HW_NONE) {
             mappings(g, &io, i, m, io.node[i], 0);
         }

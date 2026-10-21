@@ -32,6 +32,8 @@ constexpr uint32_t DRV_NOLINE = UINT32_MAX;
 enum : uint32_t {
     HWDB_BIND = 1,          /* hm_Token in; the rest out */
     HWDB_STARTED = 2,       /* hm_Token, hm_Accepted, hm_Ports in */
+    HWDB_PCI_HOST = 3,      /* pci's: hm_Host.ph_Device in; the rest of hm_Host out */
+    HWDB_PCI_FUNCTION = 4,  /* pci's: hm_Function in, a function it found */
 };
 
 /* hm_Flags, from hwdb: what the kill test asks of this start. */
@@ -48,19 +50,74 @@ struct DrvDevice {
     uint32_t dd_Line;               /* index into the first range's lines; DRV_NOLINE */
     uint32_t dd_Unit;               /* among this driver's devices, fixed at match */
     char dd_Key[40];                /* the key it matched: its compatible or _HID */
+    /* A PCI function's MSI-X: dd_NLines vectors, vector i on line dd_Line
+     * + i, each written as event i to dd_MsiDoorbell. The driver fills
+     * the table at dd_MsixTable (in its registers) and unmasks it; pci
+     * has enabled MSI-X. dd_NLines is 0 with no MSI-X, or no ITS. */
+    uint64_t dd_MsiDoorbell;
+    uint64_t dd_MsixTable;
+    uint32_t dd_NLines;
+    uint32_t dd_Pad;
+};
+
+/* --- PCI (drv/pci): the host bridge, and the functions found behind it. --- */
+
+constexpr unsigned PCI_WINDOWS = 8;
+constexpr unsigned PCI_BARS = 6;
+
+/* PciWindow.pw_Flags and PciBar.pb_Flags */
+constexpr uint32_t PCI_MEM = 1u << 0;           /* memory space; a window may be I/O */
+constexpr uint32_t PCI_64 = 1u << 1;            /* above 4 GiB on the bus, or a 64-bit BAR */
+constexpr uint32_t PCI_PREFETCH = 1u << 2;
+
+struct PciWindow {
+    uint64_t pw_Base, pw_Size;      /* the CPU's addresses */
+    uint64_t pw_Bus;                /* where pw_Base is on the bus */
+    uint32_t pw_Flags, pw_Pad;
+};
+
+struct PciHost {
+    uint32_t ph_Device;             /* in: which of the driver's devices */
+    uint32_t ph_Segment, ph_FirstBus, ph_LastBus;
+    uint32_t ph_NWindows;
+    uint32_t ph_Msi;                /* its functions' MSIs reach an ITS */
+    struct PciWindow ph_Window[PCI_WINDOWS];
+};
+
+struct PciBar {
+    uint64_t pb_Base, pb_Size;      /* the CPU's address (identity on these buses); 0 unused */
+    uint32_t pb_Flags, pb_Pad;
+};
+
+struct PciFunction {
+    uint32_t pf_Device;             /* the host bridge it's behind, as ph_Device */
+    uint32_t pf_Rid;                /* bus << 8 | device << 3 | function */
+    uint32_t pf_Vendor, pf_Id;      /* its vendor and device IDs */
+    uint32_t pf_Class;              /* class << 16 | subclass << 8 | programming interface */
+    uint32_t pf_Revision;
+    uint32_t pf_MsixVectors;        /* its MSI-X table's size; 0 if none */
+    uint32_t pf_MsixBar;            /* the table's BAR, and its offset there */
+    uint64_t pf_MsixOffset;
+    struct PciBar pf_Bar[PCI_BARS]; /* a 64-bit BAR is the first of its pair */
 };
 
 struct HwdbMsg {
     struct Message hm_Msg;
     uint32_t hm_Op;
     uint32_t hm_Token;
-    uint32_t hm_Flags;
-    uint32_t hm_NRanges;
-    uint32_t hm_NDevices;
-    uint32_t hm_Accepted;           /* HWDB_STARTED: a bit per device */
-    struct DrvRange hm_Range[DRV_RANGES];
-    struct DrvDevice hm_Device[DRV_DEVICES];
-    char hm_Ports[DRV_DEVICES][16]; /* HWDB_STARTED: each device's class port, or "" */
+    union {
+        struct {                    /* HWDB_BIND and HWDB_STARTED */
+            uint32_t hm_Flags;
+            uint32_t hm_NRanges;
+            uint32_t hm_NDevices;
+            uint32_t hm_Accepted;   /* HWDB_STARTED: a bit per device */
+            struct DrvRange hm_Range[DRV_RANGES];
+            struct DrvDevice hm_Device[DRV_DEVICES];
+            char hm_Ports[DRV_DEVICES][16]; /* HWDB_STARTED: each device's class port, or "" */
+        };
+        struct PciHost hm_Host;
+        struct PciFunction hm_Function;
+    };
 };
 
 /* --- A request on a class port (the step 3 drivers' one class). --- */
@@ -108,10 +165,20 @@ struct drv_ops {
     void (*interrupt)(struct drv *d, struct drv_dev *dev);
     /* One request; its reply goes back when this returns. */
     void (*request)(struct drv *d, struct drv_dev *dev, struct DrvRequest *r);
+    /* A class's own messages, in place of request (block's): each as it
+     * comes, from client 'c' (a number that stays the client's), in the
+     * connection's memory, at least 'message_size' bytes of it. The
+     * driver answers each with drv_reply, now or later. */
+    void (*message)(struct drv *d, struct drv_dev *dev, unsigned c, struct Message *m);
+    uint32_t message_size;
+    /* A device it polls: called each time round the loop, which doesn't
+     * sleep while this says work is outstanding. */
+    bool (*poll)(struct drv *d);
 };
 
 struct drv {
     const struct drv_ops *ops;
+    uint32_t token;                 /* hwdb's, for messages a bus driver sends it */
     struct HwdbMsg info;            /* hwdb's answer, copied */
     struct drv_dev dev[DRV_DEVICES];
     unsigned ndev;
@@ -120,6 +187,14 @@ struct drv {
 
 /* The driver's main: runs the protocol and the loop; never returns. */
 [[noreturn]] void drv_main(uint64_t token, const struct drv_ops *ops);
+
+/* Answer client c's message. A client that went keeps its connection
+ * until the driver has answered all it sent: until then its arena
+ * holds buffers the device may be using. */
+void drv_reply(struct drv *d, unsigned c, struct Message *m);
+
+/* The connection's heap, where client c's buffers must lie. */
+bool drv_in_heap(const struct drv *d, unsigned c, uint64_t addr, uint64_t size);
 
 /* For Start: publish 'dev's class port, named class.unit ("rtc.0"). */
 int64_t drv_publish(struct drv *d, struct drv_dev *dev, const char *cls);
@@ -131,5 +206,11 @@ Handle drv_lease(const struct drv *d);
 uint64_t drv_wait_irq(struct drv *d, struct drv_dev *dev, uint64_t ms);
 
 void drv_log(const struct drv *d, const struct drv_dev *dev, const char *text);
+
+/* For a bus driver's Bind: a message for hwdb, the size of any (one per
+ * driver, reused), and DoMsg with it; 0, or the error hwdb or the
+ * connection gave. */
+struct HwdbMsg *drv_hwdb_msg(struct drv *d, uint32_t op);
+int64_t drv_hwdb(struct drv *d, struct HwdbMsg *m);
 
 #endif /* PLANAR_DRV_H */

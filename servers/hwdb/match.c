@@ -56,6 +56,34 @@ static void bind_kind(const struct hw_graph *g, struct hw_node *n, const char *w
     }
 }
 
+/* One device not yet settled: its driver, and where that leaves it. */
+static void match_one(struct hw_graph *g, hw_id i, uint16_t kernel)
+{
+    struct hw_node *n = &g->nodes[i];
+    uint32_t len;
+    const char *type;
+
+    if (n->nkeys == 0 || n->state != HW_S_STRUCTURE)
+        return;                     /* not a device, or a quirk or the source settled it */
+    if (!n->enabled) {
+        n->state = HW_S_DISABLED;
+        return;
+    }
+    type = hw_fdt_prop(g, i, "device_type", &len);
+    if (i == g->console || (type && len == 4 && hw_streq(type, "cpu")) ||
+        hw_has_key(n, "ACPI0007")) {
+        n->driver = kernel;
+        if (kernel != HW_NODRV)
+            bind_kind(g, n, i == g->console ? "the console" : "a CPU");
+        return;
+    }
+    n->driver = n->pin ? by_name(g, n->pin) : choose(g, n);
+    if (n->driver == HW_NODRV)
+        n->state = HW_S_NODRIVER;
+    else
+        bind_kind(g, n, nullptr);
+}
+
 void hw_match(struct hw_graph *g, const struct hw_driver *drivers, unsigned ndrivers)
 {
     uint16_t kernel;
@@ -63,31 +91,13 @@ void hw_match(struct hw_graph *g, const struct hw_driver *drivers, unsigned ndri
     g->drivers = drivers;
     g->ndrivers = ndrivers;
     kernel = by_name(g, "kernel");
-    for (hw_id i = 1; i < g->count; i++) {
-        struct hw_node *n = &g->nodes[i];
-        uint32_t len;
-        const char *type;
+    for (hw_id i = 1; i < g->count; i++)
+        match_one(g, i, kernel);
+}
 
-        if (n->nkeys == 0 || n->state != HW_S_STRUCTURE)
-            continue;               /* not a device, or a quirk or the source settled it */
-        if (!n->enabled) {
-            n->state = HW_S_DISABLED;
-            continue;
-        }
-        type = hw_fdt_prop(g, i, "device_type", &len);
-        if (i == g->console || (type && len == 4 && hw_streq(type, "cpu")) ||
-            hw_has_key(n, "ACPI0007")) {
-            n->driver = kernel;
-            if (kernel != HW_NODRV)
-                bind_kind(g, n, i == g->console ? "the console" : "a CPU");
-            continue;
-        }
-        n->driver = n->pin ? by_name(g, n->pin) : choose(g, n);
-        if (n->driver == HW_NODRV)
-            n->state = HW_S_NODRIVER;
-        else
-            bind_kind(g, n, nullptr);
-    }
+void hw_match_node(struct hw_graph *g, hw_id id)
+{
+    match_one(g, id, by_name(g, "kernel"));
 }
 
 unsigned hw_match_ties(const struct hw_driver *drivers, unsigned n, hw_print *out, void *ctx)

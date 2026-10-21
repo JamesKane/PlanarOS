@@ -168,7 +168,9 @@ static struct hw_ref *ref(struct hw_graph *g, hw_id from, enum hw_ref_kind kind,
     return r;
 }
 
-static void resources(struct hw_graph *g, hw_id id, const struct AcpidDevice *d)
+/* The device's resources; only its windows if 'windows' (a static twin
+ * has the rest). */
+static void resources(struct hw_graph *g, hw_id id, const struct AcpidDevice *d, bool windows)
 {
     hw_id gic = gic_of(g);
     bool on_gic = false;
@@ -180,6 +182,8 @@ static void resources(struct hw_graph *g, hw_id id, const struct AcpidDevice *d)
         struct hw_ref *f;
         size_t n = 0;
 
+        if (windows && a->ar_Kind != ACPID_R_WINDOW)
+            continue;
         if (a->ar_Source && !(src = str(d, a->ar_Source, &n))) {
             g->broken++;
             continue;
@@ -234,7 +238,19 @@ static void resources(struct hw_graph *g, hw_id id, const struct AcpidDevice *d)
             r->base = a->ar_Base;
             ref(g, id, HW_REF_PARENT, "bus", HW_NONE, src);
             break;
-        case ACPID_R_WINDOW:
+        case ACPID_R_WINDOW:        /* memory only (acpid drops I/O); taken as identity on the bus */
+            if (a->ar_Size == 0 || a->ar_Base + a->ar_Size < a->ar_Base ||
+                !(r = hw_res_add(g, id))) {
+                g->broken++;
+                break;
+            }
+            r->kind = HW_WINDOW;
+            r->base = a->ar_Base;
+            r->size = a->ar_Size;
+            r->ncells = 3;
+            r->cells[0] = HW_WIN_MEM | (a->ar_Base + a->ar_Size > 1ULL << 32 ? HW_WIN_64 : 0);
+            r->cells[1] = (uint32_t)(a->ar_Base >> 32);
+            r->cells[2] = (uint32_t)a->ar_Base;
             break;
         default:
             g->broken++;
@@ -328,8 +344,7 @@ void hw_ns_add(struct hw_graph *g, const struct AcpidDevice *d)
             g->nodes[t].state = HW_S_STRUCTURE;
             g->nodes[t].enabled = d->ad_Status & 1;
         }
-        if (g->nodes[t].nres == 0)
-            resources(g, t, d);
+        resources(g, t, d, g->nodes[t].nres != 0);
         id = t;
     } else {
         if (id == HW_NONE &&
@@ -337,7 +352,7 @@ void hw_ns_add(struct hw_graph *g, const struct AcpidDevice *d)
             return;
         take_keys(g, id, d);
         g->nodes[id].enabled = d->ad_Status & 1;
-        resources(g, id, d);
+        resources(g, id, d, false);
     }
     /* On its parent's bus; a reservation (PNP0C02) is on none. */
     if (g->nodes[id].nkeys && hw_device_of(g, parent) != HW_NONE &&
