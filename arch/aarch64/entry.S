@@ -31,7 +31,10 @@
  * on every exception to EL1, so the kernel can't touch user memory but
  * through the unprivileged loads and stores of its copy routines. */
 #define SCTLR_EL1_RES1  0x30500800      /* MMU, caches, alignment checks off */
-#define SCTLR_EL1_MMU   0x30501805      /* ... | I | C | M */
+/* ... | UCI | UCT | I | C | M: EL0 may clean and invalidate the data
+ * cache by address, and read CTR_EL0 for its line size, as a driver
+ * whose device doesn't snoop must (arch/aarch64/user/cache.c). */
+#define SCTLR_EL1_MMU   0x34509805
 #define HCR_EL2_RW      (1 << 31)       /* EL1 is AArch64 */
 #define SPSR_EL1H_DAIF  0x3c5           /* EL1h, D A I F masked */
 #define CPTR_EL2_RES1   0x22ff          /* RES1 only: no FP/SIMD, SVE or SME traps to EL2 */

@@ -1385,6 +1385,8 @@ void selftest_tasks(void *)
     /* hwdb's test said what it saw of power (servers/hwdb/power.c), and
      * exited 0 only if that held; the firmware calls came with the shares. */
     kprintf("V5.2 done\n");
+    /* And of display (servers/hwdb/display.c). */
+    kprintf("V5.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2710,9 +2712,14 @@ void selftest_hwdb(void)
     task_set_signal(0, SIGF_DEAD);
     if (!(p = process_create_root("hwdb", 5, 1, task_self(), SIGF_DEAD)))
         fail("V4.3 hwdb", "process_create failed");
-    for (uint64_t end = time_now() + time_us(15000000); !atomic_load(&p->dead) && time_now() < end;)
+    /* The boards take most of 15 s for the kill test alone. */
+    for (uint64_t end = time_now() + time_us(40000000); !atomic_load(&p->dead) && time_now() < end;)
         wait_test_dead();
-    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+    if (!atomic_load(&p->dead)) {
+        kprintf("hwdb: still running after 40 s\n");
+        fail("V4.3 hwdb", "hwdb failed");
+    }
+    if (p->fault != FAULT_NONE || p->exit_code != 0) {
         kprintf("hwdb: exit %lld, fault %d\n", (long long)p->exit_code, p->fault);
         fail("V4.3 hwdb", "hwdb failed");
     }

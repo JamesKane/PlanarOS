@@ -506,6 +506,8 @@ static bool stop(struct unit *u, uint64_t quarantined)
         return stop_nvme(u);
     if (hw_streq(name, "sdhci"))
         return stop_sdhci(u);
+    if (hw_streq(name, "display"))
+        return stop_display(u);
     return quarantined == 0;    /* none: only a device that kept no DMA is safe (VQ24) */
 }
 
@@ -650,7 +652,7 @@ static void bind_reply(struct unit *u, struct HwdbMsg *m)
 {
     const struct hw_lease *ls = lease_of(u);
 
-    m->hm_Flags = u->flags;
+    m->hm_Flags = u->flags | (u->deaths ? DRVF_AGAIN : 0);
     m->hm_NRanges = ls->nranges;
     m->hm_NDevices = ls->nnodes;
     for (unsigned r = 0; r < ls->nranges; r++)
@@ -709,6 +711,8 @@ static void started(struct unit *u, const struct HwdbMsg *m)
     u->state = U_RUNNING;
     if (accepted && hw_streq(unit_driver(u), "power"))
         power_up();
+    if (accepted && hw_streq(unit_driver(u), "display"))
+        display_up();
 }
 
 static void serve(unsigned c)
@@ -721,6 +725,10 @@ static void serve(unsigned c)
     }
     if (conn_unit[c] == CONN_POWER) {
         power_serve(&conns[c]);
+        return;
+    }
+    if (conn_unit[c] == CONN_DISPLAY) {
+        display_serve(&conns[c]);
         return;
     }
     while ((m = (struct HwdbMsg *)GetMsgSized(&conns[c], sizeof *m))) {
@@ -790,9 +798,11 @@ static void serve_all(void)
     for (unsigned c = 0; c < nconns;) {
         serve(c);
         if (PortGone(&conns[c]) && (conn_unit[c] == UINT32_MAX || conn_unit[c] == CONN_ACPID ||
-                                    conn_unit[c] == CONN_POWER)) {
+                                    conn_unit[c] == CONN_POWER || conn_unit[c] == CONN_DISPLAY)) {
             if (conn_unit[c] == CONN_POWER)
                 power_down();
+            if (conn_unit[c] == CONN_DISPLAY)
+                display_down();
             ClosePort(&conns[c]);
             conns[c] = conns[--nconns];
             conn_unit[c] = conn_unit[nconns];

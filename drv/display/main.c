@@ -1,216 +1,222 @@
 /*
- * drv/display/main.c -- a text console on the firmware's framebuffer
- * (v4-plan step 7; decision 2: the firmware's, native scanout in V5)
+ * drv/display/main.c -- display: the screen the firmware left lit
+ * (v4-plan step 7; v5-plan step 3)
  *
- * The framebuffer the firmware left set up (UEFI's GOP, or on the K1 U-Boot's
- * display layer), as hwdb describes it (its geometry in the node's
- * cells), leased like registers. What's drawn is cleaned from the caches
- * after each write, for a controller that doesn't snoop them (the K1's). Text in
- * the 8x8 font, twice as big on screens 1600 pixels wide or more,
- * scrolling up a line at a time; the rest of the screen is the
- * background.
+ * hwdb leases display the framebuffer the firmware left (UEFI's GOP, or
+ * U-Boot's), its geometry in the node's cells, and with it, where hwdb
+ * knows the controller scanning it out (HW_Q_SCANOUT), that controller:
+ * the CIX's DPU4 (komeda.c), the K1's HDMI DPU (saturn.c). With one,
+ * display takes over the mode the firmware set; without, or if it isn't
+ * lit, fb.c composes the planes itself. core.c has the planes, console.c
+ * the text console on plane 0.
  *
- * It serves "con.N": a DRV_WRITE of up to 64 bytes of text at a time,
- * which also goes, a line at a time, to the kernel's log, and so to the
- * serial console (decision 1: the console is both).
+ * It serves "con.0", the console class (DRV_WRITE of up to 64 bytes of
+ * text), and "display.0" (planar/devices/display.h), both on one
+ * connection's messages: their ops don't overlap.
  */
+#include <stddef.h>
+
 #include <planar/drv.h>
 #include <planar/syscalls.h>
 
-#include "font8x8.h"
+#include "display.h"
 
-constexpr uint32_t FG = 0xe8e8e8;           /* light grey on dark slate blue, omega's */
-constexpr uint32_t BG = 0x203050;
-constexpr unsigned LINE = 160;
+void *memcpy(void *restrict dst, const void *restrict src, size_t n);
 
-struct con {
-    volatile uint32_t *fb;
-    uint32_t width, height, stride;
-    bool bgr;                               /* GOP format 1: blue in the low byte */
-    uint32_t scale, cell, cols, rows, col, row;
-    char line[LINE];                        /* for the log */
-    unsigned nline;
-    uint32_t dirty_lo, dirty_hi;            /* rows changed since the last clean */
-};
+static struct drv *drv;
+static struct dp_out out;
+static struct drv_dev *fb_dev, *ctl_dev;
+static bool started;
 
-static struct con cons[DRV_DEVICES];
-
-/* A colour as 0xRRGGBB, as this framebuffer holds it. */
-static uint32_t pixel(const struct con *c, uint32_t rgb)
+/* A controller reads its planes past the caches; fb.c, the CPU. */
+int64_t dp_alloc(struct dp_out *o, uint64_t size, bool dma, Handle *area, uint64_t *addr)
 {
-    return c->bgr ? rgb : (rgb & 0xff) << 16 | (rgb & 0xff00) | rgb >> 16;
+    void *at;
+    int64_t h = dma ? AllocDmaArea(drv_lease(drv), size, o->be == &dp_fb ? 0 : AREAF_NC, &at)
+                    : AllocArea(size, AREAF_CLEAR, &at);
+
+    if (h < 0)
+        return h;
+    *area = (Handle)h;
+    *addr = (uint64_t)at;
+    return 0;
 }
 
-static void dirty(struct con *c, uint32_t y0, uint32_t y1)
+void dp_free(Handle area)
 {
-    if (y0 < c->dirty_lo)
-        c->dirty_lo = y0;
-    if (y1 > c->dirty_hi)
-        c->dirty_hi = y1 < c->height ? y1 : c->height;
+    FreeArea(area);
 }
 
-/* The rows drawn, out of the caches to memory: a display controller that
- * doesn't snoop (the K1's) scans memory. */
-static void clean(struct con *c)
+int64_t dp_share(Handle area, Handle task, bool writable)
 {
-    if (c->dirty_hi > c->dirty_lo)
-        drv_dma_clean((const void *)(c->fb + (uint64_t)c->dirty_lo * c->stride),
-                      (uint64_t)(c->dirty_hi - c->dirty_lo) * c->stride * 4);
-    c->dirty_lo = UINT32_MAX;
-    c->dirty_hi = 0;
+    return ShareArea(area, task, AREAR_READ | (writable ? AREAR_WRITE : 0));
 }
 
-static void fill(struct con *c, uint32_t y0, uint32_t y1, uint32_t rgb)
+void dp_unshare(Handle area, Handle task)
 {
-    uint32_t p = pixel(c, rgb);
-
-    dirty(c, y0, y1);
-    for (uint32_t y = y0; y < y1 && y < c->height; y++)
-        for (uint32_t x = 0; x < c->width; x++)
-            c->fb[(uint64_t)y * c->stride + x] = p;
+    UnshareArea(area, task);
 }
 
-static void glyph(struct con *c, char ch)
+void dp_wake(volatile uint64_t *word)
 {
-    const uint8_t *g = font8x8[0];
-    uint32_t fg = pixel(c, FG), bg = pixel(c, BG);
-    uint32_t x0 = c->col * c->cell, y0 = c->row * c->cell;
-
-    if ((unsigned char)ch >= FONT8X8_FIRST && (unsigned char)ch < FONT8X8_FIRST + FONT8X8_COUNT)
-        g = font8x8[(unsigned char)ch - FONT8X8_FIRST];
-    dirty(c, y0, y0 + c->cell);
-    for (uint32_t y = 0; y < c->cell; y++)
-        for (uint32_t x = 0; x < c->cell; x++)
-            c->fb[(uint64_t)(y0 + y) * c->stride + x0 + x] =
-                g[y / c->scale] >> (x / c->scale) & 1 ? fg : bg;
+    WakeAddr(word, UINT32_MAX);
 }
 
-static void scroll(struct con *c)
+uint64_t dp_now(void)
 {
-    uint32_t keep = (c->rows - 1) * c->cell;
-
-    dirty(c, 0, c->rows * c->cell);
-    for (uint32_t y = 0; y < keep; y++)
-        for (uint32_t x = 0; x < c->cols * c->cell; x++)
-            c->fb[(uint64_t)y * c->stride + x] = c->fb[(uint64_t)(y + c->cell) * c->stride + x];
-    fill(c, keep, c->rows * c->cell, BG);
+    return CurrentTime();
 }
 
-static void newline(struct con *c)
+void dp_say(const char *text)
 {
-    c->col = 0;
-    if (++c->row == c->rows) {
-        scroll(c);
-        c->row = c->rows - 1;
-    }
+    drv_log(drv, nullptr, text);
 }
 
-static void log_line(struct con *c)
+void dp_clean(const volatile void *p, uint64_t n)
 {
-    c->line[c->nline] = '\0';
-    KLog(c->line);
-    c->nline = 0;
-}
-
-static void put(struct con *c, char ch)
-{
-    if (ch == '\n') {
-        newline(c);
-        log_line(c);
-        return;
-    }
-    if (ch == '\r')
-        return;
-    if (ch == '\b') {
-        if (c->col)
-            c->col--;
-        if (c->nline)
-            c->nline--;
-        glyph(c, ' ');
-        return;
-    }
-    if (ch == '\t')
-        ch = ' ';
-    glyph(c, ch);
-    if (++c->col == c->cols)
-        newline(c);
-    if (c->nline < LINE - 1)
-        c->line[c->nline++] = ch;
+    drv_dma_clean((const void *)p, n);
 }
 
 static int bind(struct drv *d, struct drv_dev *dev)
 {
-    struct con *c = &cons[dev - d->dev];
     const struct DrvDevice *info = dev->info;
 
-    *c = (struct con){
-        .fb = (volatile uint32_t *)dev->regs, .width = info->dd_Cells[0],
-        .height = info->dd_Cells[1], .stride = info->dd_Cells[2], .bgr = info->dd_Cells[3] == 1,
-    };
-    if (!c->width || !c->height || c->stride < c->width || info->dd_Cells[3] > 1 ||
-        (uint64_t)c->stride * c->height * 4 > info->dd_Size)
+    drv = d;
+    if (dp_streq(info->dd_Key, "simple-framebuffer")) {
+        if (fb_dev || !info->dd_Cells[0] || !info->dd_Cells[1] ||
+            info->dd_Cells[2] < info->dd_Cells[0] || info->dd_Cells[3] > 1 ||
+            (uint64_t)info->dd_Cells[2] * info->dd_Cells[1] * 4 > info->dd_Size)
+            return DRV_DECLINE;
+        fb_dev = dev;
+        return DRV_OK;
+    }
+    if (ctl_dev || !info->dd_Size)
         return DRV_DECLINE;
-    c->scale = c->width >= 1600 ? 2 : 1;
-    c->cell = 8 * c->scale;
-    c->cols = c->width / c->cell;
-    c->rows = c->height / c->cell;
-    c->dirty_lo = UINT32_MAX;
-    if (c->cols < 20 || c->rows < 4)
-        return DRV_DECLINE;
-    fill(c, 0, c->height, BG);
-    clean(c);
+    ctl_dev = dev;
     return DRV_OK;
 }
 
-static void num(char *line, unsigned *n, uint32_t v)
+static const struct dp_backend *native(const char *key)
 {
-    char dg[12];
-    unsigned k = 0;
-
-    do
-        dg[k++] = (char)('0' + v % 10);
-    while ((v /= 10) && k < sizeof dg);
-    while (k)
-        line[(*n)++] = dg[--k];
+    if (dp_streq(key, "CIXH5010"))
+        return &dp_komeda;
+    if (dp_streq(key, "ky,dpu"))
+        return &dp_saturn;
+    return nullptr;
 }
 
-static int start(struct drv *d, struct drv_dev *dev)
+static void say_mode(const char *how)
 {
-    struct con *c = &cons[dev - d->dev];
-    char line[80];
+    char line[96];
     unsigned n = 0;
 
-    for (const char *s = "Planar"; *s; s++, c->col++)
-        glyph(c, *s);
-    newline(c);
-    newline(c);
-    num(line, &n, c->width);
-    line[n++] = 'x';
-    num(line, &n, c->height);
-    for (const char *s = ", a text console on it"; *s; s++)
+    for (const char *s = how; *s && n < 40; s++)
         line[n++] = *s;
+    line[n++] = ' ';
+    n += dp_dec(line + n, out.width);
+    line[n++] = 'x';
+    n += dp_dec(line + n, out.height);
+    for (const char *s = ", planes "; *s; s++)
+        line[n++] = *s;
+    n += dp_dec(line + n, out.nplanes);
     line[n] = '\0';
-    clean(c);
-    drv_log(d, dev, line);
-    return (int)drv_publish(d, dev, "con");
+    dp_say(line);
 }
 
-static void request(struct drv *d, struct drv_dev *dev, struct DrvRequest *r)
+/* Once every device is in: the backend, the console, the two ports. */
+static int start(struct drv *d, struct drv_dev *dev)
 {
-    struct con *c = &cons[dev - d->dev];
+    bool again = d->info.hm_Flags & DRVF_AGAIN;
+    const struct dp_backend *be = ctl_dev ? native(ctl_dev->info->dd_Key) : nullptr;
+    int64_t e;
 
-    if (r->dr_Op != DRV_WRITE) {
-        r->dr_Msg.mn_Error = (int32_t)ERR_BADARG;
-        return;
+    if (started)
+        return 0;
+    started = true;
+    if (!fb_dev) {
+        drv_log(d, dev, "no framebuffer to draw the console on");
+        return -1;
     }
-    for (uint32_t i = 0; i < r->dr_Len; i++)
-        put(c, (char)r->dr_Data[i]);
-    clean(c);
-    r->dr_Msg.mn_Error = 0;
+    out.fb = fb_dev->regs;
+    out.fb_size = fb_dev->info->dd_Size;
+    memcpy(out.fb_cells, fb_dev->info->dd_Cells, sizeof out.fb_cells);
+    if (be) {
+        out.regs = ctl_dev->regs;
+        out.regs_size = ctl_dev->info->dd_Size;
+        if (!dp_start(&out, be, again)) {
+            dp_say("the controller isn't lit: the framebuffer alone");
+            out = (struct dp_out){ .fb = out.fb, .fb_size = out.fb_size };
+            memcpy(out.fb_cells, fb_dev->info->dd_Cells, sizeof out.fb_cells);
+            be = nullptr;
+        }
+    }
+    if (!be && !dp_start(&out, be = &dp_fb, again))
+        return -1;
+    if (!con_fits(&out))
+        return -1;
+    con_start(&out, again);
+    say_mode(be == &dp_fb ? "the framebuffer," : be == &dp_komeda ? "DPU (komeda)," : "DPU (saturn),");
+    if ((e = drv_publish_as(d, fb_dev, "con.0")) != 0)
+        return (int)e;
+    return (int)drv_publish_as(d, fb_dev, "display.0");
+}
+
+static void message(struct drv *d, struct drv_dev *, unsigned c, struct Message *m)
+{
+    uint32_t op = ((struct DrvRequest *)m)->dr_Op;
+
+    if (op == DRV_WRITE) {
+        struct DrvRequest *r = (struct DrvRequest *)m;
+        uint32_t len = r->dr_Len;
+
+        if (len > sizeof r->dr_Data) {
+            m->mn_Error = (int32_t)ERR_BADARG;
+        } else {
+            uint8_t text[sizeof r->dr_Data];
+
+            memcpy(text, r->dr_Data, len);      /* the client's memory: read once */
+            con_write(&out, text, len);
+            m->mn_Error = 0;
+        }
+    } else if (op >= DISPLAY_INFO && drv_in_heap(d, c, (uint64_t)m, sizeof(struct DisplayMsg))) {
+        struct DisplayMsg copy;
+
+        memcpy(&copy, m, sizeof copy);
+        dp_message(&out, c, &copy);
+        memcpy(m, &copy, sizeof copy);
+    } else {
+        m->mn_Error = (int32_t)ERR_BADARG;
+    }
+    drv_reply(d, c, m);
+}
+
+static void gone(struct drv *, struct drv_dev *, unsigned c)
+{
+    dp_gone(&out, c);
+}
+
+static void interrupt(struct drv *, struct drv_dev *)
+{
+    dp_tick(&out);
+}
+
+/* fb.c's frames: a tick at each deadline. */
+static bool poll(struct drv *)
+{
+    if (out.be && out.be->deadline)
+        dp_tick(&out);
+    return false;
+}
+
+static uint64_t deadline(struct drv *)
+{
+    return out.be && out.be->deadline ? out.be->deadline(&out) : 0;
 }
 
 static const struct drv_ops ops = {
-    .name = "display", .bind = bind, .start = start, .request = request,
+    .name = "display", .bind = bind, .start = start, .message = message,
+    .message_size = sizeof(struct DrvRequest), .gone = gone, .interrupt = interrupt,
+    .poll = poll, .deadline = deadline,
 };
 
 int main(uint64_t token)

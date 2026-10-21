@@ -146,39 +146,47 @@ uint64_t drv_wait_irq(struct drv *d, struct drv_dev *dev, uint64_t ms)
     return got;
 }
 
+/* The next of 'dev's ports, named 'name' (at most 15 bytes). */
+static int64_t publish(struct drv_dev *dev, const char *name)
+{
+    unsigned p = 0, n = 0;
+    int64_t h;
+
+    while (p < DRV_PORTS && dev->port[p])
+        p++;
+    if (p == DRV_PORTS)
+        return ERR_FULL;
+    for (; *name && n < sizeof dev->port_name[p] - 1; name++)
+        dev->port_name[p][n++] = *name;
+    dev->port_name[p][n] = '\0';
+    if ((h = CreatePort(dev->port_name[p], SIG_ACCEPT)) < 0) {
+        dev->port_name[p][0] = '\0';
+        return h;
+    }
+    dev->port[p] = (Handle)h;
+    return 0;
+}
+
 int64_t drv_publish(struct drv *, struct drv_dev *dev, const char *cls)
 {
     unsigned n = 0, u = dev->info->dd_Unit, k = 0;
-    char digits[8];
-    int64_t h;
+    char name[16], digits[8];
 
-    for (; *cls && n < sizeof dev->port_name - 10; cls++)
-        dev->port_name[n++] = *cls;
-    dev->port_name[n++] = '.';
+    for (; *cls && n < sizeof name - 10; cls++)
+        name[n++] = *cls;
+    name[n++] = '.';
     do
         digits[k++] = (char)('0' + u % 10);
     while ((u /= 10) && k < sizeof digits);
     while (k)
-        dev->port_name[n++] = digits[--k];
-    dev->port_name[n] = '\0';
-    if ((h = CreatePort(dev->port_name, SIG_ACCEPT)) < 0)
-        return h;
-    dev->port = (Handle)h;
-    return 0;
+        name[n++] = digits[--k];
+    name[n] = '\0';
+    return publish(dev, name);
 }
 
 int64_t drv_publish_as(struct drv *, struct drv_dev *dev, const char *name)
 {
-    unsigned n = 0;
-    int64_t h;
-
-    for (; *name && n < sizeof dev->port_name - 1; name++)
-        dev->port_name[n++] = *name;
-    dev->port_name[n] = '\0';
-    if ((h = CreatePort(dev->port_name, SIG_ACCEPT)) < 0)
-        return h;
-    dev->port = (Handle)h;
-    return 0;
+    return publish(dev, name);
 }
 
 /* Copy hwdb's answer in and check it: it's hwdb's, but in shared memory.
@@ -306,7 +314,7 @@ static void serve(struct drv *d, unsigned pos)
     for (unsigned i = 0; i < d->ndev; i++) {
         if (d->dev[i].accepted)
             m->hm_Accepted |= 1u << i;
-        memcpy(m->hm_Ports[i], d->dev[i].port_name, sizeof m->hm_Ports[i]);
+        memcpy(m->hm_Ports[i], d->dev[i].port_name[0], sizeof m->hm_Ports[i]);
     }
     if (DoMsg(&d->hwdb, &m->hm_Msg) != 0)
         ExitProcess(-6);
@@ -333,12 +341,12 @@ static void serve(struct drv *d, unsigned pos)
         if (PortGone(&d->hwdb))
             ExitProcess(0);
         if (got & 1ULL << SIG_ACCEPT)
-            for (unsigned i = 0; i < d->ndev; i++)
-                while (d->dev[i].port) {
+            for (unsigned i = 0; i < d->ndev * DRV_PORTS; i++)
+                while (d->dev[i / DRV_PORTS].port[i % DRV_PORTS]) {
                     struct MsgPort mp;
                     unsigned c = 0;
 
-                    if (AcceptPort(&mp, d->dev[i].port, SIG_CLIENT) != 0)
+                    if (AcceptPort(&mp, d->dev[i / DRV_PORTS].port[i % DRV_PORTS], SIG_CLIENT) != 0)
                         break;
                     while (c < DRV_CLIENTS && client[c].used)
                         c++;
@@ -347,7 +355,7 @@ static void serve(struct drv *d, unsigned pos)
                         continue;
                     }
                     client[c].used = true;
-                    client[c].dev = (uint8_t)i;
+                    client[c].dev = (uint8_t)(i / DRV_PORTS);
                     client[c].pending = 0;
                     client[c].pos = (int)nlive;
                     live_id[nlive] = (uint8_t)c;

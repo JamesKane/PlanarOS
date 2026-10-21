@@ -129,6 +129,7 @@ void acpid_stop(void);              /* at the end: kill it, take its leases back
 /* --- Connections hwdb makes itself (server.c keeps them with the rest). --- */
 
 constexpr uint32_t CONN_POWER = UINT32_MAX - 2;     /* conn_unit's mark for power's */
+constexpr uint32_t CONN_DISPLAY = UINT32_MAX - 3;   /* and display's, in test mode */
 bool server_add_conn(const struct MsgPort *mp, uint32_t mark);
 struct MsgPort *server_conn(uint32_t mark);         /* nullptr if there's none */
 
@@ -157,6 +158,14 @@ int64_t power_query(const char *name, uint32_t tag);
 int64_t power_vote_set(const char *name, uint32_t tag, bool on);
 void test_power_answer(const struct PowerMsg *m);
 bool power_test(void);              /* the kill test's power step: true when it's over */
+
+/* --- display (display.c): its stop method, and its test. --- */
+
+bool stop_display(struct unit *u);  /* every plane off but the console's, latched */
+void display_up(void);              /* its unit is running: connect (test mode) */
+void display_down(void);
+void display_serve(struct MsgPort *mp);
+bool display_test(void);            /* the kill test's display step: true when it's over */
 
 /* --- pci (pci.c): a host bridge's driver, while it binds. --- */
 

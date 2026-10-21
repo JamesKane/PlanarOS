@@ -38,8 +38,15 @@ void area_unquarantine(struct area *a);
  * holding a client's buffers, which its device may still be writing
  * into. Each is held, linked on '*list', and not freed until
  * area_unhold, whoever lets go of it meanwhile. One already held for
- * another lease is left to that one. The pages held. The caller holds
- * the lease lock (lease.c's, which comes before this file's).
+ * another lease is left to that one. The pages held.
+ *
+ * Its own DMA Areas that a client maps too (display's buffers, v5-plan
+ * step 3) are held the same way, but counted as its lease's quarantine
+ * (lease_dma_lent): its device may still read them. area_unhold makes
+ * each an ordinary Area, freed when the client lets go.
+ *
+ * The caller holds the lease lock (lease.c's, which comes before this
+ * file's).
  */
 uint64_t area_hold_lent(struct process *p, struct area **list);
 void area_unhold(struct area *list);

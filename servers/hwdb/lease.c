@@ -178,6 +178,16 @@ void hw_leases(struct hw_graph *g)
         else
             join(s, first[s[i].node], i);
     }
+    /* A controller and the framebuffer it scans out (a quirk's), when
+     * one driver has both: one process, which draws on the one and
+     * drives the other. */
+    for (uint32_t i = 0; i < n; i++) {
+        const struct hw_node *d = &g->nodes[s[i].node];
+
+        if (d->with != HW_NONE && first[d->with] != UINT32_MAX && leased(g, d) &&
+            leased(g, &g->nodes[d->with]) && g->nodes[d->with].driver == d->driver)
+            join(s, first[d->with], i);
+    }
     /* A node failed by one cluster fails the others it joined. */
     for (uint32_t i = 0; i < n; i++)
         if (g->nodes[s[i].node].state == HW_S_FAILED)

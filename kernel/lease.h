@@ -48,6 +48,11 @@ void lease_release(struct lease *l);
 void lease_dma_new(struct lease *l, uint64_t pages);
 uint64_t lease_dma_limit(const struct lease *l);    /* 0: anywhere */
 bool lease_dma_gone(struct lease *l, struct area *a, uint64_t pages, bool freed);
+/* A dying grantee's DMA Area a client still maps: counted out of the
+ * live pages and into the quarantine until RevokeLease (area_hold_lent,
+ * the lease lock held); then the Area lets the lease go (lease_dma_put). */
+void lease_dma_lent(struct lease *l, uint64_t pages);
+void lease_dma_put(struct lease *l);
 
 /* Leases in existence, and pages quarantined, for leak checks. */
 unsigned lease_count(void);

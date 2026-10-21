@@ -56,6 +56,7 @@ struct area {
     bool freed;                     /* its owner called FreeArea (lock) */
     struct lease *lease;            /* a device's DMA memory (kernel/lease.c) */
     bool held;                      /* lent to a dead driver's device: area_hold_lent */
+    bool lent_dma;                  /* held, and its own DMA Area: no lease's once let go */
     struct area *held_next;
     uint64_t run_pa, run_pages;     /* the whole run, guard included */
     unsigned sharers;
@@ -161,13 +162,22 @@ uint64_t area_hold_lent(struct process *p, struct area **list)
     for (struct mapping *m = p->maps; m; m = m->next_in_proc) {
         struct area *a = m->area;
 
-        if (a->owner == p || a->lease || a->held)
+        if (a->held)
             continue;
+        if (a->owner == p && a->lease && a->sharers > 1) {
+            /* Its own DMA, mapped in a client too (display's buffers):
+             * quarantined, but freed only once the client lets go. */
+            lease_dma_lent(a->lease, a->size / PAGE_SIZE);
+            a->lent_dma = true;
+        } else if (a->owner == p || a->lease) {
+            continue;
+        } else {
+            pages += a->size / PAGE_SIZE;
+        }
         a->held = true;
         a->refs++;
         a->held_next = *list;
         *list = a;
-        pages += a->size / PAGE_SIZE;
     }
     spin_unlock_irqrestore(&lock, was);
     return pages;
@@ -178,13 +188,21 @@ void area_unhold(struct area *list)
     while (list) {
         struct area *a = list, *next = a->held_next;
         unsigned long was = spin_lock_irqsave(&lock);
+        struct lease *dma = a->lent_dma ? a->lease : nullptr;
         bool last;
 
         a->held = false;
         a->held_next = nullptr;
         a->refs--;
+        if (dma) {
+            /* The device is stopped: an ordinary Area now, the client's. */
+            a->lease = nullptr;
+            a->lent_dma = false;
+        }
         last = unused(a);
         spin_unlock_irqrestore(&lock, was);
+        if (dma)
+            lease_dma_put(dma);
         if (last)
             area_destroy(a);
         list = next;

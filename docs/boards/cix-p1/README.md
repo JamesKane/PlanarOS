@@ -77,6 +77,11 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 - `make PLATFORM=uefi-a64 test` runs one boot (`tools/efi-boot.py`): the image goes to `\EFI\planar\planar.efi`, Planar's entry is `Boot0050`, and `BootNext` points to it. FreeBSD's `efivar -w` takes a value on stdin only. Its `-f` isn't implemented for writes.
 - The serial port must be free while a run is in progress.
 
+**The screen** (V5 step 3):
+- The GOP drives DPU4, a Linlon-D60 (product `0x0060`), at **1920×1080, 60 Hz**: one layer (layer 0, XRGB8888, `0x10`) on its framebuffer at `0x84800000`, straight into compiz input 0. There's no scaler in the path.
+- display's planes go on layers 1 and 3, through compiz inputs 1 and 2 above it. A commit reaches the screen about two frames after it's written (33 ms), where QEMU's takes one.
+- The DPU isn't coherent (`_CCA` 0). What the CPU draws in cached memory must be cleaned out with `dc cvac`. Until V5 step 3, the AArch64 `drv_dma_clean` only ordered writes. With the framebuffer mapped cached, the console's pixels stayed in the cache and the top of the screen showed stale memory.
+
 **Power** (V5 step 2):
 - SCMI answers on both channels:
   - the SCP, through mailbox 6's first 0x80 bytes, rung at `+0x80`: clocks, protocol version 2.0;

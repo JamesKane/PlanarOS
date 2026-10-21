@@ -25,6 +25,7 @@
 
 constexpr unsigned DRV_DEVICES = 32;        /* hwdb's HW_LEASE_NODES */
 constexpr unsigned DRV_RANGES = 4;          /* hwdb's HW_LEASE_RANGES */
+constexpr unsigned DRV_PORTS = 2;           /* class ports a device publishes */
 constexpr uint32_t DRV_NOLINE = UINT32_MAX;
 
 /* --- The protocol (hwdb's port "hwdb"). --- */
@@ -38,6 +39,7 @@ enum : uint32_t {
 
 /* hm_Flags, from hwdb: what the kill test asks of this start. */
 constexpr uint32_t DRVF_CRASH = 1u << 0;    /* fault in Bind (the give-up test) */
+constexpr uint32_t DRVF_AGAIN = 1u << 1;    /* a process of this unit ran before: the device is as it left it */
 
 struct DrvRange {
     Handle dr_Lease;                /* a kernel lease, granted to this process */
@@ -152,8 +154,8 @@ struct drv_dev {
     volatile uint8_t *regs;         /* mapped: dd_Base */
     bool accepted;                  /* Bind took it */
     bool line_bound;
-    Handle port;                    /* its class port, or 0 */
-    char port_name[16];
+    Handle port[DRV_PORTS];         /* its class ports, in the order published; 0 */
+    char port_name[DRV_PORTS][16];  /* hwdb is told the first */
     void *priv;                     /* the driver's */
 };
 
@@ -206,7 +208,10 @@ void drv_reply(struct drv *d, unsigned c, struct Message *m);
 /* The connection's heap, where client c's buffers must lie. */
 bool drv_in_heap(const struct drv *d, unsigned c, uint64_t addr, uint64_t size);
 
-/* For Start: publish 'dev's class port, named class.unit ("rtc.0"). */
+/* For Start: publish 'dev's class port, named class.unit ("rtc.0"). A
+ * device may publish DRV_PORTS, each a class of its own (display's
+ * "con.0" and "display.0"); their clients' messages all come to the
+ * same callbacks. ERR_FULL past that. */
 int64_t drv_publish(struct drv *d, struct drv_dev *dev, const char *cls);
 /* The same, named 'name' as it is: a server there is one of ("power"). */
 int64_t drv_publish_as(struct drv *d, struct drv_dev *dev, const char *name);

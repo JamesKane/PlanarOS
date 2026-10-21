@@ -32,6 +32,13 @@ const struct hw_quirk hw_quirk_table[] = {
      * above 4 GiB is seen 2 GiB lower and only the first 2 GiB where it
      * is; U-Boot's tree has no dram_range buses to say so. */
     { "ky,x1", HW_Q_DMA_LIMIT, "/soc/dpu@c0340000", "0x80000000" },
+    /* One node for two DPUs (reg-names "dsi", "hdmi"): display drives
+     * the HDMI one, which U-Boot lit, on its online interrupt (the
+     * vendor's x1-hdmi.dtsi; U-Boot's tree lists none), and draws its
+     * console on U-Boot's framebuffer. */
+    { "ky,x1", HW_Q_REGS, "/soc/dpu@c0340000", "0xc0440000" },
+    { "ky,x1", HW_Q_IRQ, "/soc/dpu@c0340000", "0x8b /soc/interrupt-controller@e0000000" },
+    { "ky,x1", HW_Q_SCANOUT, "/soc/dpu@c0340000", nullptr },
 
     /*
      * The CIX's SCMI (drv/power/scmi.c): `power` drives mailbox 6 and its
@@ -44,6 +51,17 @@ const struct hw_quirk hw_quirk_table[] = {
     { "CIXTEK SKY1EDK2", HW_Q_PIN, "/_SB_/MBX6", "power" },
     { "CIXTEK SKY1EDK2", HW_Q_MMIO, "/_SB_/SHM0", "0x84380000 0x80" },
     { "CIXTEK SKY1EDK2", HW_Q_CALL, "/_SB_/SHM0", "0xc2000001" },
+
+    /*
+     * The CIX's monitor is on DPU4 (through DP04 and the PS185), where
+     * the GOP left its framebuffer scaled to the mode it chose. The other
+     * four DPUs are dark, and display doesn't wake them.
+     */
+    { "CIXTEK SKY1EDK2", HW_Q_SCANOUT, "/_SB_/DPU4", nullptr },
+    { "CIXTEK SKY1EDK2", HW_Q_EXCLUDE, "/_SB_/DPU0", "display" },
+    { "CIXTEK SKY1EDK2", HW_Q_EXCLUDE, "/_SB_/DPU1", "display" },
+    { "CIXTEK SKY1EDK2", HW_Q_EXCLUDE, "/_SB_/DPU2", "display" },
+    { "CIXTEK SKY1EDK2", HW_Q_EXCLUDE, "/_SB_/DPU3", "display" },
 
     /* The CIX P1 has no SPCR. The kernel takes DBG2's port as its
      * console (kernel/acpi.c's quirk), so the node is the kernel's. */
@@ -166,6 +184,37 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
                 continue;
             }
             *r = (struct hw_res){ .kind = HW_MMIO, .ctlr = HW_NONE, .base = base, .size = size };
+            break;
+        }
+        case HW_Q_IRQ: {
+            const char *c = q->arg;
+            uint64_t line = hex(&c);
+            hw_id ctlr;
+            struct hw_res *r;
+            struct hw_ref *f;
+
+            ctlr = hw_find_path(g, c, hw_strlen(c));
+            if (ctlr == HW_NONE || !(r = hw_res_add(g, id)) ||
+                !(f = hw_ref_add(g, id, HW_REF_IRQ, "interrupts", true))) {
+                g->broken++;
+                continue;
+            }
+            *r = (struct hw_res){ .kind = HW_IRQ, .ctlr = ctlr, .base = line, .ncells = 1,
+                                  .cells = { (uint32_t)line } };
+            f->target = f->supplier = ctlr;
+            break;
+        }
+        case HW_Q_SCANOUT: {
+            hw_id fb = HW_NONE;
+
+            /* hwdb's node for the framebuffer the firmware left lit, if
+             * it left one (server.c's framebuffer()). */
+            for (hw_id i = 1; i < g->count && fb == HW_NONE; i++)
+                if (hw_has_key(&g->nodes[i], "simple-framebuffer"))
+                    fb = i;
+            if (fb == HW_NONE)
+                continue;
+            g->nodes[id].with = fb;
             break;
         }
         case HW_Q_ALIAS: {

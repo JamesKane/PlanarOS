@@ -355,6 +355,23 @@ bool lease_dma_gone(struct lease *l, struct area *a, uint64_t pages, bool freed)
     return false;
 }
 
+void lease_dma_lent(struct lease *l, uint64_t pages)
+{
+    l->dma_pages -= pages;
+    l->quarantined_pages += pages;
+    atomic_fetch_add(&quarantined_total, pages);
+}
+
+void lease_dma_put(struct lease *l)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    bool last = put(l);
+
+    spin_unlock_irqrestore(&lock, was);
+    if (last)
+        kfree(l);
+}
+
 /* --- Interrupts. --- */
 
 static void line_fire(void *data)
@@ -387,7 +404,11 @@ static bool overlaps_memory(uint64_t base, uint64_t size)
     return false;
 }
 
-/* The GOP's framebuffer, exactly, page-rounded: memory a display may lease. */
+/* The GOP's framebuffer, exactly, page-rounded: memory a display may lease.
+ * It's mapped cached, as memory (v5-plan step 3): the kernel never draws
+ * on it, and display cleans what it draws for a controller that doesn't
+ * snoop. Read through a device mapping, scrolling a 1920x1080 console
+ * took seconds on the CIX. */
 static bool is_framebuffer(uint64_t base, uint64_t size)
 {
     const struct boot_fb *fb = boot_fb();
@@ -611,7 +632,9 @@ int64_t lease_map_call(uint32_t h, uint64_t addr_out)
         err = ERR_BADHANDLE;
     else if (l->mapped_in)
         err = ERR_EXISTS;
-    else if (!area_map_phys(p, l->base, l->size, MAP_USER | MAP_READ | MAP_WRITE | MAP_DEVICE))
+    else if (!area_map_phys(p, l->base, l->size,
+                            MAP_USER | MAP_READ | MAP_WRITE |
+                                (is_framebuffer(l->base, l->size) ? 0 : MAP_DEVICE)))
         err = ERR_NOMEM;
     if (!err) {
         l->mapped_in = p;

@@ -122,6 +122,7 @@ struct hw_node {
     const char *why;                /* for KERNEL, FIRMWARE and FAILED: what says so */
     const char *pin, *exclude;      /* a quirk's: the driver it must or mustn't have */
     hw_id alias;                    /* a quirk's: the device this describes again; HW_NONE */
+    hw_id with;                     /* a quirk's: a node leased with this one; HW_NONE */
     uint32_t pending;               /* references not yet met */
     uint32_t order;                 /* when it was bound, from 1 */
     uint32_t fdt_props;             /* the device tree: where its properties start */
@@ -279,6 +280,8 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_REGS,          /* of its registers, only the blocks at the addresses in 'arg' are its */
     HW_Q_MMIO,          /* registers the firmware doesn't list: 'arg' is "base size" */
     HW_Q_CALL,          /* its driver may make the firmware call 'arg' (SetLeaseCall) */
+    HW_Q_IRQ,           /* a line the firmware doesn't list: 'arg' is "line controller-path" */
+    HW_Q_SCANOUT,       /* it scans out the firmware's framebuffer: leased with it, to one process */
 };
 
 struct hw_quirk {

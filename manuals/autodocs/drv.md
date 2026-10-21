@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers).*
+*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers) and step 3's (two ports a device, `DRVF_AGAIN`).*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 
@@ -171,6 +171,7 @@ int main(uint64_t token)
 - Signals 16 to 19 are the library's; line *n* of the lease is signal 32 + *n*.
 - A client that goes with messages unanswered keeps its connection, out of the loop, until the driver has answered them all: its heap holds buffers the device may be using.
 - With `DRVF_CRASH` in hwdb's answer it faults on purpose before Bind: the kill test's give-up case.
+- `DRVF_AGAIN` in `d->info.hm_Flags` says a process of this unit ran before: the device is as the last one left it, after hwdb's stop method. display keeps the screen it finds then, rather than clearing it.
 
 **SEE ALSO**
 [Devices ch. 1](../devices/01-drivers.md)
@@ -194,8 +195,10 @@ For Start: creates `dev`'s port, named for its class and unit: "nvme.0", "sd.0",
 
 `drv_publish_as(d, dev, name)` is the same with the name as given, for a server there is one of: power publishes "power".
 
+A device may publish two ports (`DRV_PORTS`), each a class of its own: display publishes "con.0" and "display.0" on one device. Their clients' messages come to the same callbacks; the driver tells them apart by what they ask. hwdb is told the first.
+
 **RESULT**
-0, or what `CreatePort` gives.
+0, `ERR_FULL` past `DRV_PORTS`, or what `CreatePort` gives.
 
 **BUGS**
 None known.

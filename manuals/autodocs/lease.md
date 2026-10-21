@@ -124,7 +124,8 @@ The Area's handle (positive), or:
 **NOTES**
 - Its pages count in `li_DmaPages` while it lives.
 - `FreeArea` is the driver's word that the device has finished with the Area. The kernel can't check it, and frees the Area as usual once nobody maps it.
-- Quarantine is decided when the Area's last mapping goes. An Area the driver shared and didn't free is quarantined only if the lease isn't idle when the other process lets it go (`lease_dma_gone` in `kernel/lease.c`).
+- Quarantine is decided when the Area's last mapping goes.
+- **Shared with a client** (display's plane buffers, V5 step 3): if the grantee dies while another process still maps the Area, the Area is held for the device, as a client's buffer the driver mapped is. Its pages move from `li_DmaPages` to `li_QuarantinedPages`. The client keeps its mapping and may go on writing. `RevokeLease` says the device has stopped, and the Area becomes an ordinary one, freed when the client lets go (`area_hold_lent` in `kernel/area.c`).
 - The Area work is in `kernel/area.c` (`area_alloc_dma`).
 
 **BUGS**

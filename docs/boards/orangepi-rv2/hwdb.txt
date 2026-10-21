@@ -119,12 +119,12 @@
   mmio 0xc0a00000+0x10000
   irq 125 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/phy@c0b10000 (phy); /soc/usb2phy@0xc0a30000 (phy); /soc/usb3@0 (parent)
-/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci, bound 11
+/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci, bound 12
   mmio 0xd4280000+0x200
   irq 99 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc/pinctrl@d401e000 (pins); /soc/gpio@d4019000 (gpio); /soc (parent)
 /soc/sdh@d4280800 [ky,x1-sdhci]: disabled
-/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci, bound 12
+/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci, bound 13
   mmio 0xd4281000+0x200
   irq 101 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc (parent)
@@ -179,11 +179,11 @@
 /soc/fuse@f0702800 [ky,x1-efuse]: no driver
   mmio 0xf0702800+0x400
   needs /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc (parent)
-/soc/dpu@c0340000 [ky,dpu]: no driver
-  mmio 0xc0340000+0x2a000
+/soc/dpu@c0340000 [ky,dpu]: display, bound 11
   mmio 0xc0440000+0x2a000
+  irq 139 on /soc/interrupt-controller@e0000000
   dma below 0x80000000
-  needs /soc (parent)
+  needs /soc (parent); /soc/interrupt-controller@e0000000 (interrupts)
 /soc/mipi@d421a800 [ky,mipi-dsi]: disabled
 /soc/panel [ky,panel]: disabled
 /soc/hdmi@c0400500 [ky,hdmi]: no driver
@@ -204,4 +204,4 @@
   needs /soc/gpio@d4019000 (gpio)
 /gpio-leds [gpio-leds]: no driver
 hwdb: one power for 3 devices sharing 0xd4282000+0x1000: clock-controller@d4050000 reset-controller@d4050000 power-management@0
-hwdb: ky,x1: 20 disabled, 19 kernel, 4 firmware, 26 no driver, 12 bound, 0 broken
+hwdb: ky,x1: 20 disabled, 19 kernel, 4 firmware, 25 no driver, 13 bound, 0 broken

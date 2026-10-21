@@ -50,7 +50,7 @@ constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
 enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_POWER,
-                       T_STOP, T_END };
+                       T_DISPLAY, T_STOP, T_END };
 
 enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
 
@@ -746,6 +746,10 @@ static void step(void)
         break;
     case T_POWER:
         if (power_test())
+            phase = T_DISPLAY;
+        break;
+    case T_DISPLAY:
+        if (display_test())
             phase = T_STOP;
         break;
     case T_STOP:
@@ -769,6 +773,7 @@ uint64_t test_deadline(void)
     case T_RETRY:
     case T_DRAIN:
     case T_POWER:
+    case T_DISPLAY:
         return hwdb.now + 5 * MS;
     default:
         return 0;

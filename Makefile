@@ -73,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V5.2 done
+EXPECT := V5.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -125,7 +125,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -172,6 +172,7 @@ test-all:
 	@$(MAKE) --no-print-directory compare-hw
 	@$(MAKE) --no-print-directory hwdb-test
 	@$(MAKE) --no-print-directory power-test
+	@$(MAKE) --no-print-directory display-test
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.
@@ -222,7 +223,7 @@ HWDB_BUILD := build/hwdb
 ACPID_BUILD := build/acpid
 # The graph: what the server and the host share (not the server's loop).
 HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c servers/hwdb/server.c \
-	servers/hwdb/killtest.c servers/hwdb/acpid.c servers/hwdb/pci.c servers/hwdb/power.c,\
+	servers/hwdb/killtest.c servers/hwdb/acpid.c servers/hwdb/pci.c servers/hwdb/power.c servers/hwdb/display.c,\
 	$(wildcard servers/hwdb/*.c))
 HWDB_HOST := $(HWDB_BUILD)/hwdb-host
 HWDB_TEST := $(HWDB_BUILD)/hwdb-test
@@ -318,6 +319,23 @@ $(POWER_TEST): $(POWER_SRCS) drv/power/power.h include/planar/devices/power.h
 
 power-test: $(POWER_TEST)
 	@$(POWER_TEST)
+
+# display's core and backends (drv/display) on the host, with the
+# sanitizers: commits latched at the vblank, clipping, a client's going,
+# and each DPU backend against made-up registers as the firmware leaves
+# them, with hwdb's stop method; fb.c composing in memory.
+DISPLAY_BUILD := build/display
+DISPLAY_TEST := $(DISPLAY_BUILD)/display-test
+DISPLAY_SRCS := drv/display/core.c drv/display/komeda.c drv/display/saturn.c drv/display/fb.c \
+	drv/display/test.c
+
+$(DISPLAY_TEST): $(DISPLAY_SRCS) drv/display/display.h drv/display/komeda.h drv/display/saturn.h \
+		include/planar/devices/display.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Idrv/display) $(DISPLAY_SRCS) -o $@
+
+display-test: $(DISPLAY_TEST)
+	@$(DISPLAY_TEST)
 
 # The FAT32 code (servers/dos/fat.c) on the host, with the sanitizers:
 # on a disk tools/mkdisk.py makes, it reads what's there, writes and

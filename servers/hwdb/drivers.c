@@ -83,8 +83,11 @@ static const struct hw_match sdhci[] = {
     { nullptr, 0 },
 };
 
-/* Step 7: the framebuffer. */
+/* The framebuffer (V4 step 7), and the controllers display drives
+ * natively (V5 step 3), each with it (HW_Q_SCANOUT). */
 static const struct hw_match display[] = {
+    { "ky,dpu",                 HW_SPECIFIC },  /* the K1's saturn */
+    { "CIXH5010",               HW_SPECIFIC },  /* the CIX's Linlon-D60 */
     { "simple-framebuffer",     HW_GENERIC },
     { nullptr, 0 },
 };
