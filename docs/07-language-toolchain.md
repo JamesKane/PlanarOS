@@ -38,7 +38,8 @@ Source for the Odin rows: `OS/VectraOS-Odin/spikes/RESULTS.md`, `docs/adr/0001`,
 2. **The system ABI is a C ABI**, described once in `include/planar/`. Any other language binds to it later.
 3. **SIMD is expected in user code**: apps, servers and libraries. **The kernel is built without SIMD** and is kept small.
 4. **Namespacing in C.**
-   - Public libraries are reached through *interface tables*, in AmigaOS 4 style: `IExec->PutMsg()`. This gives namespacing without name mangling, per-interface versioning, and the jump table §1.6 wants.
+   - Public libraries are reached through *interface tables*: `IExec->PutMsg()`. This gives namespacing without name mangling, per-interface versioning, and the jump table §1.6 wants.
+   - Public library functions follow Commodore's RKM 3rd Edition (Kickstart V36–V40) `CamelCase` names ([§17](17-c-runtime-and-libraries.md)).
    - Kernel internals use `subsystem_verb` prefixes (`port_put`, `area_share`), as in Omega.
 5. **Vestra** stays a possible later language through the C ABI.
 
@@ -54,7 +55,8 @@ Source for the Odin rows: `OS/VectraOS-Odin/spikes/RESULTS.md`, `docs/adr/0001`,
   - `#embed` for firmware blobs and user images, replacing Omega's generated `user_images.S`
   - `_BitInt` for register fields, used sparingly
 - Distinct address types are single-member structs: `paddr_t`, `uaddr_t`.
-- Public types are `<stdint.h>` types. Omega's Amiga typedefs (`ULONG`, `APTR`) are a question: they carry 32-bit meanings that read oddly on a 64-bit little-endian system (**VQ18**).
+- Public types are `<stdint.h>` types, paired with Commodore RKM `CamelCase` function names (**VQ18**, decided; [§17](17-c-runtime-and-libraries.md)). Omega's 32-bit Amiga typedefs (`ULONG`, `APTR`) are not used.
+- Native Planar code uses `exec.library`, `utility.library`, and `dos.library` rather than a Unix `libc`; standard C library headers (`<stdlib.h>`, `<string.h>`, `<ctype.h>`, `<stdio.h>`, `<stdbit.h>`) live in opt-in `include/clib/` (`lib/clib`) for third-party C ports ([§17](17-c-runtime-and-libraries.md)).
 
 ## 7.4 SIMD policy
 

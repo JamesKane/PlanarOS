@@ -15,6 +15,8 @@ Each entry gives the question, where it came up, and the current leaning or deci
 | VQ7 | **ACPI and FDT are both native sources.** The kernel parses static tables only. A user-mode `hwdb` builds one device graph. ACPICA runs unmodified in an isolated user-mode `acpid`. The Q8B merges ACPI with its firmware DTB. Board quirks are kept as data. Details in [09-hardware-description.md](09-hardware-description.md). | 2026-10-19 |
 | VQ19 | **Board order: RV2, then CIX (Orange Pi 6 Plus), then RK3588, then Q8B.** The ACPI path gets proven on the second board. | 2026-10-19 |
 | VQ14 | **FAT32 is required** for the EFI system partition and firmware interchange. The **native filesystem is a modern design**: journaling or copy-on-write metadata, extents and checksums are candidates. Snapshots and encryption are out of scope. The specific design is still open (VQ14a). | 2026-10-19 |
+| VQ18 | **`<stdint.h>` types with canonical Commodore V36–V40 RKM `CamelCase` API names** across public libraries (`exec.library`, `utility.library`, `dos.library`). Struct interface tables (`IExec->`, `IUtility->`, `IDos->`) are adopted independently for C namespacing. Details in [17-c-runtime-and-libraries.md](17-c-runtime-and-libraries.md). | 2026-10-21 |
+| VQ43 | **No PDP-11 `libc` in native code; Commodore V36–V40 library split + opt-in `lib/clib`.** Native programs use `exec.library` (`CreatePool`/`AllocPooled`/`AllocVec`/`RawDoFmt`), `utility.library` (`TagItem`, `Hook`, `Stricmp`, `SNPrintf`, 64-bit `Span`/`Str` slices), and `dos.library` (`ReadArgs`, `FilePart`, `Printf`). Standard C headers live in opt-in `include/clib/` (`lib/clib`) for third-party C ports (`acpid`), and LLVM `compiler-rt` 128-bit integer builtins are vendored into `third_party/compiler-rt/`. Details in [17-c-runtime-and-libraries.md](17-c-runtime-and-libraries.md). | 2026-10-21 |
 
 ## Memory
 
@@ -85,11 +87,17 @@ Raised in §4.3.
 
 ## Language and build
 
-**VQ18 Public type names.**
+**VQ18 Public type and function names.**
 
-Use Omega's Amiga typedefs, or `<stdint.h>` names with CamelCase API functions? *Leaning:* `<stdint.h>`.
+**Decided (2026-10-21):** `<stdint.h>` fixed-width types with canonical Commodore V36–V40 RKM `CamelCase` API functions across all public libraries, plus struct interface tables (`IExec->`, `IUtility->`, `IDos->`) for C namespacing. See [17-c-runtime-and-libraries.md](17-c-runtime-and-libraries.md).
 
-Raised in §7.3.
+Raised in §7.3 and §17.1.
+
+**VQ43 C runtime and `libc` architecture.**
+
+**Decided (2026-10-21):** Native Planar code uses Commodore-lineage `exec.library`, `utility.library` (upgraded with 64-bit `Span`/`Str` slices and checked binary readers), and `dos.library` rather than a Unix/PDP-11 `libc`. Standard C headers (`<stdlib.h>`, `<string.h>`, `<ctype.h>`, `<stdio.h>`, `<stdbit.h>`) are strictly opt-in via `include/clib/` and `lib/clib` for third-party C code (`acpid`), and 128-bit integer builtins are vendored from LLVM `compiler-rt` into `third_party/compiler-rt/`. See [17-c-runtime-and-libraries.md](17-c-runtime-and-libraries.md).
+
+Raised in §17.
 
 **VQ13 Hardening features.**
 
