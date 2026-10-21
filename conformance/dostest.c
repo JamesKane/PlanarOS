@@ -134,7 +134,7 @@ int main(void)
     }
 
     /* A program from the disk. */
-    r = dos_run(&d, "C:hello", 0, SIG_CHILD, 0);
+    r = dos_run(&d, "C:hello", nullptr, SIG_CHILD, 0);
     check(r >= 0, "C:hello wouldn't load");
     if (r >= 0) {
         uint64_t since = CurrentTime();
@@ -146,7 +146,7 @@ int main(void)
         CloseHandle((Handle)r);
     }
     if (test_disk)
-        check(dos_run(&d, "SYS:EFI/planar/hello.txt", 0, SIG_CHILD, 0) == ERR_BADARG,
+        check(dos_run(&d, "SYS:EFI/planar/hello.txt", nullptr, SIG_CHILD, 0) == ERR_BADARG,
               "a text file was taken for a program");
 
     /* Writing, where it may. */

@@ -17,5 +17,6 @@ struct uart8250 {
 };
 
 void uart8250_putc(const struct uart8250 *u, char c);
+int uart8250_getc(const struct uart8250 *u);    /* a byte received, or -1 */
 
 #endif /* DRIVERS_UART8250_H */

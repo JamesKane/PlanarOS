@@ -90,7 +90,8 @@ static void fdt_ram(void)
  * the firmware or the OS keeps something in; free is conventional and
  * boot-services memory, now that boot services are gone. The rest of
  * RAM is reserved: the runtime services' (never called, but not ours),
- * ACPI's, and the loader's (the kernel, this map, the boot block).
+ * ACPI's, the loader's (the kernel, this map, the boot block), and a
+ * framebuffer's made of RAM.
  */
 static void efi_ram(const struct boot_info *bi)
 {
@@ -122,6 +123,14 @@ static void efi_ram(const struct boot_info *bi)
             add_merged(reserved, &nreserved, d->physical_start, size);
             break;
         default:
+            /* The GOP's framebuffer, when the firmware made it of RAM
+             * (QEMU's ramfb): RAM still, kept from the allocator, so the
+             * machine's RAM reads the same whether or not there's one. */
+            if (bi->fb.base && d->physical_start <= bi->fb.base &&
+                bi->fb.base + bi->fb.size <= d->physical_start + size) {
+                add_merged(ram, &nram, d->physical_start, size);
+                add_merged(reserved, &nreserved, d->physical_start, size);
+            }
             break;
         }
     }

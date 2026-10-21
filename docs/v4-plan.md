@@ -256,6 +256,14 @@ On the CIX every I/O takes its own interrupt even at depth 32, since the SSD com
 
 ## 7. A shell on the framebuffer
 
+**Progress (2026-10-20): the CIX boots to a shell on its screen.** Still to come: `power` (SCMI on the CIX, the K1 PMU on the RV2), and the RV2.
+- **The framebuffer.** `MapFirmware` gives hwdb the GOP's (1920×1080 on the CIX; QEMU's edk2 boots get one from `-device ramfb`). hwdb adds a `simple-framebuffer` node for it, and the kernel lets that one range of memory be leased. Firmware that makes it of RAM still reports the machine's RAM unchanged: the range counts as reserved.
+- **`display`** (`drv/display`) draws a text console in omega's 8×8 font (doubled on screens 1600 pixels or wider) and serves `con.0`. Each line also goes to the kernel's log, so the console is the screen and the serial line both (decision 1).
+- **Input** comes from the serial console. The device root's holder gives it to one process (`GrantConsole`, 44), which polls it (`ReadConsole`, 45). There's no receive interrupt yet.
+- **The Shell** (`cmd/shell.c`) is itself on the disk, in `C:`, with `List`, `Type`, `Echo` and `Info` (`cmd/`, built as ELF only and installed next to `planar.efi`). Built in: `CD`, `Help`, `EndShell`. A command's line reaches it in a page at the end of its own image, since under VQ3 that page keeps its address in the child.
+- **Booting to it.** `BOOTARGS=shell` skips the task tests and starts hwdb in its normal mode. hwdb starts the drivers, then `dos`, then the Shell, and restarts either if it ends. On a board run with `reboot`, `EndShell` ends the system and the board starts over. Seen on the CIX's screen (2026-10-20).
+- **Tested** in hwdb's test mode by `C:shell -s SYS:EFI/planar/S/test`, a script on the disk, on QEMU and the CIX. The kill test now waits up to 3 s for each client after the last kill: clearing a 1920×1080 screen through uncached memory makes the display's restart slow.
+
 - **`display`** leases the firmware's framebuffer: the GOP's on the CIX and on QEMU through edk2 (`-device ramfb`), and U-Boot's on the RV2. A text console draws on it, with omega's 8×8 font to start.
 - **A shell** in the Amiga style: commands from FAT, run as processes, with their output on the console.
 - **`power`** with the providers these boards need: the K1 PMU on the RV2 and native SCMI on the CIX (§9.4 Layer 3). Its first job is the kill test's check that a dead driver's votes go.

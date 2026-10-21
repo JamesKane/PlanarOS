@@ -14,5 +14,6 @@ struct pl011 {
 };
 
 void pl011_putc(const struct pl011 *u, char c);
+int pl011_getc(const struct pl011 *u);      /* a byte received, or -1 */
 
 #endif /* DRIVERS_PL011_H */

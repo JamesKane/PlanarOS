@@ -101,10 +101,6 @@ QEMU_DISK = -drive if=none,id=disk,file=$(DISK),format=raw,snapshot=on \
 	-drive if=none,id=sd,file=$(SDCARD),format=raw,snapshot=on \
 	-device sdhci-pci -device sd-card,drive=sd
 
-$(BUILD)/disk.img $(BUILD)/sd.img: tools/mkdisk.py $(BUILD)/user/hello.elf
-	@mkdir -p $(dir $@)
-	python3 -I tools/mkdisk.py $@ --file $(BUILD)/user/hello.elf:EFI/planar/C/hello
-
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
 .SECONDEXPANSION:
@@ -112,6 +108,18 @@ $(BUILD)/disk.img $(BUILD)/sd.img: tools/mkdisk.py $(BUILD)/user/hello.elf
 include mk/$(PLATFORM).mk
 
 CPPFLAGS += -Iarch/$(ARCH)/include
+
+# What a disk's EFI partition holds under EFI/planar (tools/mkdisk.py for
+# QEMU's, tools/efi-boot.py for a board's): the commands in C/, and the
+# scripts (cmd/scripts) in S/. C/hello is the built-in hello, for dostest.
+DISK_FILES = $(BUILD)/user/hello.elf:C/hello \
+	$(foreach p,$(CMD_PROGS),$(BUILD)/user/cmd/$(p).elf:C/$(p)) \
+	$(foreach f,$(wildcard cmd/scripts/*),$(f):S/$(notdir $(f)))
+DISK_DEPS = tools/mkdisk.py $(BUILD)/user/hello.elf $(CMD_ELFS) $(wildcard cmd/scripts/*)
+
+$(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
+	@mkdir -p $(dir $@)
+	python3 -I tools/mkdisk.py $@ $(foreach f,$(DISK_FILES),--file $(subst :,:EFI/planar/,$(f)))
 
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)

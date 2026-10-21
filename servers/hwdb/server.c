@@ -19,6 +19,7 @@
  * hwdb never waits for a driver (§11.6 D6): one task, one loop, every
  * message answered as it comes.
  */
+#include <planar/dos.h>
 #include <planar/syscalls.h>
 
 #include "server.h"
@@ -121,6 +122,36 @@ static void tables_mapped(const uint8_t *rsdp, const struct hw_table *t, unsigne
     }
 }
 
+/*
+ * The framebuffer UEFI's GOP left (MapFirmware): a node of its own, as a
+ * device tree's simple-framebuffer would be, its geometry in its
+ * registers' cells, for display (step 7). Neither description has it.
+ */
+static bool framebuffer(void)
+{
+    const struct FirmwareInfo *fi = &hwdb.fb;
+    struct hw_line l = { 0 };
+    struct hw_res *r;
+    hw_id n;
+
+    if (!fi->fi_FbBase || !fi->fi_FbSize)
+        return true;
+    hw_put(&l, "framebuffer@");
+    hw_put_hex(&l, fi->fi_FbBase);
+    if ((n = hw_node_new(&hwdb.g, 0, hw_strdup(&hwdb.g, l.text + 0, l.len))) == HW_NONE ||
+        !hw_key_add(&hwdb.g, n, "simple-framebuffer") || !(r = hw_res_add(&hwdb.g, n)))
+        return !hwdb.g.full;
+    r->kind = HW_MMIO;
+    r->base = fi->fi_FbBase;
+    r->size = fi->fi_FbSize;
+    r->ncells = 4;
+    r->cells[0] = fi->fi_FbWidth;
+    r->cells[1] = fi->fi_FbHeight;
+    r->cells[2] = fi->fi_FbStride;
+    r->cells[3] = fi->fi_FbFormat;
+    return true;
+}
+
 static bool build(void)
 {
     struct FirmwareInfo fi;
@@ -132,8 +163,10 @@ static bool build(void)
     hw_graph_init(&hwdb.g, &hwdb.arena, 4096);
     if (MapFirmware(hwdb.root, &fi) != 0)
         return false;
+    hwdb.fb = fi;
     if (fi.fi_Dtb)
-        return hw_from_fdt(&hwdb.g, (const void *)fi.fi_Dtb, (uint32_t)fi.fi_DtbSize);
+        return hw_from_fdt(&hwdb.g, (const void *)fi.fi_Dtb, (uint32_t)fi.fi_DtbSize) &&
+               framebuffer();
     if (fi.fi_Rsdp) {
         static struct hw_table t[TABLES];
         const uint8_t *rsdp = (const uint8_t *)fi.fi_Rsdp, *root;
@@ -169,7 +202,7 @@ static bool build(void)
             };
         }
         tables_mapped(rsdp, t, n);
-        return hw_from_acpi(&hwdb.g, t, n);
+        return hw_from_acpi(&hwdb.g, t, n) && framebuffer();
     }
     return false;
 }
@@ -618,6 +651,8 @@ static void bind_reply(struct unit *u, struct HwdbMsg *m)
             if ((r->kind == HW_MMIO || r->kind == HW_ECAM) && d->dd_Size == 0) {
                 d->dd_Base = r->base;
                 d->dd_Size = r->size;
+                for (unsigned k = 0; k < r->ncells && k < 4; k++)
+                    d->dd_Cells[k] = r->cells[k];
             }
             if (r->kind == HW_MSIX) {
                 d->dd_MsixTable = r->base;
@@ -833,11 +868,82 @@ void hwdb_facts(void)
     }
 }
 
+/* --- The system (not the test): dos, then the Shell, kept going. --- */
+
+static Handle sys_dos, sys_shell;
+static uint64_t sys_due;
+
+static void system_step(void)
+{
+    struct ProcessInfo pi;
+    struct dos d;
+    int64_t p;
+
+    if (hwdb.stopping) {
+        bool any = false;
+
+        for (uint32_t i = 0; i < hwdb.g.nleases; i++)
+            any |= hwdb.units[i].proc != 0;
+        hwdb.finished = !any;
+        return;
+    }
+    if (hwdb.test || hwdb_busy() || hwdb.now < sys_due)
+        return;
+    if (sys_dos && QueryProcess(sys_dos, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+        say("hwdb: dos ended: restarting it");
+        CloseHandle(sys_dos);
+        sys_dos = 0;
+    }
+    if (!sys_dos) {
+        if ((p = CreateProcess("dos", 0, SIG_DEAD, 0)) < 0) {
+            say("hwdb: dos couldn't be started");
+            sys_due = hwdb.now + 1000 * MS;
+            return;
+        }
+        sys_dos = (Handle)p;
+    }
+    if (sys_shell && QueryProcess(sys_shell, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+        CloseHandle(sys_shell);
+        sys_shell = 0;
+        if (hwdb.end) {             /* EndShell, on a board that goes back to its other system */
+            say("hwdb: the Shell ended: stopping");
+            CloseHandle(sys_dos);
+            sys_dos = 0;
+            hwdb.stopping = true;
+            for (uint32_t i = 0; i < hwdb.g.nleases; i++)
+                unit_kill(&hwdb.units[i]);
+            return;
+        }
+        sys_due = hwdb.now + 100 * MS;  /* a new Shell after one ends */
+        return;
+    }
+    if (sys_shell)
+        return;
+    /* The Shell from C:, with the console's input, once dos answers. */
+    if (dos_open(&d, SIG_DOS_CLIENT) != 0) {
+        sys_due = hwdb.now + 50 * MS;
+        return;
+    }
+    p = dos_run(&d, "C:shell", "", SIG_DEAD, PROCF_HELD);
+    dos_close(&d);
+    if (p < 0) {
+        say("hwdb: no C:shell to start");
+        sys_due = hwdb.now + 5000 * MS;
+        return;
+    }
+    if (GrantConsole(hwdb.root, (Handle)p) != 0 || StartProcess((Handle)p) != 0) {
+        CloseHandle((Handle)p);
+        sys_due = hwdb.now + 1000 * MS;
+        return;
+    }
+    sys_shell = (Handle)p;
+}
+
 /* --- The loop. --- */
 
 static uint64_t next_deadline(void)
 {
-    uint64_t next = hwdb.test ? test_deadline() : 0;
+    uint64_t next = hwdb.test ? test_deadline() : (!sys_shell || sys_due > hwdb.now ? hwdb.now + 50 * MS : 0);
 
     for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
         const struct unit *u = &hwdb.units[i];
@@ -868,6 +974,7 @@ int main(uint64_t arg, uint64_t root)
 
     hwdb.root = (Handle)root;
     hwdb.test = arg & HWDB_TEST;
+    hwdb.end = arg & HWDB_END;
     hwdb.now = CurrentTime();
     if (!build()) {
         say("hwdb: the firmware's description is unusable");
@@ -893,6 +1000,8 @@ int main(uint64_t arg, uint64_t root)
         pump();
         if (hwdb.test)
             test_step();
+        else
+            system_step();
         if (hwdb.finished)
             break;
         next = next_deadline();

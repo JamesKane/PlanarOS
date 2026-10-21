@@ -24,6 +24,9 @@ void console_describe(void);
 /* Write one byte, waiting for room. */
 void console_putc(char c);
 
+/* A byte typed at the console, or -1 if none is waiting (polled). */
+int console_getc(void);
+
 /* The console's registers (physical), or 0 if it has none. */
 uint64_t console_base(void);
 

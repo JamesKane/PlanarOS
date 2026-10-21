@@ -64,6 +64,12 @@ struct FirmwareInfo {
     uint64_t fi_Dtb;
     uint64_t fi_DtbSize;
     uint64_t fi_Rsdp;
+    /* The framebuffer UEFI's GOP left set up (step 7), or base 0. It's
+     * memory, but the one memory a lease may cover: exactly this. */
+    uint64_t fi_FbBase, fi_FbSize;
+    uint32_t fi_FbWidth, fi_FbHeight;
+    uint32_t fi_FbStride;           /* pixels a line */
+    uint32_t fi_FbFormat;           /* GOP's: 0 RGBX, 1 BGRX (8 bits each) */
 };
 
 int64_t MapFirmware(Handle root, struct FirmwareInfo *info);
@@ -82,6 +88,15 @@ int64_t GrantFirmware(Handle root, Handle process);
  * interrupt controller has no MSIs at all (a PLIC), ERR_FULL if it can't
  * give these (no ITS in use, or none left).
  */
+/*
+ * The serial console's input (step 7): the root's holder gives it to one
+ * process (0: itself), which then reads what's been typed, up to 64 bytes
+ * a call, without waiting: the bytes read, 0 if none, or ERR_RIGHTS if it
+ * wasn't given the console. Polled; the kernel keeps writing its log.
+ */
+int64_t GrantConsole(Handle root, Handle process);
+int64_t ReadConsole(char *buf, uint32_t len);
+
 struct MsiInfo {
     uint64_t mi_Doorbell;           /* where the device writes an event's number */
     uint32_t mi_First;              /* the source event 0 raises; then 1, ... */

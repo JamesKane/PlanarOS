@@ -1293,8 +1293,42 @@ static void test_class_costs(void)
     }
 }
 
+/*
+ * BOOTARGS=shell: no task tests, but the system (step 7): hwdb in its
+ * normal mode, which starts the drivers, dos and the Shell, and keeps
+ * them going. This task waits on it.
+ */
+static void run_system(void)
+{
+    constexpr uint64_t DEAD = 1ULL << 17;     /* SIGF_DEAD, below */
+    struct process *p;
+
+    task_set_signal(0, DEAD);
+    kprintf("planar: starting the system\n");
+    /* With "reboot", the Shell's EndShell ends the system and the board
+     * starts again (hwdb's HWDB_END). */
+    if (!(p = process_create_root("hwdb", 5, bootargs_has("reboot") ? 2 : 0, task_self(), DEAD))) {
+        kprintf("planar: hwdb couldn't be started\n");
+        return;
+    }
+    while (!atomic_load(&p->dead))
+        task_wait(DEAD);
+    kprintf("planar: hwdb ended (exit %lld, fault %d)\n", (long long)p->exit_code, p->fault);
+    if (bootargs_has("reboot")) {
+        task_sleep_until(time_now() + time_us(200000));
+        kprintf("planar: rebooting\n");
+        task_sleep_until(time_now() + time_us(50000));
+        plat_reboot();
+        arch_reboot();
+    }
+}
+
 void selftest_tasks(void *)
 {
+    if (bootargs_has("shell")) {
+        run_system();
+        return;
+    }
     tester = task_self();
     test_spawn();
     test_signals();

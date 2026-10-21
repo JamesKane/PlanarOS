@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <planar/dos.h>
+#include <planar/drv.h>
 #include <planar/syscalls.h>
 
 void *memset(void *dst, int c, size_t n);
@@ -202,8 +203,9 @@ static uint64_t le(const uint8_t *p, unsigned n)
     return v;
 }
 
-int64_t dos_run(struct dos *d, const char *path, uint64_t arg, int64_t sigbit, uint32_t flags)
+int64_t dos_run(struct dos *d, const char *path, const char *args, int64_t sigbit, uint32_t flags)
 {
+    uint64_t arg = 0;
     uint8_t eh[64], ph[16 * 56];
     struct ProcessImage pi = { 0 };
     struct DosEntry de;
@@ -248,9 +250,19 @@ int64_t dos_run(struct dos *d, const char *path, uint64_t arg, int64_t sigbit, u
         etext = total;
     if (total == 0 || etext % PAGE || entry >= etext)
         goto out;
-    if ((area = AllocArea(total, AREAF_EXEC, (void **)&image)) < 0) {
+    if ((area = AllocArea(total + PAGE, AREAF_EXEC, (void **)&image)) < 0) {
         e = area;
         goto out;
+    }
+    /* The command line, in the page past the image. */
+    if (args) {
+        char *line = (char *)image + total;
+        unsigned i = 0;
+
+        for (; args[i] && i < DOS_ARGS - 1; i++)
+            line[i] = args[i];
+        line[i] = '\0';
+        arg = (uint64_t)line;
     }
     for (unsigned i = 0; i < phnum; i++) {
         const uint8_t *p = ph + 56 * i;
@@ -279,4 +291,127 @@ int64_t dos_run(struct dos *d, const char *path, uint64_t arg, int64_t sigbit, u
 out:
     dos_close_file(d, (uint32_t)f);
     return e;
+}
+
+void dos_args(uint64_t arg, char *cwd, unsigned cwd_size, const char **args)
+{
+    const char *line = arg ? (const char *)arg : "";
+    unsigned n = 0;
+
+    *args = line;
+    cwd[0] = '\0';
+    for (const char *p = line; *p; p++)
+        if (*p == '\n') {
+            for (const char *q = line; q < p && n < cwd_size - 1; q++)
+                cwd[n++] = *q;
+            cwd[n] = '\0';
+            *args = p + 1;
+            break;
+        }
+    if (!cwd[0] && cwd_size > 4) {
+        cwd[0] = 'S', cwd[1] = 'Y', cwd[2] = 'S', cwd[3] = ':', cwd[4] = '\0';
+    }
+}
+
+void dos_path(const char *cwd, const char *name, char *out, unsigned size)
+{
+    unsigned n = 0;
+    bool volume = false;
+
+    for (const char *p = name; *p; p++)
+        volume |= *p == ':';
+    if (!volume) {
+        for (; *cwd && n < size - 1; cwd++)
+            out[n++] = *cwd;
+        if (n && out[n - 1] != ':' && out[n - 1] != '/' && n < size - 1 && *name)
+            out[n++] = '/';
+    }
+    for (; *name && n < size - 1; name++)
+        out[n++] = *name;
+    out[n] = '\0';
+}
+
+/* --- The console. --- */
+
+void con_open(struct con *c, int64_t sigbit)
+{
+    memset(c, 0, sizeof *c);
+    if (ConnectPort(&c->mp, "con.0", sigbit, 4, 2 * sizeof(struct DrvRequest)) != 0)
+        return;
+    if (!(c->m = AllocMsg(&c->mp, sizeof(struct DrvRequest)))) {
+        ClosePort(&c->mp);
+        return;
+    }
+    c->open = true;
+}
+
+void con_close(struct con *c)
+{
+    if (c->nline) {
+        c->line[c->nline] = '\0';
+        KLog(c->line);
+        c->nline = 0;
+    }
+    if (c->open)
+        ClosePort(&c->mp);
+    c->open = false;
+}
+
+void con_write(struct con *c, const char *text, uint32_t len)
+{
+    while (len) {
+        struct DrvRequest *r = c->m;
+        uint32_t n = len < sizeof r->dr_Data ? len : sizeof r->dr_Data;
+
+        if (c->open) {
+            memset(r, 0, sizeof *r);
+            r->dr_Msg.mn_Length = sizeof *r;
+            r->dr_Op = DRV_WRITE;
+            r->dr_Len = n;
+            memcpy(r->dr_Data, text, n);
+            if (DoMsg(&c->mp, &r->dr_Msg) == 0 && r->dr_Msg.mn_Error == 0) {
+                text += n;
+                len -= n;
+                continue;
+            }
+            /* The console went (display restarting): to the log from here. */
+            ClosePort(&c->mp);
+            c->open = false;
+        }
+        for (uint32_t i = 0; i < n; i++) {
+            if (text[i] == '\n' || c->nline == sizeof c->line - 1) {
+                c->line[c->nline] = '\0';
+                KLog(c->line);
+                c->nline = 0;
+                if (text[i] == '\n')
+                    continue;
+            }
+            c->line[c->nline++] = text[i];
+        }
+        text += n;
+        len -= n;
+    }
+}
+
+void con_puts(struct con *c, const char *text)
+{
+    uint32_t n = 0;
+
+    while (text[n])
+        n++;
+    con_write(c, text, n);
+}
+
+void con_dec(struct con *c, uint64_t v)
+{
+    char d[24];
+    unsigned n = 0, k = 0;
+    char out[24];
+
+    do
+        d[n++] = (char)('0' + v % 10);
+    while ((v /= 10) && n < sizeof d);
+    while (n)
+        out[k++] = d[--n];
+    con_write(c, out, k);
 }

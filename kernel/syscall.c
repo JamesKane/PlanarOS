@@ -274,6 +274,10 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
 
         return arch_copy_to_user(a[0], &si, sizeof si) ? 0 : ERR_BADADDR;
     }
+    case SYS_GRANT_CONSOLE:
+        return lease_console_grant_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_READ_CONSOLE:
+        return lease_console_read_call(a[0], (uint32_t)a[1]);
     case SYS_ALLOC_MSI:
         return lease_msi_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2], a[3]);
     default:

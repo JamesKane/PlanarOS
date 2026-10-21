@@ -58,6 +58,9 @@ struct DrvDevice {
     uint64_t dd_MsixTable;
     uint32_t dd_NLines;
     uint32_t dd_Pad;
+    /* Its registers' cells, when the description gives them more than an
+     * address: a framebuffer's width, height, pixels a line and format. */
+    uint32_t dd_Cells[4];
 };
 
 /* --- PCI (drv/pci): the host bridge, and the functions found behind it. --- */
@@ -124,6 +127,7 @@ struct HwdbMsg {
 
 enum : uint32_t {
     DRV_READ = 1,                   /* the device's value: the time, random bytes */
+    DRV_WRITE = 2,                  /* dr_Len bytes of dr_Data to it: text, to a console */
 };
 
 struct DrvRequest {

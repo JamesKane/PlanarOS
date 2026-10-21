@@ -26,6 +26,7 @@ constexpr uint64_t MS = 1000000;
 
 /* The argument's bits, from the kernel. */
 constexpr uint64_t HWDB_TEST = 1u << 0;     /* run the kill test, then exit */
+constexpr uint64_t HWDB_END = 1u << 1;      /* not the test: end when the Shell does */
 
 enum unit_state : uint8_t {
     U_WAITING,          /* not all its devices ready */
@@ -59,8 +60,9 @@ struct hwdb {
     Handle root, port;
     struct unit *units;         /* one per g.leases */
     uint64_t rsdp;              /* ACPI's, else 0: acpid runs */
+    struct FirmwareInfo fb;     /* MapFirmware's: the GOP framebuffer, if any */
     uint64_t now;
-    bool test, stopping, finished;
+    bool test, end, stopping, finished;
     unsigned errors;            /* teardown checks that failed */
     uint64_t quarantined;       /* DMA pages dead drivers left, all told */
 };
@@ -81,6 +83,7 @@ void check_failed(const struct unit *u, const char *what);
 /* --- acpid (acpid.c). --- */
 
 constexpr int64_t SIG_DEAD = 18;            /* a unit's process died, or acpid */
+constexpr int64_t SIG_DOS_CLIENT = 25;      /* hwdb's own connection to dos, for the Shell */
 constexpr int64_t SIG_ACPI_PORT = 24;       /* acpid at "hwdb.acpi" */
 constexpr uint32_t CONN_ACPID = UINT32_MAX - 1;     /* conn_unit's mark for its connection */
 constexpr unsigned ACPID_REGIONS = 64;

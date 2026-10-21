@@ -91,7 +91,7 @@ $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/
 define user_dir_prog
 $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$$(wildcard $(2)/*.c))) \
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA)) \
-	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK))
+	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) $(if $(filter servers/hwdb,$(2)),$(USER_DOS))
 $(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) arch/$(ARCH)/user/user.ld
 	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) -o $$@
 -include $$(patsubst %.o,%.d,$$(filter %.o,$$($(1)_OBJS)))
@@ -106,6 +106,21 @@ $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 -include $(USER_RT:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
+
+# Commands (cmd/NAME.c): programs that live on storage, in C: (step 6),
+# not in the image. Each links dos.library, and the build or the board's
+# loader puts its .elf on the disk.
+CMD_PROGS := $(basename $(notdir $(wildcard cmd/*.c)))
+CMD_ELFS  := $(patsubst %,$(BUILD)/user/cmd/%.elf,$(CMD_PROGS))
+
+$(BUILD)/user/cmd/%.o: cmd/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/user/cmd/%.elf: $(BUILD)/user/cmd/%.o $(USER_RT) $(USER_DOS) arch/$(ARCH)/user/user.ld
+	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(USER_DOS) -o $@
+
+-include $(patsubst %,$(BUILD)/user/cmd/%.d,$(CMD_PROGS))
 
 $(BUILD)/user_images.S: $(USER_BINS) mk/user.mk
 	@{ echo '    .section .rodata'; \

@@ -95,7 +95,40 @@ int64_t dos_volume(struct dos *d, uint32_t index, struct DosEntry *entry);
  * relocates itself. dos_run loads it into a new Area and starts it with
  * CreateProcessImage: a process handle, or an error (ERR_BADARG: not a
  * program this machine runs).
+ *
+ * Its command line, 'args' (up to DOS_ARGS bytes), goes in a page on the
+ * end of that Area, and its argument is the line's address: the Area
+ * keeps its address in the child (VQ3), so the child reads it there.
  */
-int64_t dos_run(struct dos *d, const char *path, uint64_t arg, int64_t sigbit, uint32_t flags);
+constexpr unsigned DOS_ARGS = 1024;
+
+/*
+ * A command's line from the shell is its current directory, a newline,
+ * then its arguments. dos_args splits what dos_run passed (0 is "") into
+ * the two; dos_path makes 'name' a whole path from 'cwd' unless it names
+ * its volume ("SYS:x" is as it is; "x" in "SYS:EFI" is "SYS:EFI/x").
+ */
+void dos_args(uint64_t arg, char *cwd, unsigned cwd_size, const char **args);
+void dos_path(const char *cwd, const char *name, char *out, unsigned size);
+int64_t dos_run(struct dos *d, const char *path, const char *args, int64_t sigbit, uint32_t flags);
+
+/*
+ * The console (a program's Output(), the Amiga's CON:): text to display's
+ * "con.0", which draws it and logs it, and so to the serial console. Where
+ * there's no framebuffer, a line at a time to the kernel's log.
+ */
+struct con {
+    struct MsgPort mp;
+    void *m;                        /* a DrvRequest */
+    bool open;
+    char line[160];                 /* the log's, without a console */
+    unsigned nline;
+};
+
+void con_open(struct con *c, int64_t sigbit);
+void con_close(struct con *c);
+void con_write(struct con *c, const char *text, uint32_t len);
+void con_puts(struct con *c, const char *text);
+void con_dec(struct con *c, uint64_t v);
 
 #endif /* PLANAR_DOS_H */

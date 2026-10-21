@@ -165,6 +165,18 @@ void console_putc(char c)
     }
 }
 
+int console_getc(void)
+{
+    switch (kind) {
+    case CONSOLE_8250:
+        return uart8250_getc(&u8250);
+    case CONSOLE_PL011:
+        return pl011_getc(&pl011);
+    default:
+        return -1;
+    }
+}
+
 uint64_t console_base(void)
 {
     return console_pa;

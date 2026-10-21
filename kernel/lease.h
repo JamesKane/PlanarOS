@@ -65,6 +65,8 @@ uint64_t lease_ack_wait_call(uint32_t lease, uint32_t line, uint64_t mask);
 int64_t lease_dma_call(uint32_t lease, uint64_t size, uint32_t flags, uint64_t addr_out);
 int64_t lease_firmware_call(uint32_t root, uint64_t info_out);
 int64_t lease_firmware_grant_call(uint32_t root, uint32_t process);
+int64_t lease_console_grant_call(uint32_t root, uint32_t process);
+int64_t lease_console_read_call(uint64_t buf, uint32_t len);
 int64_t lease_msi_call(uint32_t root, uint32_t device, uint32_t count, uint64_t info_out);
 
 #endif /* KERNEL_LEASE_H */

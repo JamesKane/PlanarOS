@@ -110,6 +110,8 @@ def main() -> int:
     ap.add_argument("--bootargs", default="")
     ap.add_argument("--file", action="append", default=[],
                     help="SRC:DST, installed as EFI/planar/DST")
+    ap.add_argument("--type", action="append", default=[],
+                    help="a line to type at the Shell once it says it's there")
     ap.add_argument("--log", default="build/efi-boot.log")
     ap.add_argument("--quiet", type=float, default=180.0,
                     help="give up after this many seconds without output")
@@ -131,7 +133,14 @@ def main() -> int:
     last = time.monotonic()
     started = False             # the stub's first line: past the old system
     rebooting = None            # when the kernel said it was rebooting
+    typing = list(args.type)    # lines for the Shell, once it's there
     while time.monotonic() - last < args.quiet:
+        # A line once the Shell's there and quiet (its prompt reaches the
+        # serial line only with the line after it).
+        if typing and b"Shell. Type Help" in out and time.monotonic() - last > 1.5:
+            for ch in typing.pop(0).encode() + b"\r":
+                os.write(fd, bytes([ch]))
+                time.sleep(0.02)
         chunk = os.read(fd, 4096)
         if chunk:
             last = time.monotonic()

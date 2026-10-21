@@ -1,0 +1,7 @@
+; The Shell's test (hwdb's test mode runs it: Shell -s SYS:EFI/planar/S/test)
+Info
+List SYS:EFI/planar/C
+CD SYS:EFI/planar
+Echo The current directory is now SYS:EFI/planar
+Type S/greeting
+Echo Every line of SYS:EFI/planar/S/test ran.

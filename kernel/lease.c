@@ -25,6 +25,8 @@
 #include "acpi.h"
 #include "arch.h"
 #include "area.h"
+#include "bootinfo.h"
+#include "console.h"
 #include "devmem.h"
 #include "fdt.h"
 #include "handle.h"
@@ -80,6 +82,8 @@ static struct lease *leases;
 static atomic_uint live;
 static atomic_uint_fast64_t quarantined_total;
 static char root;                   /* the device root's object */
+static spinlock_t console_lock;     /* below: whose the console's input is */
+static struct process *console_reader;
 
 unsigned lease_count(void)
 {
@@ -178,6 +182,12 @@ void lease_process_dying(struct process *p)
  */
 void lease_process_died(struct process *p)
 {
+    unsigned long cw = spin_lock_irqsave(&console_lock);
+
+    if (console_reader == p)
+        console_reader = nullptr;
+    spin_unlock_irqrestore(&console_lock, cw);
+
     uint32_t detach[DETACH];
     unsigned n;
 
@@ -337,6 +347,19 @@ static bool overlaps_memory(uint64_t base, uint64_t size)
     return false;
 }
 
+/* The GOP's framebuffer, exactly, page-rounded: memory a display may lease. */
+static bool is_framebuffer(uint64_t base, uint64_t size)
+{
+    const struct boot_info *bi = bootinfo();
+    uint64_t lo, hi;
+
+    if (!bi || !bi->fb.base || !bi->fb.size)
+        return false;
+    lo = bi->fb.base & ~(PAGE_SIZE - 1);
+    hi = (bi->fb.base + bi->fb.size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    return base == lo && base + size == hi;
+}
+
 int64_t lease_create_call(uint32_t root_h, uint64_t base, uint64_t size, uint64_t irqs,
                           uint32_t nirqs)
 {
@@ -360,7 +383,7 @@ int64_t lease_create_call(uint32_t root_h, uint64_t base, uint64_t size, uint64_
             if (src[j] == src[i])
                 return ERR_BADARG;
     }
-    if (overlaps_memory(base, size) || devmem_kernel(base, size))
+    if ((overlaps_memory(base, size) && !is_framebuffer(base, size)) || devmem_kernel(base, size))
         return ERR_RIGHTS;
     if (!(l = kmalloc(sizeof *l)))
         return ERR_NOMEM;
@@ -685,6 +708,14 @@ static int64_t map_firmware(struct process *p, struct FirmwareInfo *fi)
     uint64_t pa, len;
 
     *fi = (struct FirmwareInfo){ 0 };
+    if (bootinfo() && bootinfo()->fb.base && (bootinfo()->fb.format == 0 || bootinfo()->fb.format == 1)) {
+        fi->fi_FbBase = bootinfo()->fb.base;
+        fi->fi_FbSize = bootinfo()->fb.size;
+        fi->fi_FbWidth = bootinfo()->fb.width;
+        fi->fi_FbHeight = bootinfo()->fb.height;
+        fi->fi_FbStride = bootinfo()->fb.stride;
+        fi->fi_FbFormat = bootinfo()->fb.format;
+    }
     if (fdt_blob()) {
         fi->fi_Dtb = virt_to_phys(fdt_blob());
         fi->fi_DtbSize = fdt_size();
@@ -716,6 +747,47 @@ int64_t lease_firmware_call(uint32_t root_h, uint64_t info_out)
     if ((err = map_firmware(p, &fi)))
         return err;
     return arch_copy_to_user(info_out, &fi, sizeof fi) ? 0 : ERR_BADADDR;
+}
+
+/*
+ * The console's input (step 7, decision 1): the root's holder gives it to
+ * one process at a time, a child of its own or itself, which reads what
+ * was typed by polling (there's no receive interrupt yet). The grant goes
+ * when that process dies.
+ */
+int64_t lease_console_grant_call(uint32_t root_h, uint32_t process)
+{
+    struct process *p = task_self()->process, *child = process ? process_child(process) : p;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, p) || !child)
+        return ERR_BADHANDLE;
+    unsigned long was = spin_lock_irqsave(&console_lock);
+    console_reader = child;         /* compared, never followed: lease_process_died clears it */
+    spin_unlock_irqrestore(&console_lock, was);
+    if (child != p)
+        process_put(child);
+    return 0;
+}
+
+int64_t lease_console_read_call(uint64_t buf, uint32_t len)
+{
+    char got[64];
+    uint32_t n = 0;
+    int c;
+
+    if (len > sizeof got)
+        len = sizeof got;
+    unsigned long was = spin_lock_irqsave(&console_lock);
+    if (console_reader != task_self()->process) {
+        spin_unlock_irqrestore(&console_lock, was);
+        return ERR_RIGHTS;
+    }
+    while (n < len && (c = console_getc()) >= 0)
+        got[n++] = (char)c;
+    spin_unlock_irqrestore(&console_lock, was);
+    if (n && !arch_copy_to_user(buf, got, n))
+        return ERR_BADADDR;
+    return n;
 }
 
 /* The same, into a process the root's holder made: acpid (step 4). */

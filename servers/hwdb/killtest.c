@@ -6,8 +6,10 @@
  *
  * 0. Measures each block device with blkbench (conformance/blkbench.c),
  *    one at a time, while nothing else runs. Then starts dos, the file
- *    server, and runs dostest against it; dos stays through the kills,
- *    its devices restarting under it, and is stopped at the end.
+ *    server, and runs dostest against it, then the Shell from the disk
+ *    on a script there (C:shell -s SYS:EFI/planar/S/test), which must end
+ *    0; dos stays through the kills, its devices restarting under it,
+ *    and is stopped at the end.
  * 1. Starts a client task per class port the drivers published. Each
  *    reads its device over and over, and when its connection dies with
  *    ERR_PORT_DIED, reconnects, as a class library would (§11.9). A
@@ -34,6 +36,7 @@
 #include <stddef.h>
 
 #include <planar/blk.h>
+#include <planar/dos.h>
 #include <planar/syscalls.h>
 
 #include "server.h"
@@ -46,9 +49,9 @@ constexpr uint64_t Y2020 = 1577836800;
 constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
-enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
+enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_STOP, T_END };
 
-enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK };
+enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
 
 struct client {
     char port[16];
@@ -96,6 +99,8 @@ static bool plausible(const struct client *c, const struct DrvRequest *r)
     uint64_t v = 0;
     unsigned nonzero = 0;
 
+    if (c->kind == K_CON)
+        return r->dr_Len == 0;
     if (c->kind == K_RTC) {
         if (r->dr_Len != 8)
             return false;
@@ -241,8 +246,8 @@ static void client(uint64_t arg)
         }
         memset(m, 0, sizeof *m);
         m->dr_Msg.mn_Length = sizeof *m;
-        m->dr_Op = DRV_READ;
-        m->dr_Len = c->kind == K_RTC ? 8 : 32;
+        m->dr_Op = c->kind == K_CON ? DRV_WRITE : DRV_READ;   /* a console's: nothing, written */
+        m->dr_Len = c->kind == K_RTC ? 8 : c->kind == K_CON ? 0 : 32;
         e = DoMsg(&mp, &m->dr_Msg);
         if (e == ERR_PORT_DIED || m->dr_Msg.mn_Error == ERR_PORT_DIED) {
             c->deaths++;
@@ -309,6 +314,7 @@ static void settle(void)
                 c->port[q] = u->ports[k][q];
             c->kind = hw_strneq(u->ports[k], "rtc.", 4)                                  ? K_RTC
                       : hw_strneq(u->ports[k], "nvme.", 5) || hw_strneq(u->ports[k], "sd.", 3) ? K_BLOCK
+                      : hw_strneq(u->ports[k], "con.", 4)                                  ? K_CON
                                                                                                : K_RNG;
             c->unit = u;
             nclients++;
@@ -411,6 +417,43 @@ static void dos_step(void)
     }
     if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
         fail("dostest failed");
+    CloseHandle(bench);
+    bench = 0;
+    phase = T_SHELL;
+}
+
+/* The Shell, loaded from the disk, on its test script. */
+static void shell_step(void)
+{
+    static struct dos d;
+    struct ProcessInfo pi;
+
+    if (!bench) {
+        int64_t p;
+
+        if (dos_open(&d, SIG_SLEEP + 1) != 0 ||
+            (p = dos_run(&d, "C:shell", "-s SYS:EFI/planar/S/test", SIG_DEAD, 0)) < 0) {
+            fail("the Shell couldn't be loaded");
+            dos_close(&d);
+            start_clients();
+            return;
+        }
+        dos_close(&d);
+        bench = (Handle)p;
+        phase_at = hwdb.now;
+        return;
+    }
+    if (QueryProcess(bench, &pi) != 0 || pi.pi_State < PROCS_EXITED) {
+        if (hwdb.now - phase_at < 15000 * MS)
+            return;
+        fail("the Shell's script didn't finish");
+        KillProcess(bench);
+        return;
+    }
+    if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+        fail("a line of the Shell's script failed");
+    else
+        say("hwdb: kill test: the Shell ran its script from the disk");
     CloseHandle(bench);
     bench = 0;
     start_clients();
@@ -524,6 +567,12 @@ static void drain(void)
     }
     if (hwdb.now < phase_at + 50 * MS)
         return;                     /* time for its client to come back */
+    /* A restart may take a while (a big screen cleared): each client is
+     * given as long as any restart may take to come back from its last. */
+    for (unsigned i = 0; i < nclients; i++)
+        if (!clients[i].stop && clients[i].recovered != clients[i].deaths &&
+            hwdb.now < phase_at + 3000 * MS)
+            return;
     for (unsigned i = 0; i < nclients; i++)
         clients[i].stop = true;
     for (unsigned i = 0; i < nclients; i++)
@@ -640,6 +689,9 @@ static void step(void)
     case T_DOS:
         dos_step();
         break;
+    case T_SHELL:
+        shell_step();
+        break;
     case T_ROUNDS:
         kill_rounds();
         break;
@@ -667,6 +719,7 @@ uint64_t test_deadline(void)
         return wake > hwdb.now ? wake : hwdb.now + 1 * MS;
     case T_BENCH:
     case T_DOS:
+    case T_SHELL:
     case T_RETRY:
     case T_DRAIN:
         return hwdb.now + 5 * MS;

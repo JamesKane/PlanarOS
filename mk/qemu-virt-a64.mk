@@ -34,7 +34,7 @@ HOW := kernel
 ifeq ($(EFI),1)
 EDK2 ?= $(abspath $(dir $(shell command -v $(QEMU)))/../share/qemu/edk2-aarch64-code.fd)
 QEMU_MACHINE := $(QEMU_MACHINE),acpi=$(if $(filter acpi,$(HW)),on,off)
-QEMU_FIRMWARE := -bios $(EDK2) -nic none
+QEMU_FIRMWARE := -bios $(EDK2) -nic none -device ramfb
 HOW := efi-$(HW)
 EFI_CHECK := --forbid '^V3.1 boot ok: from a device tree' \
 	--forbid '^V3.1 boot ok: .*arguments "(?!qemu)'
