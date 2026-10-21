@@ -350,13 +350,13 @@ static bool overlaps_memory(uint64_t base, uint64_t size)
 /* The GOP's framebuffer, exactly, page-rounded: memory a display may lease. */
 static bool is_framebuffer(uint64_t base, uint64_t size)
 {
-    const struct boot_info *bi = bootinfo();
+    const struct boot_fb *fb = boot_fb();
     uint64_t lo, hi;
 
-    if (!bi || !bi->fb.base || !bi->fb.size)
+    if (!fb || !fb->size)
         return false;
-    lo = bi->fb.base & ~(PAGE_SIZE - 1);
-    hi = (bi->fb.base + bi->fb.size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    lo = fb->base & ~(PAGE_SIZE - 1);
+    hi = (fb->base + fb->size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     return base == lo && base + size == hi;
 }
 
@@ -710,13 +710,13 @@ static int64_t map_firmware(struct process *p, struct FirmwareInfo *fi)
     uint64_t pa, len;
 
     *fi = (struct FirmwareInfo){ 0 };
-    if (bootinfo() && bootinfo()->fb.base && (bootinfo()->fb.format == 0 || bootinfo()->fb.format == 1)) {
-        fi->fi_FbBase = bootinfo()->fb.base;
-        fi->fi_FbSize = bootinfo()->fb.size;
-        fi->fi_FbWidth = bootinfo()->fb.width;
-        fi->fi_FbHeight = bootinfo()->fb.height;
-        fi->fi_FbStride = bootinfo()->fb.stride;
-        fi->fi_FbFormat = bootinfo()->fb.format;
+    if (boot_fb() && (boot_fb()->format == 0 || boot_fb()->format == 1)) {
+        fi->fi_FbBase = boot_fb()->base;
+        fi->fi_FbSize = boot_fb()->size;
+        fi->fi_FbWidth = boot_fb()->width;
+        fi->fi_FbHeight = boot_fb()->height;
+        fi->fi_FbStride = boot_fb()->stride;
+        fi->fi_FbFormat = boot_fb()->format;
     }
     if (fdt_blob()) {
         fi->fi_Dtb = virt_to_phys(fdt_blob());

@@ -81,8 +81,8 @@ void hw_report(void)
     kprintf("hw: timer irq %u\n", arch_timer_irq());
     console_describe();
     /* Not a fact: QEMU's -kernel boot has none, its EFI boots ramfb's. */
-    if (bootinfo() && bootinfo()->fb.base)
+    if (boot_fb())
         kprintf("planar: framebuffer %ux%u at %p, %u pixels a line, GOP format %u\n",
-                bootinfo()->fb.width, bootinfo()->fb.height, (void *)bootinfo()->fb.base,
-                bootinfo()->fb.stride, bootinfo()->fb.format);
+                boot_fb()->width, boot_fb()->height, (void *)boot_fb()->base, boot_fb()->stride,
+                boot_fb()->format);
 }

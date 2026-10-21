@@ -324,6 +324,28 @@ int64_t blk_partition(struct blk *b, unsigned index)
     return 0;
 }
 
+/* No GPT: an MBR's primary partitions, 1 to 4, as SD cards often have.
+ * A protective MBR (type EE) without its GPT is no table at all. */
+static int64_t mbr_range(struct blk *b, uint8_t *blk, unsigned index, uint64_t *first,
+                         uint64_t *count)
+{
+    const uint8_t *e;
+    int64_t err;
+
+    if (index > 4 || (err = blk_read(b, 0, 1, blk)) != 0)
+        return index > 4 ? ERR_NOTFOUND : err;
+    if (blk[510] != 0x55 || blk[511] != 0xaa)
+        return ERR_NOTFOUND;
+    e = blk + 446 + 16 * (index - 1);
+    if (e[4] == 0 || e[4] == 0xee || le(e + 12, 4) == 0)
+        return ERR_NOTFOUND;
+    *first = le(e + 8, 4);
+    *count = le(e + 12, 4);
+    if (*first == 0 || *first >= b->dev_blocks || *count > b->dev_blocks - *first)
+        return ERR_BADARG;
+    return 0;
+}
+
 int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first_out, uint64_t *count)
 {
     uint8_t *blk = b->scratch;          /* one block at a time, the connection's own */
@@ -342,8 +364,10 @@ int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first_out, 
         goto out;
     e = ERR_NOTFOUND;
     hsize = (uint32_t)le(blk + 12, 4);
-    if (le(blk, 8) != 0x5452415020494645ULL || hsize < 92 || hsize > bs)
-        goto out;                       /* not "EFI PART" */
+    if (le(blk, 8) != 0x5452415020494645ULL || hsize < 92 || hsize > bs) {
+        e = mbr_range(b, blk, index, first_out, count);     /* not "EFI PART" */
+        goto out;
+    }
     e = ERR_BADARG;
     crc = (uint32_t)le(blk + 16, 4);
     blk[16] = blk[17] = blk[18] = blk[19] = 0;

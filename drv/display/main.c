@@ -2,9 +2,10 @@
  * drv/display/main.c -- a text console on the firmware's framebuffer
  * (v4-plan step 7; decision 2: the firmware's, native scanout in V5)
  *
- * The framebuffer UEFI's GOP left set up, as hwdb describes it (its
- * geometry in the node's cells), leased like registers and mapped
- * uncached, so the controller scanning it out sees each write. Text in
+ * The framebuffer the firmware left set up (UEFI's GOP, or on the K1 U-Boot's
+ * display layer), as hwdb describes it (its geometry in the node's
+ * cells), leased like registers. What's drawn is cleaned from the caches
+ * after each write, for a controller that doesn't snoop them (the K1's). Text in
  * the 8x8 font, twice as big on screens 1600 pixels wide or more,
  * scrolling up a line at a time; the rest of the screen is the
  * background.
@@ -29,6 +30,7 @@ struct con {
     uint32_t scale, cell, cols, rows, col, row;
     char line[LINE];                        /* for the log */
     unsigned nline;
+    uint32_t dirty_lo, dirty_hi;            /* rows changed since the last clean */
 };
 
 static struct con cons[DRV_DEVICES];
@@ -39,10 +41,30 @@ static uint32_t pixel(const struct con *c, uint32_t rgb)
     return c->bgr ? rgb : (rgb & 0xff) << 16 | (rgb & 0xff00) | rgb >> 16;
 }
 
+static void dirty(struct con *c, uint32_t y0, uint32_t y1)
+{
+    if (y0 < c->dirty_lo)
+        c->dirty_lo = y0;
+    if (y1 > c->dirty_hi)
+        c->dirty_hi = y1 < c->height ? y1 : c->height;
+}
+
+/* The rows drawn, out of the caches to memory: a display controller that
+ * doesn't snoop (the K1's) scans memory. */
+static void clean(struct con *c)
+{
+    if (c->dirty_hi > c->dirty_lo)
+        drv_dma_clean((const void *)(c->fb + (uint64_t)c->dirty_lo * c->stride),
+                      (uint64_t)(c->dirty_hi - c->dirty_lo) * c->stride * 4);
+    c->dirty_lo = UINT32_MAX;
+    c->dirty_hi = 0;
+}
+
 static void fill(struct con *c, uint32_t y0, uint32_t y1, uint32_t rgb)
 {
     uint32_t p = pixel(c, rgb);
 
+    dirty(c, y0, y1);
     for (uint32_t y = y0; y < y1 && y < c->height; y++)
         for (uint32_t x = 0; x < c->width; x++)
             c->fb[(uint64_t)y * c->stride + x] = p;
@@ -56,6 +78,7 @@ static void glyph(struct con *c, char ch)
 
     if ((unsigned char)ch >= FONT8X8_FIRST && (unsigned char)ch < FONT8X8_FIRST + FONT8X8_COUNT)
         g = font8x8[(unsigned char)ch - FONT8X8_FIRST];
+    dirty(c, y0, y0 + c->cell);
     for (uint32_t y = 0; y < c->cell; y++)
         for (uint32_t x = 0; x < c->cell; x++)
             c->fb[(uint64_t)(y0 + y) * c->stride + x0 + x] =
@@ -66,6 +89,7 @@ static void scroll(struct con *c)
 {
     uint32_t keep = (c->rows - 1) * c->cell;
 
+    dirty(c, 0, c->rows * c->cell);
     for (uint32_t y = 0; y < keep; y++)
         for (uint32_t x = 0; x < c->cols * c->cell; x++)
             c->fb[(uint64_t)y * c->stride + x] = c->fb[(uint64_t)(y + c->cell) * c->stride + x];
@@ -130,9 +154,11 @@ static int bind(struct drv *d, struct drv_dev *dev)
     c->cell = 8 * c->scale;
     c->cols = c->width / c->cell;
     c->rows = c->height / c->cell;
+    c->dirty_lo = UINT32_MAX;
     if (c->cols < 20 || c->rows < 4)
         return DRV_DECLINE;
     fill(c, 0, c->height, BG);
+    clean(c);
     return DRV_OK;
 }
 
@@ -164,6 +190,7 @@ static int start(struct drv *d, struct drv_dev *dev)
     for (const char *s = ", a text console on it"; *s; s++)
         line[n++] = *s;
     line[n] = '\0';
+    clean(c);
     drv_log(d, dev, line);
     return (int)drv_publish(d, dev, "con");
 }
@@ -178,6 +205,7 @@ static void request(struct drv *d, struct drv_dev *dev, struct DrvRequest *r)
     }
     for (uint32_t i = 0; i < r->dr_Len; i++)
         put(c, (char)r->dr_Data[i]);
+    clean(c);
     r->dr_Msg.mn_Error = 0;
 }
 

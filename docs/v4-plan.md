@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** Steps 1 to 4 are done, and step 5 is under way. The four decisions at the end are made, as leaned.
+**Status: steps 1 to 7 done (2026-10-20),** on QEMU, the CIX and the RV2: each board boots from its own storage to a shell on its screen. The four decisions at the end are made, as leaned; `power` moved to V5.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -205,9 +205,22 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 
 ## 5. Storage
 
-**Progress (2026-10-20): QEMU and the CIX are done.** Still to come: SDHCI on the RV2, and the step's exit line. The RV2 waits until steps 6 and 7 are done on the CIX, so that the serial cable moves once.
+**Done (2026-10-20)** on QEMU, the CIX and the RV2. The RV2 waited until steps 6 and 7 were done on the CIX, so that the serial cable moved once.
 
-**SDHCI** (`drv/sdhci`) is written and passes on QEMU (`sdhci-pci` with an SD card, polled), in the bench and the kill test. hwdb's stop method for it is Software Reset For All. For the K1 it follows Linux's `sdhci-of-k1`: PHY and pad set-up after a reset, the base clock from the device tree (the capabilities are wrong), card detection by asking the card, and no 64-bit DMA. A buffer above 4 GiB goes through a bounce buffer from a DMA Area below it (`AREAF_DMA32`, new). It hasn't run on the RV2 yet.
+**SDHCI** (`drv/sdhci`) is written and passes on QEMU (`sdhci-pci` with an SD card, polled), in the bench and the kill test. hwdb's stop method for it is Software Reset For All. For the K1 it follows Linux's `sdhci-of-k1`: PHY and pad set-up after a reset, the base clock from the device tree (the capabilities are wrong), card detection by asking the card, and no 64-bit DMA. A buffer above 4 GiB goes through a bounce buffer from a DMA Area below it (`AREAF_DMA32`, new).
+
+**On the RV2** (2026-10-20) it took three fixes the K1 needed and QEMU couldn't show:
+- **Its DMA doesn't snoop the caches** (Linux's `k1.dtsi`: `dma-noncoherent`). The controller read stale ADMA descriptors, so no transfer finished and `dos` found nothing. Drivers now clean what a device will read and flush what it writes (`drv_dma_clean`, `drv_dma_flush`, by Zicbom's `cbo.clean` and `cbo.flush`, which the kernel lets user mode run through `senvcfg`; on Arm they only order, since QEMU and the CIX are coherent).
+- **Its PLIC ignores a completion of a disabled source,** as the spec allows, and a driver's line is masked as it fires, before the trap path completes it. So the source stayed claimed and never fired again. The PLIC driver now completes a source as it's disabled and again once enabled, as the vendor's Linux does on the K1 (`drivers/irqchip/irq-sifive-plic.c`, `CONFIG_SOC_KY`). It's the first interrupt a user-mode driver has taken on the board.
+- **`drv.library` has a deadline,** so a driver waiting on an interrupt can still look after a while: the SD driver checks a command at 2 s, and if its interrupt never came polls from then on, saying so. Its first check is at start, a read of block 0.
+
+| SD card, 4 KiB random reads (RV2) | Depth 1 | Depth 2 | Depth 8 | Depth 32 |
+|---|---|---|---|---|
+| IOPS | 1,574 | 1,588 | 1,569 | 1,574 |
+| Mean / median / 99th latency, µs | 634 / 631 / 777 | 1,257 / 1,255 / 1,457 | 5,059 / 5,091 / 5,584 | 19,695 / 20,289 / 20,887 |
+| Calls, interrupts, crossings per I/O | 14.6, 2.9, 4.3 | 21.6, 2.9, 4.3 | 21.6, 2.9, 4.2 | 21.4, 2.9, 4.2 |
+
+The card does one command at a time, so IOPS stay flat and latency grows with depth: the queue is in the driver. Each I/O takes about three interrupts (command, transfer, Auto CMD12) and four crossings. The kill test killed the SD driver 12 times under I/O and passed.
 
 **On the CIX** (2026-10-20):
 - Both SMMUs were left off and passing DMA through, which hwdb now checks at start (`SMMU_CR0`, `SMMU_GBPA`). That settles this step's *(verify)*. A function behind an SMMU that translates or aborts would wait on it, named.
@@ -242,7 +255,9 @@ On the CIX every I/O takes its own interrupt even at depth 32, since the SSD com
 
 ## 6. Files and programs
 
-**Progress (2026-10-20): files and programs from storage work on QEMU and the CIX.** Still to come: the RV2's SD boot partition (with step 5's SDHCI), and the shell's commands (step 7).
+**Done (2026-10-20)** on QEMU, the CIX and the RV2.
+
+**The RV2 boots from its SD card.** Its FAT32 partition (an MBR card: `lib/blk` reads MBR partitions where there's no GPT) holds `EFI/planar/` as the CIX's EFI partition does, and a `boot.scr` (`plat/ky-x1/boot.cmd`, wrapped by `tools/mkscript.py`, from omega) that the stock U-Boot's distro boot runs: it boots Planar to the Shell on power-on, with nobody at the console. `make PLATFORM=ky-x1 sdcard` writes the card. This U-Boot autoboots after 0 seconds and takes no Ctrl-C meanwhile, so a test run gets its prompt by a file: with `EFI/planar/hold` on the card the script stops. `tools/serial-boot.py` makes it from the Shell (`Touch`) and resets the board (`EndShell`), and `SD=1` then loads the image with `load mmc`, not over the serial line.
 - **FAT32** (`servers/dos/fat.c`): pure C over two sector calls, tested on the host (`make dos-test`) on images `tools/mkdisk.py` formats, and checked after by `fsck_msdos`. Long names are read. A name it makes is 8.3, keeping lower case by the flags Windows uses. Writes go straight to the disk: the FAT, then the data, then the entry. The FSInfo free count is marked unknown at the first write, as the spec allows.
 - **`dos`** (`servers/dos`, `planar/dos.h`) mounts the FAT32 partitions of every block device and serves files by path (`VOLUME:dir/file`), with `SYS:` (the volume holding `EFI/planar`) and `C:` (`SYS:EFI/planar/C`). Every volume is writable. Until 2026-10-20 only the test disks were, until writing to the CIX's EFI partition (shared with FreeBSD's and Ubuntu's loaders) was agreed: it's a test board.
 - **Programs from storage.** `dos.library`'s loader reads an ELF static PIE (the `.elf` the build already links at 0) into an `AREAF_EXEC` Area. The new call `CreateProcessImage` (43) takes that Area from the parent and maps it in the child, code read and execute. There's no ELF in the kernel.
@@ -258,7 +273,9 @@ On the CIX every I/O takes its own interrupt even at depth 32, since the SSD com
 
 ## 7. A shell on the framebuffer
 
-**Progress (2026-10-20): the CIX boots to a shell on its screen.** Still to come: the RV2. **`power` moved to V5** (decided 2026-10-20): nothing in V4's exit needs it, a wrong SCMI request can hang or reset the board, and the GPU and native scanout that need it come in V5. The kill test's check that a dead driver's votes go moves with it.
+**Done (2026-10-20)** on QEMU, the CIX and the RV2.
+
+**The RV2's screen** is U-Boot's: its K1 display driver leaves one layer scanning a framebuffer out of RAM, and says nothing of it in its tree. The kernel finds it in the display controller's registers (`plat_framebuffer`, as omega did), keeps it from the allocator (before, Planar zeroed it, and the screen went black), and passes it on as the GOP's. `display` draws there, cleaning each change from the caches, since the controller doesn't snoop either. Seen on the RV2's screen (2026-10-20): the Shell, 1920×1080. `power` moved to V5 (decided 2026-10-20): nothing in V4's exit needs it, a wrong SCMI request can hang or reset the board, and the GPU and native scanout that need it come in V5. The kill test's check that a dead driver's votes go moves with it.
 - **The framebuffer.** `MapFirmware` gives hwdb the GOP's (1920×1080 on the CIX; QEMU's edk2 boots get one from `-device ramfb`). hwdb adds a `simple-framebuffer` node for it, and the kernel lets that one range of memory be leased. Firmware that makes it of RAM still reports the machine's RAM unchanged: the range counts as reserved.
 - **`display`** (`drv/display`) draws a text console in omega's 8×8 font (doubled on screens 1600 pixels or wider) and serves `con.0`. Each line also goes to the kernel's log, so the console is the screen and the serial line both (decision 1).
 - **Input** comes from the serial console. The device root's holder gives it to one process (`GrantConsole`, 44), which polls it (`ReadConsole`, 45). There's no receive interrupt yet.

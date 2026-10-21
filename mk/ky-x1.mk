@@ -27,11 +27,35 @@ PLAT_SRCS := \
 # The board's serial adapter.
 SERIAL ?= $(firstword $(wildcard /dev/cu.usbserial-*))
 
+# SD=1 loads the image from the SD card (make sdcard put it there) with
+# U-Boot's load mmc, not over the serial line, which takes minutes.
 RUN_CMD := python3 -I tools/serial-boot.py --port $(SERIAL) --image $(IMAGE) \
-	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/serial-boot.log
+	--bootargs 'reboot $(BOOTARGS)' --log $(BUILD)/serial-boot.log $(if $(SD),--sd)
 
 run: $(IMAGE)
 	@test -n "$(SERIAL)" || { echo "no serial adapter found (set SERIAL=...)"; exit 1; }
 	$(RUN_CMD)
+
+# The board's own storage (V4 step 6): the SD card's FAT partition, mounted
+# here, gets the image, the commands and scripts under EFI/planar (as the
+# CIX's EFI partition does), and a boot.scr, so the board boots to the
+# Shell on power-on. Files already there are left.
+SD_MOUNT ?= /Volumes/OMEGA
+BOOTSCR := $(BUILD)/boot.scr
+
+$(BOOTSCR): plat/ky-x1/boot.cmd tools/mkscript.py
+	@mkdir -p $(dir $@)
+	python3 -I tools/mkscript.py $< $@
+
+.PHONY: sdcard
+sdcard: $(IMAGE) $(BOOTSCR) $$(DISK_DEPS)
+	@test -d $(SD_MOUNT) || { echo "no SD card at $(SD_MOUNT) (set SD_MOUNT=...)"; exit 1; }
+	mkdir -p $(SD_MOUNT)/EFI/planar/C $(SD_MOUNT)/EFI/planar/S
+	cp -X $(IMAGE) $(SD_MOUNT)/EFI/planar/planar.bin
+	@for f in $(DISK_FILES); do cp -X $${f%%:*} $(SD_MOUNT)/EFI/planar/$${f#*:}; done
+	cp -X $(BOOTSCR) $(SD_MOUNT)/boot.scr
+	-dot_clean -m $(SD_MOUNT)
+	sync
+	@echo "Eject the card, put it in the board and power on."
 
 CHECK_FLAGS := $(FULL_CHECK)

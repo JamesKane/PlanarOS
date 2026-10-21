@@ -46,13 +46,19 @@ void arch_early_init(void)
 }
 
 /* Every CPU: traps; no FP or vector in the kernel, so a stray use faults
- * instead of clobbering a task's state; the clock and cycle counter for
- * user mode; the timer disarmed; and the interrupts the kernel takes. */
+ * instead of clobbering a task's state; the clock and cycle counter, and
+ * cache-block maintenance, for user mode; the timer disarmed; and the
+ * interrupts the kernel takes. */
 void arch_cpu_init(void)
 {
     trap_init();
     __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_FS | SSTATUS_VS_MASK) : "memory");
     __asm__ volatile("csrw scounteren, %0" : : "r"(3UL));
+    /* Zicbom's cbo.clean and cbo.flush for user mode, cbo.inval taken as
+     * a flush (senvcfg CBCFE, CBIE 01): drivers keep memory a device that
+     * doesn't snoop (the K1's) sees in step with the caches. The fields
+     * read back 0 where there's no Zicbom. */
+    __asm__ volatile("csrs senvcfg, %0" : : "r"(1UL << 6 | 1UL << 4));
     /* stimecmp's reset value is unspecified: disarm before the timer
      * interrupt is enabled. Interrupts stay off until arch_irq_enable(). */
     arch_timer_arm(~(uint64_t)0);

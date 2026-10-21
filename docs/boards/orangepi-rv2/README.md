@@ -14,3 +14,16 @@ Taken on 2026-10-20 from the board, for hwdb's tests (docs/v4-plan.md step 2).
 - Three SD/MMC controllers: `sdh@d4280000` (`mmc0`, the SD card, with a card-detect GPIO), `sdh@d4280800` (disabled) and `sdh@d4281000` (`mmc2`, eMMC).
 - The PMIC (`ky,spm8821`) is on I2C 8 (`twsi8@d401d800`) at `0x41`.
 - **Shared system controllers.** The clock controller, the reset controller and the power domains list the same register blocks: the MPMU at `0xd4050000` (also the watchdog's reset register, `0xd4051020`), the APMU at `0xd4282800` (shared again with the PCIe controller and its PHY), and others. Leases of whole pages can't give each its own.
+
+## Booting Planar (V4)
+
+- **From the SD card** (`make PLATFORM=ky-x1 sdcard`, with the card's FAT partition mounted, `SD_MOUNT=/Volumes/OMEGA` by default): `EFI/planar/planar.bin`, the commands in `EFI/planar/C`, the scripts in `EFI/planar/S`, and `boot.scr`. On power-on the stock U-Boot runs `boot.scr`, which boots Planar to the Shell. `EndShell` resets the board.
+- **This U-Boot autoboots after 0 seconds and ignores Ctrl-C while it does.** With `EFI/planar/hold` on the card, `boot.scr` stops and U-Boot goes on to its prompt (after trying USB and the network, about 80 s). `Touch SYS:EFI/planar/hold` makes the file from the Shell; `Delete` removes it.
+- **Test runs:** `make PLATFORM=ky-x1 SD=1 test` makes the hold from the Shell, resets the board, and loads the image from the card with `load mmc`. Without `SD=1` it goes over the serial line by `loadx` (about two minutes for the image), which fails if the line drops bytes, as it did for a while on 2026-10-20.
+- **The screen:** U-Boot leaves a 1920×1080 framebuffer at `0x7f700000` scanning out over HDMI when a monitor is attached. Planar keeps it and draws its console there.
+
+## Facts found running Planar
+
+- **DMA isn't cache-coherent** on the K1 (Linux: `dma-noncoherent` on the SoC bus). The X60 has Zicbom with 64-byte blocks; drivers clean and flush through it.
+- **The PLIC ignores a completion of a disabled source**, as the spec allows: complete before disabling, and again after enabling (the vendor's Linux does).
+- The SD card here is a 32 GB SDHC (61,952,000 blocks), MBR, one FAT32 partition (label `OMEGA`). The eMMC slot is empty.

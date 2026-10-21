@@ -33,4 +33,10 @@ void plat_reboot(void);
  */
 void plat_console_putc(char c);
 
+/* A framebuffer the firmware left scanning out, when the board has its
+ * own way to find one (the K1: U-Boot's display layer); false if none.
+ * UEFI's GOP is found by the stub instead (kernel/bootinfo.h). */
+struct boot_fb;
+bool plat_framebuffer(struct boot_fb *fb);
+
 #endif /* KERNEL_PLAT_H */

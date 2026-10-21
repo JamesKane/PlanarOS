@@ -26,9 +26,9 @@ struct boot_info {
     uint32_t reserved;
 
     /* The GOP framebuffer, for V4; base 0 if none. */
-    struct {
+    struct boot_fb {
         uint64_t base, size;
-        uint32_t width, height, stride, format;
+        uint32_t width, height, stride, format;     /* stride in pixels; GOP's formats */
     } fb;
 
     char cmdline[BOOT_INFO_CMDLINE];  /* the load options, NUL-terminated */
@@ -41,5 +41,9 @@ uint64_t bootinfo_init(uint64_t firmware_data);
 
 /* The block, or nullptr if the kernel was given a bare device tree. */
 const struct boot_info *bootinfo(void);
+
+/* The framebuffer the firmware left scanning out: the GOP's, or the
+ * board's own (plat_framebuffer); nullptr if there's none. */
+const struct boot_fb *boot_fb(void);
 
 #endif /* KERNEL_BOOTINFO_H */

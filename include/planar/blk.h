@@ -56,12 +56,14 @@ void blk_close(struct blk *b);
 int64_t blk_open_now(struct blk *b, const char *port, int64_t sigbit, uint64_t heap);
 
 /* Narrow b to partition 'index' (from 1) of the GPT on it (UEFI 2.10
- * §5.3), whose header and entries must check. 0, or an error. */
+ * §5.3), whose header and entries must check, or of its MBR when it has
+ * no GPT. 0, or an error. */
 int64_t blk_partition(struct blk *b, unsigned index);
 
 /* Where partition 'index' is, without narrowing b to it: its first block
  * on the device and its length. ERR_NOTFOUND past the table's end, for
- * an unused entry, or with no GPT. */
+ * an unused entry, or with no table. A disk without a GPT may have an MBR:
+ * its primary partitions are 1 to 4. */
 int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first, uint64_t *count);
 
 /* 'size' bytes of this connection's heap, page aligned; nullptr when it's

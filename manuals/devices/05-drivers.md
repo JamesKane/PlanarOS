@@ -26,7 +26,7 @@ The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`
 `drv/sdhci`: SD host controllers (SD Host Controller 3.00) and SD cards in them.
 - Bind resets the controller, then takes the card through identification at 400 kHz, reads its size from the CSD, and runs it 4 bits wide at 25 MHz. SD 2.0 and later cards only: SDSC, SDHC and SDXC, not MMC or eMMC, which it declines.
 - One command at a time, as the card does them: each request is a CMD18 or CMD25 with Auto CMD12, the data moved by ADMA2. ADMA2's addresses are 32 bits; a buffer above 4 GiB goes through a bounce buffer in a DMA Area below it (`AREAF_DMA32`).
-- **On the K1** (the RV2), as Linux's `sdhci-of-k1` does: after a full reset it sets up the PHY and pads again and forces the card clock on; it takes the base clock from the device tree's 204.8 MHz, since the capabilities are wrong; it finds the card by asking it, since card detect is a GPIO's; and it never uses 64-bit DMA. *Not yet run on the RV2.*
+- **On the K1** (the RV2), as Linux's `sdhci-of-k1` does: after a full reset it sets up the PHY and pads again and forces the card clock on; it takes the base clock from the device tree's 204.8 MHz, since the capabilities are wrong; it finds the card by asking it, since card detect is a GPIO's; and it never uses 64-bit DMA. Its DMA doesn't snoop the caches, so the driver cleans descriptors and data it hands the device and flushes what the device writes (`drv_dma_clean`, `drv_dma_flush`). It takes its interrupt (line 99) on the RV2; if a command's interrupt doesn't come within its 2-second deadline, it polls from then on and says so.
 - QEMU's `sdhci-pci` shows the same driver on QEMU.
 
 ## display

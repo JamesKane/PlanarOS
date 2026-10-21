@@ -176,6 +176,10 @@ struct drv_ops {
     /* A device it polls: called each time round the loop, which doesn't
      * sleep while this says work is outstanding. */
     bool (*poll)(struct drv *d);
+    /* When poll should be called even with nothing come in (a command's
+     * deadline, in case its interrupt doesn't), as CurrentTime() goes; 0
+     * if never. The loop sleeps until then at most. */
+    uint64_t (*deadline)(struct drv *d);
 };
 
 struct drv {
@@ -208,6 +212,13 @@ Handle drv_lease(const struct drv *d);
 uint64_t drv_wait_irq(struct drv *d, struct drv_dev *dev, uint64_t ms);
 
 void drv_log(const struct drv *d, const struct drv_dev *dev, const char *text);
+
+/* DMA memory and the caches, for a device that doesn't snoop them (the
+ * K1's): clean what the device will read before it does; flush what it
+ * will write before it starts and again before reading it. Each ISA's
+ * (arch/<arch>/user/cache.c); orders only where the machine is coherent. */
+void drv_dma_clean(const void *p, uint64_t n);
+void drv_dma_flush(const void *p, uint64_t n);
 
 /* For a bus driver's Bind: a message for hwdb, the size of any (one per
  * driver, reused), and DoMsg with it; 0, or the error hwdb or the

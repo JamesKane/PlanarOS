@@ -18,7 +18,7 @@
  * from the client's buffer, or through a bounce buffer when that lies
  * above 4 GiB, where 32-bit ADMA2 can't reach (the RV2's 6 GiB there).
  * Requests wait their turn here. Completion is by its interrupt line
- * when it has one, else it polls.
+ * when it has one (and a 2-second deadline), else it polls.
  */
 #include <stddef.h>
 
@@ -70,6 +70,7 @@ struct waiting {
 struct sd {
     struct drv_dev *dev;
     bool k1;                            /* the K1's: its quirks (k1_reset) */
+    bool polled;                        /* its interrupt didn't come: polled since */
     struct adma *table;                 /* in a DMA Area below 4 GiB */
     uint8_t *bounce;                    /* likewise, for buffers above */
     uint32_t base_hz;
@@ -80,6 +81,7 @@ struct sd {
     bool busy;
     unsigned cur, req;
     uint8_t *bounced;                   /* the client's buffer, if through the bounce one */
+    uint8_t *target;                    /* where the device reads or writes */
     uint64_t bytes;
     uint64_t deadline;
     /* Messages, oldest first. */
@@ -289,7 +291,13 @@ static void next(struct drv *d, struct sd *s)
                 .len = (uint16_t)len, .addr = (uint32_t)(r.br_Buffer + k * 65536ULL),
             };
         }
-        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        /* The K1's DMA doesn't snoop: the lines and the data, out of the caches. */
+        drv_dma_clean(s->table, sizeof s->table[0] * ((bytes + 65535) / 65536));
+        if (read)
+            drv_dma_flush((void *)r.br_Buffer, bytes);
+        else
+            drv_dma_clean((void *)r.br_Buffer, bytes);
+        s->target = (uint8_t *)r.br_Buffer;
         wr(s, INTSTS, ~0u);
         wr(s, ADMA_ADDR, (uint32_t)(uint64_t)s->table);
         wr(s, ADMA_ADDR + 4, 0);
@@ -320,6 +328,8 @@ static void check(struct drv *d, struct sd *s)
         w->m->bm_Req[s->req].br_Error = BLK_EIO;
     } else if (st & I_XFER) {
         wr(s, INTSTS, st);
+        if (w->m->bm_Req[s->req].br_Op == BLK_READ)
+            drv_dma_flush(s->target, s->bytes);     /* lines read meanwhile are stale */
         if (s->bounced && w->m->bm_Req[s->req].br_Op == BLK_READ)
             memcpy(s->bounced, s->bounce, s->bytes);
         w->m->bm_Req[s->req].br_Error = 0;
@@ -370,16 +380,48 @@ static void interrupt(struct drv *d, struct drv_dev *dev)
     check(d, &sds[dev - d->dev]);
 }
 
+/* Without an interrupt line the status is polled while a command is
+ * out. With one, the interrupt says when it's done, and poll looks only
+ * once the command's deadline has passed (drv.library calls it then). If
+ * the command had finished with no interrupt (on the K1, so far), the
+ * device is polled from then on, and that's said once. */
 static bool poll(struct drv *d)
 {
     bool busy = false;
 
-    for (unsigned k = 0; k < nsds; k++)
-        if (sds[k].dev && !sds[k].dev->line_bound && sds[k].busy) {
-            check(d, &sds[k]);
-            busy |= sds[k].busy;
+    for (unsigned k = 0; k < nsds; k++) {
+        struct sd *s = &sds[k];
+
+        if (!s->dev || !s->busy)
+            continue;
+        if (s->dev->line_bound && !s->polled) {
+            if (CurrentTime() < s->deadline)
+                continue;
+            if (rd(s, INTSTS) & I_XFER) {
+                /* Done, and no interrupt said so (the K1's, so far):
+                 * polled from now on. */
+                s->polled = true;
+                drv_log(d, s->dev, "a command finished with no interrupt: polling from now on");
+            }
+            check(d, s);
+            busy |= s->busy;
+            continue;
         }
+        check(d, s);
+        busy |= s->busy;
+    }
     return busy;
+}
+
+static uint64_t deadline(struct drv *)
+{
+    uint64_t next = 0;
+
+    for (unsigned k = 0; k < nsds; k++)
+        if (sds[k].dev && sds[k].busy && sds[k].dev->line_bound && !sds[k].polled &&
+            (!next || sds[k].deadline < next))
+            next = sds[k].deadline;
+    return next;
 }
 
 /* --- Bind. --- */
@@ -500,14 +542,45 @@ static int bind(struct drv *d, struct drv_dev *dev)
     return DRV_OK;
 }
 
+/* Its interrupt, tried once its line is bound: block 0 read into the
+ * bounce buffer. If the read finishes and the line doesn't fire within
+ * 100 ms (the K1's, so far), the device is polled from the start. */
+static void try_interrupt(struct drv *d, struct drv_dev *dev, struct sd *s)
+{
+    uint64_t got, until;
+
+    if (!dev->line_bound)
+        return;
+    s->table[0] = (struct adma){ .attr = 1u | 2u << 4 | 2u, .len = BLOCK,
+                                 .addr = (uint32_t)(uint64_t)s->bounce };
+    drv_dma_clean(s->table, sizeof s->table[0]);
+    drv_dma_flush(s->bounce, BLOCK);
+    wr(s, INTSTS, ~0u);
+    wr(s, ADMA_ADDR, (uint32_t)(uint64_t)s->table);
+    wr(s, ADMA_ADDR + 4, 0);
+    wr(s, BLKSIZE, 1u << 16 | BLOCK);
+    wr(s, ARG, 0);
+    wr(s, XFER, (17u << 8 | R_48 | C_CRC | C_INDEX | C_DATA) << 16 | XM_DMA | XM_READ);
+    got = drv_wait_irq(d, dev, 100);
+    for (until = CurrentTime() + 500 * MS; !(rd(s, INTSTS) & (I_XFER | I_ERR));)
+        if (CurrentTime() > until)
+            break;
+    wr(s, INTSTS, rd(s, INTSTS));
+    if (!(got & 1ULL << (32 + dev->info->dd_Line))) {
+        s->polled = true;
+        drv_log(d, dev, "its interrupt didn't come: polled");
+    }
+}
+
 static int start(struct drv *d, struct drv_dev *dev)
 {
+    try_interrupt(d, dev, &sds[dev - d->dev]);
     return (int)drv_publish(d, dev, "sd");
 }
 
 static const struct drv_ops ops = {
     .name = "sdhci", .bind = bind, .start = start, .interrupt = interrupt, .message = message,
-    .message_size = sizeof(struct BlkMsg), .poll = poll,
+    .message_size = sizeof(struct BlkMsg), .poll = poll, .deadline = deadline,
 };
 
 int main(uint64_t token)

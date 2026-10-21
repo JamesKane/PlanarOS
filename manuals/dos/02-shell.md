@@ -38,6 +38,8 @@ Hello from a file on the disk, typed by C:type.
 | `Help` | What's built in. |
 | `EndShell` (or `EndCLI`) | End the Shell. |
 
+**Commands in C:** `List [DIR]`, `Type FILE`, `Echo ...`, `Info`, `Touch FILE` (make an empty file), `Delete NAME` (a file, or an empty directory).
+
 **Commands in `C:`:**
 
 | Command | |

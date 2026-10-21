@@ -80,6 +80,14 @@ static bool init_cpu(uint64_t hart)
     return true;
 }
 
+/*
+ * A completion of a source that isn't enabled may be ignored (the spec
+ * allows it, and the K1's PLIC does), which leaves it claimed and never
+ * firing again: and a driver's line is masked as it fires, before the
+ * trap path completes it (kernel/lease.c). So, as the vendor's Linux does
+ * on the K1, a source is completed as it's disabled and again once it's
+ * enabled; completing one that isn't claimed does nothing.
+ */
 static void set(uint32_t source, unsigned level)
 {
     volatile uint32_t *enable = reg(ENABLE(context, source));
@@ -88,10 +96,13 @@ static void set(uint32_t source, unsigned level)
     if (source == 0 || source > nsources)
         return;
     *reg(PRIORITY(source)) = level;
-    if (level)
+    if (level) {
         *enable |= bit;
-    else
+        *reg(CLAIM(context)) = source;
+    } else {
+        *reg(CLAIM(context)) = source;
         *enable &= ~bit;
+    }
 }
 
 static uint32_t claim(void)

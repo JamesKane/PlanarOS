@@ -302,13 +302,19 @@ static void serve(struct drv *d, unsigned pos)
     for (;;) {
         uint64_t want = lines | 1ULL << SIG_ACCEPT | 1ULL << SIG_CLIENT | 1ULL << SIG_HWDB, got;
 
+        uint64_t until = ops->deadline ? ops->deadline(d) : 0;
+
         if (ops->poll && ops->poll(d)) {
             /* Work outstanding on a polled device: look, but don't sleep. */
             for (unsigned i = 0; i < nlive; i++)
                 FlushPort(&live[i]);
             got = want;
         } else {
-            got = WaitPorts(live, nlive, want);
+            if (until)
+                ArmTimer(until, SIG_TIMER);
+            got = WaitPorts(live, nlive, want | (until ? 1ULL << SIG_TIMER : 0));
+            if (until)
+                ArmTimer(0, 0);
         }
         if (PortGone(&d->hwdb))
             ExitProcess(0);

@@ -6,6 +6,28 @@ What a driver links to do its job, in alphabetical order. The header is `planar/
 
 ---
 
+## drv/drv_dma_clean
+
+**NAME**
+drv_dma_clean, drv_dma_flush -- DMA memory and the caches
+
+**SYNOPSIS**
+```c
+#include <planar/drv.h>
+void drv_dma_clean(const void *p, uint64_t n);
+void drv_dma_flush(const void *p, uint64_t n);
+```
+
+**FUNCTION**
+For a device that doesn't snoop the CPU's caches (the K1's). `drv_dma_clean` writes the cached lines of `p` to `p + n` back to memory: call it before the device reads them (descriptors, data to write). `drv_dma_flush` writes them back and drops them: call it before the device writes a buffer and again before reading what it wrote. Whole cache blocks are done, so keep a device's buffers from sharing a block with anything else.
+
+On RISC-V they're Zicbom's `cbo.clean` and `cbo.flush`, which the kernel lets user mode run. On Arm they only order the writes before them, since Planar's Arm machines (QEMU, the CIX) are coherent.
+
+**SEE ALSO**
+`drv/sdhci/main.c`, `drv/display/main.c`; [Devices ch. 5](../devices/05-drivers.md)
+
+---
+
 ## drv/drv_hwdb
 
 **NAME**
@@ -121,13 +143,13 @@ Runs a driver, given its token (its `main`'s argument) and its callbacks:
 2. Calls `bind` for each device: `DRV_OK` to take it, `DRV_DECLINE` (not one this driver drives), or a negative error, which ends the process. Binds each taken device's line, or its MSI-X lines (`dd_NLines`).
 3. Calls `start` for each taken device, to publish its class port (`drv_publish`).
 4. Tells hwdb what it took and published (`HWDB_STARTED`). A driver that took nothing exits 0.
-5. Loops: accepts clients at the class ports (8 a port, `DRV_CLIENTS`), calls `interrupt` when a device's line fires and acknowledges it, and gives each client message to `request` (answered when it returns) or `message` (answered with `drv_reply`). With a `poll` callback that says work is outstanding, it looks again without sleeping.
+5. Loops: accepts clients at the class ports (8 a port, `DRV_CLIENTS`), calls `interrupt` when a device's line fires and acknowledges it, and gives each client message to `request` (answered when it returns) or `message` (answered with `drv_reply`). With a `poll` callback that says work is outstanding, it looks again without sleeping. With a `deadline` callback that gives a time, it sleeps until then at most and calls `poll` (a command whose interrupt may not come).
 
 It exits when hwdb's connection goes.
 
 **INPUTS**
 - `token` -- `main`'s argument, from hwdb.
-- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`. Any but `name` and `bind` may be `nullptr`.
+- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`. Any but `name` and `bind` may be `nullptr`.
 
 **EXAMPLE**
 From `drv/nvme/main.c`:
@@ -147,9 +169,6 @@ int main(uint64_t token)
 - Signals 16 to 19 are the library's; line *n* of the lease is signal 32 + *n*.
 - A client that goes with messages unanswered keeps its connection, out of the loop, until the driver has answered them all: its heap holds buffers the device may be using.
 - With `DRVF_CRASH` in hwdb's answer it faults on purpose before Bind: the kill test's give-up case.
-
-**BUGS**
-`struct drv_dev`'s `clients` and `nclients` are left over; the library keeps its clients itself.
 
 **SEE ALSO**
 [Devices ch. 1](../devices/01-drivers.md)

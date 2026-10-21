@@ -57,6 +57,7 @@
 | dos_run | [dos](dos.md#dosdos_run) | library |
 | dos_stat | [dos](dos.md#dosdos_stat) | library |
 | dos_volume | [dos](dos.md#dosdos_volume) | library |
+| drv_dma_clean, drv_dma_flush | [drv](drv.md#drvdrv_dma_clean) | library |
 | drv_hwdb_msg, drv_hwdb | [drv](drv.md#drvdrv_hwdb) | library |
 | drv_in_heap | [drv](drv.md#drvdrv_in_heap) | library |
 | drv_lease, drv_wait_irq | [drv](drv.md#drvdrv_lease) | library |

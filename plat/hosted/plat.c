@@ -27,3 +27,8 @@ void plat_late_init(void)
 void plat_reboot(void)
 {
 }
+
+bool plat_framebuffer(struct boot_fb *)
+{
+    return false;
+}

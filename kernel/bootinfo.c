@@ -3,6 +3,7 @@
  */
 #include "arch.h"
 #include "bootinfo.h"
+#include "plat.h"
 
 static const struct boot_info *info;
 
@@ -19,4 +20,16 @@ uint64_t bootinfo_init(uint64_t firmware_data)
 const struct boot_info *bootinfo(void)
 {
     return info;
+}
+
+const struct boot_fb *boot_fb(void)
+{
+    static struct boot_fb board;
+    static int known;               /* 0 not looked, 1 none, 2 the board's */
+
+    if (info && info->fb.base)
+        return &info->fb;
+    if (!known)
+        known = plat_framebuffer(&board) ? 2 : 1;
+    return known == 2 ? &board : nullptr;
 }
