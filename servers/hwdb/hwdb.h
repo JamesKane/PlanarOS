@@ -78,6 +78,7 @@ struct hw_ref {
     hw_id target;           /* the node named, perhaps a part of a device */
     hw_id supplier;         /* the device that provides it; HW_NONE if none does */
     uint32_t handle;        /* the device tree's phandle, when it names none */
+    const char *path;       /* acpid's: the device it names ("\_SB_.GPI4"), when none */
     const char *name;       /* the property, as "vmmc-supply" */
     uint32_t cells[HW_CELLS];
 };
@@ -184,6 +185,13 @@ struct hw_graph {
     uint32_t *phandles;             /* sorted pairs: phandle, node */
     uint32_t nphandles;
 
+    /* The namespace (namespace.c): the first node acpid's devices added,
+     * and the static nodes it moved, by the paths they had (quirks name
+     * them so: hw_find_moved). */
+    uint32_t ns_first;
+    struct hw_move { const char *from; hw_id node; } *moves;
+    uint32_t nmoves, maxmoves;
+
     /* Leases (lease.c). */
     struct hw_lease *leases;
     uint32_t nleases;
@@ -226,6 +234,19 @@ struct hw_table {
 bool hw_from_acpi(struct hw_graph *g, const struct hw_table *tables, unsigned n);
 
 /*
+ * The namespace (namespace.c, docs/v4-plan.md step 4): acpid's devices,
+ * added to a graph hw_from_acpi built, one at a time as they come, then
+ * hw_ns_done once all have. Each goes where its path says ("\_SB_.COM0"
+ * is /_SB_/COM0). A device a static table already has (an IORT named
+ * component, the MCFG's host bridge, a serial port at the same address)
+ * isn't added again: the static node moves to the path and takes the
+ * device's keys. hw_ns_done resolves the paths resources name.
+ */
+struct AcpidDevice;
+void hw_ns_add(struct hw_graph *g, const struct AcpidDevice *d);
+void hw_ns_done(struct hw_graph *g);
+
+/*
  * Board quirks (§9.4 Layer 2, D5 (a)): C tables, keyed by the board (the
  * root compatible, or the ACPI OEM ID and OEM table ID) and naming nodes
  * by path. They change the graph, never a match table.
@@ -254,6 +275,8 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n);
 
 /* The node at 'path' ("/soc/uart@d4017000"), or HW_NONE. */
 hw_id hw_find_path(const struct hw_graph *g, const char *path, size_t len);
+/* The node a static table put at 'path' and acpid's namespace moved, or HW_NONE. */
+hw_id hw_find_moved(const struct hw_graph *g, const char *path);
 hw_id hw_child(const struct hw_graph *g, hw_id parent, const char *name, size_t len);
 
 /* Matching (match.c): each enabled device gets the best driver for its

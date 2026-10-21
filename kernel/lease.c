@@ -620,20 +620,17 @@ int64_t lease_dma_call(uint32_t h, uint64_t size, uint32_t flags, uint64_t addr_
     return r;
 }
 
-/* The DTB, or the ACPI tables, mapped read-only where they are. */
-int64_t lease_firmware_call(uint32_t root_h, uint64_t info_out)
+/* The DTB, or the ACPI tables, mapped read-only where they are, into p. */
+static int64_t map_firmware(struct process *p, struct FirmwareInfo *fi)
 {
-    struct process *p = task_self()->process;
-    struct FirmwareInfo fi = { 0 };
     uint64_t pa, len;
 
-    if (!handle_get(root_h, HANDLE_DEVROOT, p))
-        return ERR_BADHANDLE;
+    *fi = (struct FirmwareInfo){ 0 };
     if (fdt_blob()) {
-        fi.fi_Dtb = virt_to_phys(fdt_blob());
-        fi.fi_DtbSize = fdt_size();
-        pa = fi.fi_Dtb & ~(PAGE_SIZE - 1);
-        len = (fi.fi_Dtb + fi.fi_DtbSize - pa + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        fi->fi_Dtb = virt_to_phys(fdt_blob());
+        fi->fi_DtbSize = fdt_size();
+        pa = fi->fi_Dtb & ~(PAGE_SIZE - 1);
+        len = (fi->fi_Dtb + fi->fi_DtbSize - pa + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
         if (!area_map_phys(p, pa, len, MAP_USER | MAP_READ))
             return ERR_NOMEM;
     }
@@ -641,10 +638,37 @@ int64_t lease_firmware_call(uint32_t root_h, uint64_t info_out)
         uint64_t page = pa & ~(PAGE_SIZE - 1);
 
         if (i == 0)
-            fi.fi_Rsdp = pa;
+            fi->fi_Rsdp = pa;
         if (!area_map_phys(p, page, (pa + len - page + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1),
                            MAP_USER | MAP_READ))
             return ERR_NOMEM;
     }
+    return 0;
+}
+
+int64_t lease_firmware_call(uint32_t root_h, uint64_t info_out)
+{
+    struct process *p = task_self()->process;
+    struct FirmwareInfo fi;
+    int64_t err;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, p))
+        return ERR_BADHANDLE;
+    if ((err = map_firmware(p, &fi)))
+        return err;
     return arch_copy_to_user(info_out, &fi, sizeof fi) ? 0 : ERR_BADADDR;
+}
+
+/* The same, into a process the root's holder made: acpid (step 4). */
+int64_t lease_firmware_grant_call(uint32_t root_h, uint32_t process)
+{
+    struct process *p = task_self()->process, *child;
+    struct FirmwareInfo fi;
+    int64_t err;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, p) || !(child = process_child(process)))
+        return ERR_BADHANDLE;
+    err = atomic_load(&child->dying) ? ERR_NOTFOUND : map_firmware(child, &fi);
+    process_put(child);
+    return err;
 }

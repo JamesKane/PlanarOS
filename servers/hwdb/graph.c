@@ -153,9 +153,11 @@ const char *hw_ref_kind_name(enum hw_ref_kind kind)
     return kind < HW_REF_KINDS ? names[kind] : "?";
 }
 
+/* Not only after its parent: acpid's namespace moves static nodes
+ * under parents made later (namespace.c). */
 hw_id hw_child(const struct hw_graph *g, hw_id parent, const char *name, size_t len)
 {
-    for (hw_id i = parent + 1; i < g->count; i++)
+    for (hw_id i = 1; i < g->count; i++)
         if (g->nodes[i].parent == parent && hw_strneq(name, g->nodes[i].name, len))
             return i;
     return HW_NONE;

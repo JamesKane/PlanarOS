@@ -58,6 +58,7 @@ struct hwdb {
     struct hw_arena arena;
     Handle root, port;
     struct unit *units;         /* one per g.leases */
+    uint64_t rsdp;              /* ACPI's, else 0: acpid runs */
     uint64_t now;
     bool test, stopping, finished;
     unsigned errors;            /* teardown checks that failed */
@@ -68,13 +69,48 @@ extern struct hwdb hwdb;
 
 const char *unit_driver(const struct unit *u);
 const char *unit_path(const struct unit *u, struct hw_line *l);
-bool hwdb_busy(void);           /* a unit is starting, due to, or ending */
+bool hwdb_busy(void);           /* a unit is starting, due to, or ending; or acpid probing */
 void unit_kill(struct unit *u); /* an unbind: restarted at once unless stopping */
 void unit_retry(struct unit *u);    /* start one given up on, afresh */
 void say(const char *text);
 void hwdb_report(void);      /* the lines worth the console */
+void hwdb_facts(void);       /* what the drivers bound, failed and declined: "hw: " lines */
 void say_unit(const struct unit *u, const char *text);
 void check_failed(const struct unit *u, const char *what);
+
+/* --- acpid (acpid.c). --- */
+
+constexpr int64_t SIG_DEAD = 18;            /* a unit's process died, or acpid */
+constexpr int64_t SIG_ACPI_PORT = 24;       /* acpid at "hwdb.acpi" */
+constexpr uint32_t CONN_ACPID = UINT32_MAX - 1;     /* conn_unit's mark for its connection */
+constexpr unsigned ACPID_REGIONS = 64;
+constexpr unsigned ACPID_TABLES_MAX = 72;
+
+struct acpid_region {
+    uint64_t base, size;
+    Handle lease;
+};
+
+struct acpid {
+    Handle proc, port;
+    uint32_t token;
+    bool done, stopping, probed;
+    uint64_t rsdp, until;
+    unsigned devices, asked, refused;
+    struct { uint64_t base, size; } tables[ACPID_TABLES_MAX];  /* the firmware's, mapped */
+    unsigned ntables;
+    struct acpid_region regions[ACPID_REGIONS];
+    unsigned nregions;
+};
+
+extern struct acpid acpid;
+
+bool acpid_start(uint64_t rsdp);    /* false (having said why) if it couldn't be */
+bool acpid_waiting(void);           /* started, not done, not late */
+void acpid_serve(struct MsgPort *mp);
+bool acpid_reap(void);              /* true if it had died: its leases are taken back */
+void acpid_finish(void);            /* its devices are all in: resolve them, say so */
+void acpid_stop(void);              /* at the end: kill it, take its leases back */
 
 /* The kill test (killtest.c): a step each time round the loop, and when
  * it next wants one (0: no time). */

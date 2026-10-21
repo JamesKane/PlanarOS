@@ -1,0 +1,128 @@
+\_SB_ sta 0xf
+\_SB_.C000 [ACPI0007] sta 0xf uid 0
+\_SB_.C001 [ACPI0007] sta 0xf uid 1
+\_SB_.C002 [ACPI0007] sta 0xf uid 2
+\_SB_.C003 [ACPI0007] sta 0xf uid 3
+\_SB_.COM0 [ARMH0011] sta 0xf uid 0
+  mmio 0x9000000+0x1000
+  irq 33
+\_SB_.FWCF [QEMU0002] sta 0xb
+  mmio 0x9020000+0x18
+\_SB_.VR00 [LNRO0005] sta 0xf uid 0
+  mmio 0xa000000+0x200
+  irq 48
+\_SB_.VR01 [LNRO0005] sta 0xf uid 1
+  mmio 0xa000200+0x200
+  irq 49
+\_SB_.VR02 [LNRO0005] sta 0xf uid 2
+  mmio 0xa000400+0x200
+  irq 50
+\_SB_.VR03 [LNRO0005] sta 0xf uid 3
+  mmio 0xa000600+0x200
+  irq 51
+\_SB_.VR04 [LNRO0005] sta 0xf uid 4
+  mmio 0xa000800+0x200
+  irq 52
+\_SB_.VR05 [LNRO0005] sta 0xf uid 5
+  mmio 0xa000a00+0x200
+  irq 53
+\_SB_.VR06 [LNRO0005] sta 0xf uid 6
+  mmio 0xa000c00+0x200
+  irq 54
+\_SB_.VR07 [LNRO0005] sta 0xf uid 7
+  mmio 0xa000e00+0x200
+  irq 55
+\_SB_.VR08 [LNRO0005] sta 0xf uid 8
+  mmio 0xa001000+0x200
+  irq 56
+\_SB_.VR09 [LNRO0005] sta 0xf uid 9
+  mmio 0xa001200+0x200
+  irq 57
+\_SB_.VR10 [LNRO0005] sta 0xf uid 10
+  mmio 0xa001400+0x200
+  irq 58
+\_SB_.VR11 [LNRO0005] sta 0xf uid 11
+  mmio 0xa001600+0x200
+  irq 59
+\_SB_.VR12 [LNRO0005] sta 0xf uid 12
+  mmio 0xa001800+0x200
+  irq 60
+\_SB_.VR13 [LNRO0005] sta 0xf uid 13
+  mmio 0xa001a00+0x200
+  irq 61
+\_SB_.VR14 [LNRO0005] sta 0xf uid 14
+  mmio 0xa001c00+0x200
+  irq 62
+\_SB_.VR15 [LNRO0005] sta 0xf uid 15
+  mmio 0xa001e00+0x200
+  irq 63
+\_SB_.VR16 [LNRO0005] sta 0xf uid 16
+  mmio 0xa002000+0x200
+  irq 64
+\_SB_.VR17 [LNRO0005] sta 0xf uid 17
+  mmio 0xa002200+0x200
+  irq 65
+\_SB_.VR18 [LNRO0005] sta 0xf uid 18
+  mmio 0xa002400+0x200
+  irq 66
+\_SB_.VR19 [LNRO0005] sta 0xf uid 19
+  mmio 0xa002600+0x200
+  irq 67
+\_SB_.VR20 [LNRO0005] sta 0xf uid 20
+  mmio 0xa002800+0x200
+  irq 68
+\_SB_.VR21 [LNRO0005] sta 0xf uid 21
+  mmio 0xa002a00+0x200
+  irq 69
+\_SB_.VR22 [LNRO0005] sta 0xf uid 22
+  mmio 0xa002c00+0x200
+  irq 70
+\_SB_.VR23 [LNRO0005] sta 0xf uid 23
+  mmio 0xa002e00+0x200
+  irq 71
+\_SB_.VR24 [LNRO0005] sta 0xf uid 24
+  mmio 0xa003000+0x200
+  irq 72
+\_SB_.VR25 [LNRO0005] sta 0xf uid 25
+  mmio 0xa003200+0x200
+  irq 73
+\_SB_.VR26 [LNRO0005] sta 0xf uid 26
+  mmio 0xa003400+0x200
+  irq 74
+\_SB_.VR27 [LNRO0005] sta 0xf uid 27
+  mmio 0xa003600+0x200
+  irq 75
+\_SB_.VR28 [LNRO0005] sta 0xf uid 28
+  mmio 0xa003800+0x200
+  irq 76
+\_SB_.VR29 [LNRO0005] sta 0xf uid 29
+  mmio 0xa003a00+0x200
+  irq 77
+\_SB_.VR30 [LNRO0005] sta 0xf uid 30
+  mmio 0xa003c00+0x200
+  irq 78
+\_SB_.VR31 [LNRO0005] sta 0xf uid 31
+  mmio 0xa003e00+0x200
+  irq 79
+\_SB_.L000 [PNP0C0F] sta 0xf uid 0
+  irq 35
+\_SB_.L001 [PNP0C0F] sta 0xf uid 1
+  irq 36
+\_SB_.L002 [PNP0C0F] sta 0xf uid 2
+  irq 37
+\_SB_.L003 [PNP0C0F] sta 0xf uid 3
+  irq 38
+\_SB_.PCI0 [PNP0A08 PNP0A03] sta 0xf uid 0
+  window 0x10000000+0x2eff0000
+  window 0x8000000000+0x8000000000
+  2 resources not sent
+\_SB_.PCI0.RES0 [PNP0C02] sta 0xf
+  window 0x4010000000+0x10000000
+\_SB_.PCI0.S00_ sta 0xf adr 0
+\_SB_.GED_ [ACPI0013] sta 0xf uid GED
+  irq 41 (edge)
+\_SB_.PWRB [PNP0C0C] sta 0xf uid 0
+\_SB_.GEDD [PNP0C33] sta 0xf uid 0
+\_TZ_ sta 0xf
+acpid: 50 devices, 50 present; 0 took a method to describe (_HID 0, _CID 0, _UID 0, _STA 0, _CRS 0, _DSD 0); 0 have _INI, 0 power by method
+acpid: describing them touched operation regions for 0 (0 refused); methods failed for 0; _INI and _REG touched none

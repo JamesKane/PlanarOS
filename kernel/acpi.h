@@ -110,5 +110,6 @@ const char *acpi_quirk_name(void);
 
 /* Print the tables found and the facts read from them. */
 void acpi_report(void);
+void acpi_dump_tables(void);   /* "dumpacpi": every table in hex */
 
 #endif /* KERNEL_ACPI_H */

@@ -9,6 +9,7 @@ LLD_BIN    ?= /opt/homebrew/opt/lld@$(LLVM_MAJOR)/bin
 
 CROSS_CC := $(LLVM_BIN)/clang
 OBJCOPY  := $(LLVM_BIN)/llvm-objcopy
+AR       := $(LLVM_BIN)/llvm-ar
 READELF  := $(LLVM_BIN)/llvm-readelf
 LD_PATH  := $(LLD_BIN)/ld.lld
 

@@ -1,0 +1,723 @@
+\_SB_ sta 0xf; _INI
+\_SB_.UCRU [CIXHA018] sta 0xb uid 2
+  mmio 0x416009c+0x80
+\_SB_.COM0 [ARMH0011] sta 0xf uid 1; _STA
+  mmio 0x40b0000+0x1000
+  irq 328
+  3 resources not sent
+\_SB_.COM1 [ARMH0011] sta 0xf uid 2; _STA
+  mmio 0x40c0000+0x1000
+  irq 329
+  3 resources not sent
+\_SB_.COM2 [ARMH0011] sta 0xf uid 3; _STA
+  mmio 0x40d0000+0x1000
+  irq 330
+  1 resources not sent
+\_SB_.COM3 [ARMH0011] sta 0xf uid 4; _STA
+  mmio 0x40e0000+0x1000
+  irq 331
+  3 resources not sent
+\_SB_.DSTD [cix,dst] sta 0xb uid 0
+  mmio 0x83000000+0x400000
+\_SB_.DSTD.EXTR [rdr,exceptiontrace] sta 0xb uid 1
+\_SB_.DSTD.APAD [rdr,rdr_ap_adapter] sta 0xb uid 2
+  mmio 0x83de0000+0x20000
+\_SB_.RAOP [ramoops] sta 0x3 uid 18
+  mmio 0x83d00000+0xa0000
+\_SB_.SEPM [cix,se_pm_crash] sta 0x3 uid 16
+\_SB_.DSMC [cix,cix_se2ap_mbox] sta 0x3 uid 17
+\_SB_.PDC0 [CIXHA019] sta 0xb uid 0
+  mmio 0x16000000+0x1000
+\_SB_.MBX0 [CIXHA001] sta 0xb uid 0
+  mmio 0x5060000+0x10000
+  irq 410
+\_SB_.MBX1 [CIXHA001] sta 0xb uid 1
+  mmio 0x5070000+0x10000
+  irq 411
+\_SB_.MBX2 [CIXHA001] sta 0 uid 2
+\_SB_.MBX3 [CIXHA001] sta 0 uid 3
+\_SB_.MBX4 [CIXHA001] sta 0xb uid 4; _STA region refused
+  mmio 0x7100000+0x10000
+  irq 265
+\_SB_.MBX5 [CIXHA001] sta 0xb uid 5; _STA region refused
+  mmio 0x70f0000+0x10000
+  irq 264
+\_SB_.MBX6 [CIXHA001] sta 0xb uid 6
+  mmio 0x6590000+0x10000
+  irq 395
+\_SB_.MBX7 [CIXHA001] sta 0xb uid 7
+  mmio 0x65a0000+0x10000
+  irq 391
+\_SB_.CCLK [CIXHA010] sta 0xb uid 0
+\_SB_.REST [CIXA1019] sta 0xb uid 0
+\_SB_.RST0 [CIXHA020] sta 0xb uid 0
+  mmio 0x16000000+0x1000
+\_SB_.RST1 [CIXHA021] sta 0xb uid 0
+  mmio 0x4160000+0x1000
+\_SB_.CRU0 [CIXHA018] sta 0xb uid 4
+  mmio 0x16000000+0x1000
+\_SB_.GCRU [CIXHA018] sta 0 uid 3
+\_SB_.MAC0 [CIXH7020] sta 0 uid 0; _STA region refused
+\_SB_.MAC0.PHY0 sta 0xf adr 0x1
+\_SB_.MAC1 [CIXH7020] sta 0 uid 1; _STA region refused
+\_SB_.MAC1.PHY1 sta 0xf adr 0x2
+\_SB_.SHM0 [CIXHA004] sta 0xb uid 0
+  mmio 0x6590000+0x80
+\_SB_.SHM1 [CIXHA005] sta 0xb uid 0
+  mmio 0x65a0000+0x80
+\_SB_.SCMI [CIXHA006] sta 0xb uid 0
+\_SB_.SCMI.DVFS [CIXHA008] sta 0 uid 0
+\_SB_.SCMI.CLKS [CIXHA009] sta 0 uid 0
+\_SB_.PMMX [CIXHA000] sta 0x3; _STA
+\_SB_.ADSS [CIXH6060] sta 0xb uid 0; _STA region refused
+  mmio 0x7110000+0x10000
+\_SB_.ADSS.ACLK [CIXH6061] sta 0xb uid 0; _STA power region refused
+\_SB_.ADSS.ARST [CIXH6062] sta 0xb uid 0; _STA region refused
+\_SB_.ACRU [CIXHA018] sta 0xb uid 0
+  mmio 0x7110000+0x10000
+\_SB_.GPI0 [CIXH1002] sta 0xf uid 0
+  mmio 0x4120000+0x10000
+  irq 336
+\_SB_.GPI1 [CIXH1003] sta 0xf uid 1
+  mmio 0x4130000+0x10000
+  irq 337
+\_SB_.GPI2 [CIXH1003] sta 0xf uid 2
+  mmio 0x4140000+0x10000
+  irq 338
+\_SB_.GPI3 [CIXH1003] sta 0xf uid 3
+  mmio 0x4150000+0x10000
+  irq 339
+\_SB_.GPI4 [CIXH1003] sta 0xf uid 4
+  mmio 0x16004000+0x1000
+  irq 404
+\_SB_.GPI5 [CIXH1003] sta 0xf uid 5
+  mmio 0x16005000+0x1000
+  irq 405
+\_SB_.GPI6 [CIXH1003] sta 0xf uid 6
+  mmio 0x16006000+0x1000
+  irq 406
+\_SB_.PWM0 [CIXH2011] sta 0xb uid 0
+  mmio 0x4110000+0x1000
+  1 resources not sent
+\_SB_.PWM1 [CIXH2011] sta 0 uid 1
+\_SB_.PWM3 [CIXH2011] sta 0 uid 3
+\_SB_.PWM5 [CIXH2011] sta 0 uid 5
+\_SB_.TMR0 [CIXH1007] sta 0xb uid 0
+  mmio 0x4116000+0x2000
+  irq 502
+\_SB_.HDA_ [CIXH6020] sta 0xb uid 0; _STA region refused
+  mmio 0x70c0000+0x10000
+  irq 266
+  1 resources not sent
+\_SB_.DCRU [CIXHA018] sta 0xb uid 1; _STA region refused
+  mmio 0x7110000+0x10000
+\_SB_.DSP_ [CIXH6000] sta 0xb uid 0; _STA region refused
+  mmio 0x7000000+0x1000000
+  irq 261
+\_SB_.DMA0 [CIXHA014] sta 0xb uid 0
+  mmio 0x4190000+0x10000
+  irq 335
+\_SB_.DMA1 [CIXH1006] sta 0xb uid 0; _STA region refused
+  mmio 0x7010000+0x10000
+  irq 262
+\_SB_.XSPI [CIXH2002] sta 0 uid 0
+\_SB_.I2C0 [CIXH200B] sta 0xf uid 0; _STA region refused
+  mmio 0x4010000+0x10000
+  irq 318
+  1 resources not sent
+\_SB_.I2C0.IIS0 [CIXH3024] sta 0xb uid 0
+  bus 52 on \_SB_.I2C0
+  gpio 12 (2 pins) on \_SB_.GPI1
+  2 resources not sent
+\_SB_.I2C0.MTR0 [CIXH3023] sta 0xb uid 0
+  bus 64 on \_SB_.I2C0
+\_SB_.I2C1 [CIXH200B] sta 0xf uid 1; _STA region refused
+  mmio 0x4020000+0x10000
+  irq 319
+\_SB_.I2C1.IIS2 [CIXH3024] sta 0xb uid 2
+  bus 56 on \_SB_.I2C1
+  gpio 11 (2 pins) on \_SB_.GPI1
+  2 resources not sent
+\_SB_.I2C1.IIS1 [CIXH3024] sta 0xb uid 1
+  bus 54 on \_SB_.I2C1
+  gpio 17 (2 pins) on \_SB_.GPI1
+  2 resources not sent
+\_SB_.I2C2 [CIXH200B] sta 0xf uid 2; _STA region refused
+  mmio 0x4030000+0x10000
+  irq 320
+  gpio 12 (2 pins) on \_SB_.GPI0
+  1 resources not sent
+\_SB_.I2C2.RTL5 [RTL5682] sta 0xb uid 0
+  gpio 10 (int edge shared) on \_SB_.GPI3
+  bus 26 on \_SB_.I2C2
+  1 resources not sent
+\_SB_.I2C3 [CIXH200B] sta 0xf uid 3; _STA region refused
+  mmio 0x4040000+0x10000
+  irq 321
+  gpio 15 (2 pins) on \_SB_.GPI0
+  1 resources not sent
+\_SB_.I2C3.RTC0 [RX008900] sta 0xb uid 0
+  bus 50 on \_SB_.I2C3
+  gpio 10 (int level low) on \_SB_.GPI4
+  1 resources not sent
+\_SB_.I2C4 [CIXH200B] sta 0xf uid 4; _STA region refused
+  mmio 0x4050000+0x10000
+  irq 322
+  1 resources not sent
+\_SB_.I2C5 [CIXH200B] sta 0xf uid 5; _STA region refused
+  mmio 0x4060000+0x10000
+  irq 323
+  1 resources not sent
+\_SB_.I2C6 [CIXH200B] sta 0xf uid 6; _STA region refused
+  mmio 0x4070000+0x10000
+  irq 324
+\_SB_.I2C7 [CIXH200B] sta 0xf uid 7; _STA region refused
+  mmio 0x4080000+0x10000
+  irq 325
+\_SB_.I2C7.PD00 [CIXH200D] sta 0xb uid 1
+  bus 48 on \_SB_.I2C7
+  gpio 7 (int level low) on \_SB_.GPI4
+\_SB_.I2C7.PD01 [CIXH200D] sta 0xb uid 2
+  bus 49 on \_SB_.I2C7
+  gpio 7 (int level low) on \_SB_.GPI4
+\_SB_.SPI0 [CIXH2001] sta 0xf uid 0
+  mmio 0x4090000+0x10000
+  irq 326
+  1 resources not sent
+\_SB_.SPI0.TP3_ [SPT0002] sta 0xb uid 1; _CRS
+  bus 0 on \_SB_.SPI0
+\_SB_.SPI0.TP4_ [SPT0002] sta 0xb uid 2; _CRS
+  bus 1 on \_SB_.SPI0
+\_SB_.SPI1 [CIXH2001] sta 0 uid 1
+\_SB_.I3C0 [CIXH200C] sta 0 uid 0
+\_SB_.I3C1 [CIXH200C] sta 0 uid 1
+\_SB_.PCI0 [PNP0A08 PNP0A03] sta 0xf uid 0; _STA _CRS region refused
+  window 0x60000000+0x20000000
+  window 0x1800000000+0x400000000
+  1 resources not sent
+\_SB_.PCI1 [PNP0A08 PNP0A03] sta 0xf uid 1; _STA _CRS region refused
+  window 0x50000000+0x10000000
+  window 0x1400000000+0x400000000
+  1 resources not sent
+\_SB_.PCI2 [PNP0A08 PNP0A03] sta 0xf uid 2; _STA _CRS region refused
+  window 0x40000000+0x10000000
+  window 0x1000000000+0x400000000
+  1 resources not sent
+\_SB_.PCI3 [PNP0A08 PNP0A03] sta 0xf uid 3; _STA _CRS region refused
+  window 0x38000000+0x8000000
+  window 0xc00000000+0x400000000
+  1 resources not sent
+\_SB_.PCI4 [PNP0A08 PNP0A03] sta 0xf uid 4; _STA _CRS region refused
+  window 0x30000000+0x8000000
+  window 0x800000000+0x400000000
+  1 resources not sent
+\_SB_.RES0 [PNP0C02] sta 0xf uid 0
+  mmio 0x20000000+0x10000000
+\_SB_.PRC0 [CIXH2020] sta 0xb uid 0; _STA region refused
+  mmio 0xa010000+0x10000
+  mmio 0xa000000+0x10000
+  mmio 0x2c000000+0x4000000
+  mmio 0x60000000+0x100000
+  irq 434
+  irq 435
+  irq 436
+  irq 437
+  irq 438
+  irq 443
+  window 0x60200000+0xfe00000
+  window 0x1800000000+0x400000000
+  gpio 1 on \_SB_.GPI4
+  3 resources not sent
+\_SB_.PCP0 [CIXH2023] sta 0xb uid 0; _STA region refused
+  mmio 0xa020000+0x40000
+\_SB_.PCP0.PX8P sta 0xf adr 0
+\_SB_.PRC1 [CIXH2020] sta 0xb uid 1; _STA region refused
+  mmio 0xa070000+0x10000
+  mmio 0xa060000+0x10000
+  mmio 0x29000000+0x3000000
+  mmio 0x50000000+0x100000
+  irq 444
+  irq 445
+  irq 446
+  irq 447
+  irq 448
+  irq 453
+  window 0x50200000+0xfe00000
+  window 0x1400000000+0x400000000
+  gpio 3 on \_SB_.GPI4
+  3 resources not sent
+\_SB_.PCP1 [CIXH2023] sta 0xb uid 1; _STA region refused
+  mmio 0xa080000+0x40000
+\_SB_.PCP1.PX4P sta 0xf adr 0
+\_SB_.PRC2 [CIXH2020] sta 0xb uid 2; _STA region refused
+  mmio 0xa0c0000+0x10000
+  mmio 0xa060000+0x10000
+  mmio 0x26000000+0x3000000
+  mmio 0x40000000+0x100000
+  irq 454
+  irq 455
+  irq 456
+  irq 457
+  irq 458
+  irq 483
+  window 0x40200000+0xfe00000
+  window 0x1000000000+0x400000000
+  gpio 2 on \_SB_.GPI4
+  3 resources not sent
+\_SB_.PRC3 [CIXH2020] sta 0xb uid 3; _STA region refused
+  mmio 0xa0e0000+0x10000
+  mmio 0xa060000+0x10000
+  mmio 0x23000000+0x3000000
+  mmio 0x38000000+0x100000
+  irq 472
+  irq 473
+  irq 474
+  irq 475
+  irq 476
+  irq 482
+  window 0x38200000+0x7e00000
+  window 0xc00000000+0x400000000
+  gpio 5 on \_SB_.GPI4
+  3 resources not sent
+\_SB_.PRC4 [CIXH2020] sta 0xb uid 4; _STA region refused
+  mmio 0xa0d0000+0x10000
+  mmio 0xa060000+0x10000
+  mmio 0x20000000+0x3000000
+  mmio 0x30000000+0x100000
+  irq 463
+  irq 464
+  irq 465
+  irq 466
+  irq 467
+  irq 481
+  window 0x30200000+0x7e00000
+  window 0x800000000+0x400000000
+  gpio 4 on \_SB_.GPI4
+  3 resources not sent
+\_SB_.PCP2 [CIXH2023] sta 0xb uid 2; _STA region refused
+  mmio 0xa0f0000+0x40000
+\_SB_.PCP2.PX10 sta 0xb adr 0; _STA
+\_SB_.PCP2.PX11 sta 0xb adr 0x1; _STA
+\_SB_.PCP2.PX2P sta 0xb adr 0x2; _STA
+\_SB_.VPU0 [CIXH3010] sta 0xb uid 0; power
+  mmio 0x14230000+0x10000
+  mmio 0x14240000+0x10000
+  irq 358
+\_SB_.VPU0.CRE0 sta 0xb adr 0; power
+\_SB_.VPU0.CRE1 sta 0xb adr 0x1; power
+\_SB_.VPU0.CRE2 sta 0xb adr 0x2; power
+\_SB_.VPU0.CRE3 sta 0xb adr 0x3; power
+\_SB_.VDP0 [CIXH503F] sta 0 uid 0
+\_SB_.VDP1 [CIXH503F] sta 0 uid 1
+\_SB_.VDP2 [CIXH503F] sta 0 uid 2
+\_SB_.VDP3 [CIXH503F] sta 0 uid 3
+\_SB_.VDP4 [CIXH503F] sta 0 uid 4
+\_SB_.VDP5 [CIXH503F] sta 0 uid 5
+\_SB_.VDP6 [CIXH503F] sta 0 uid 6
+\_SB_.VDP7 [CIXH503F] sta 0 uid 7
+\_SB_.VDP8 [CIXH503F] sta 0 uid 8
+\_SB_.VDP9 [CIXH503F] sta 0 uid 9
+\_SB_.DP00 [CIXH502F] sta 0xb uid 0; _STA region refused
+  mmio 0x14064000+0x4000
+  mmio 0x14068000+0x4000
+  mmio 0x1406ff00+0x100
+  mmio 0x14050000+0x304
+  irq 364
+\_SB_.DP01 [CIXH502F] sta 0xb uid 1; _STA region refused
+  mmio 0x140d4000+0x4000
+  mmio 0x140d8000+0x4000
+  mmio 0x140dff00+0x100
+  mmio 0x140c0000+0x304
+  irq 365
+\_SB_.DP02 [CIXH502F] sta 0xb uid 2; _STA region refused
+  mmio 0x14144000+0x4000
+  mmio 0x14148000+0x4000
+  mmio 0x1414c000+0x4000
+  mmio 0x14130000+0x320
+  irq 366
+\_SB_.DP03 [CIXH502F] sta 0xb uid 3; _STA region refused
+  mmio 0x141b4000+0x4000
+  mmio 0x141b8000+0x4000
+  mmio 0x141bff00+0x100
+  mmio 0x141a0000+0x304
+  irq 367
+\_SB_.DP04 [CIXH502F] sta 0xb uid 4; _STA region refused
+  mmio 0x14224000+0x4000
+  mmio 0x14228000+0x4000
+  mmio 0x1422ff00+0x100
+  mmio 0x14210000+0x304
+  irq 368
+\_SB_.DPU0 [CIXH5010] sta 0xb uid 0; _STA power region refused
+  mmio 0x14010000+0x20000
+  irq 348
+\_SB_.DPU1 [CIXH5010] sta 0xb uid 1; _STA power region refused
+  mmio 0x14080000+0x20000
+  irq 350
+\_SB_.DPU2 [CIXH5010] sta 0xb uid 2; _STA power region refused
+  mmio 0x140f0000+0x20000
+  irq 352
+\_SB_.DPU3 [CIXH5010] sta 0xb uid 3; _STA power region refused
+  mmio 0x14160000+0x20000
+  irq 354
+\_SB_.DPU4 [CIXH5010] sta 0xb uid 4; _STA power region refused
+  mmio 0x141d0000+0x20000
+  irq 356
+\_SB_.AEU0 [CIXH5011] sta 0 uid 0; _STA
+\_SB_.AEU1 [CIXH5011] sta 0 uid 1; _STA
+\_SB_.AEU2 [CIXH5011] sta 0 uid 2; _STA
+\_SB_.AEU3 [CIXH5011] sta 0 uid 3; _STA
+\_SB_.AEU4 [CIXH5011] sta 0 uid 4; _STA
+\_SB_.DPBL [CIXH5041] sta 0xb uid 0
+  gpio 15 on \_SB_.GPI3
+\_SB_.EDP0 [CIXH5040] sta 0xb uid 0
+  gpio 16 on \_SB_.GPI3
+  1 resources not sent
+\_SB_.PMA_ [CIXHA012] sta 0x3 uid 0
+  mmio 0xbce00000+0x1000000
+\_SB_.PMGM [CIXHA013] sta 0x3 uid 0
+\_SB_.GPUP [CIXH5001] sta 0xb uid 0; power
+\_SB_.GPU_ [CIXH5000] sta 0xb uid 0
+  mmio 0x15000000+0x10000
+  mmio 0x15010000+0x480000
+  irq 269
+  irq 270
+  irq 271
+\_SB_.NPU0 [CIXH4000] sta 0xb uid 0; _INI power
+  mmio 0x14260000+0x10000
+  irq 359
+\_SB_.NPU0.CRE0 [CIXH4010] sta 0xb uid 0; power
+\_SB_.NPU0.CRE1 [CIXH4010] sta 0xb uid 1; power
+\_SB_.NPU0.CRE2 [CIXH4010] sta 0xb uid 2; power
+\_SB_.I2S0 [CIXH6010] sta 0 uid 0; _STA region refused
+\_SB_.I2S1 [CIXH6010] sta 0 uid 1; _STA region refused
+\_SB_.I2S2 [CIXH6010] sta 0 uid 2; _STA region refused
+\_SB_.I2S3 [CIXH6011] sta 0 uid 3; _STA region refused
+\_SB_.I2S4 [CIXH6011] sta 0 uid 4; _STA region refused
+\_SB_.I2S5 [CIXH6011] sta 0xb uid 5; _STA region refused
+  mmio 0x7070000+0x10000
+  irq 256
+  2 resources not sent
+\_SB_.I2S6 [CIXH6011] sta 0xb uid 6; _STA region refused
+  mmio 0x7080000+0x10000
+  irq 257
+  2 resources not sent
+\_SB_.I2S7 [CIXH6011] sta 0 uid 7; _STA region refused
+\_SB_.I2S8 [CIXH6011] sta 0xb uid 8; _STA region refused
+  mmio 0x70a0000+0x10000
+  irq 259
+  2 resources not sent
+\_SB_.I2S9 [CIXH6011] sta 0xb uid 9; _STA region refused
+  mmio 0x70b0000+0x10000
+  irq 260
+  2 resources not sent
+\_SB_.XHC0 [PNP0D10] sta 0 uid 0; _STA _CRS region refused
+\_SB_.XHC1 [PNP0D10] sta 0xf uid 1; _STA _CRS region refused
+  mmio 0x9088000+0x8000
+  irq 300
+\_SB_.XHC2 [PNP0D10] sta 0xf uid 2; _STA _CRS region refused
+  mmio 0x90f8000+0x8000
+  irq 306
+\_SB_.XHC3 [PNP0D10] sta 0xf uid 3; _STA _CRS region refused
+  mmio 0x9168000+0x8000
+  irq 312
+\_SB_.XHC4 [PNP0D10] sta 0 uid 4; _STA _CRS region refused
+\_SB_.XHC5 [PNP0D10] sta 0 uid 5; _STA _CRS region refused
+\_SB_.USB0 [PNP0D10] sta 0xf uid 6; _STA _CRS region refused
+  mmio 0x9268000+0x8000
+  irq 272
+\_SB_.USB1 [PNP0D10] sta 0xf uid 7; _STA _CRS region refused
+  mmio 0x9298000+0x8000
+  irq 275
+\_SB_.USB2 [PNP0D10] sta 0xf uid 8; _STA _CRS region refused
+  mmio 0x92c8000+0x8000
+  irq 278
+\_SB_.USB3 [PNP0D10] sta 0xf uid 9; _STA _CRS region refused
+  mmio 0x92f8000+0x8000
+  irq 281
+\_SB_.SUB0 [CIXH2030] sta 0xb uid 0; _STA region refused
+  mmio 0x9000310+0x4
+  mmio 0x9000400+0x4
+  1 resources not sent
+\_SB_.SUB0.CUB0 [CIXH2031] sta 0xb uid 0; _STA
+  mmio 0x9010000+0x4000
+  mmio 0x9014000+0x4000
+  mmio 0x9018000+0x8000
+  irq 294
+  irq 294
+  irq 295
+  irq 294 on \_SB_.PDC0
+\_SB_.U2P4 [CIXH2032] sta 0xb uid 4
+\_SB_.UCP0 [CIXH2033] sta 0xb uid 0
+  mmio 0x9030000+0x40000
+\_SB_.UCP0.USBP sta 0xf adr 0
+\_SB_.UCP0.UDPP sta 0xf adr 0x1
+\_SB_.SUB1 [CIXH2030] sta 0xb uid 1; _STA region refused
+  mmio 0x9070310+0x4
+  mmio 0x9070400+0x4
+  1 resources not sent
+\_SB_.SUB1.CUB1 [CIXH2031] sta 0xb uid 1; _STA
+  mmio 0x9080000+0x4000
+  mmio 0x9084000+0x4000
+  mmio 0x9088000+0x8000
+  irq 300
+  irq 300
+  irq 301
+  irq 300 on \_SB_.PDC0
+\_SB_.U2P5 [CIXH2032] sta 0xb uid 5
+\_SB_.UCP1 [CIXH2033] sta 0xb uid 1
+  mmio 0x90a0000+0x40000
+\_SB_.UCP1.USBP sta 0xf adr 0
+\_SB_.UCP1.UDPP sta 0xf adr 0x1
+\_SB_.SUB2 [CIXH2030] sta 0xb uid 2; _STA region refused
+  mmio 0x90e0310+0x4
+  mmio 0x90e0400+0x4
+  1 resources not sent
+\_SB_.SUB2.CUB2 [CIXH2031] sta 0xb uid 2; _STA
+  mmio 0x90f0000+0x4000
+  mmio 0x90f4000+0x4000
+  mmio 0x90f8000+0x8000
+  irq 306
+  irq 306
+  irq 307
+  irq 306 on \_SB_.PDC0
+\_SB_.U2P8 [CIXH2032] sta 0xb uid 8
+\_SB_.UCP2 [CIXH2033] sta 0xb uid 2
+  mmio 0x9110000+0x40000
+\_SB_.UCP2.USBP sta 0xf adr 0
+\_SB_.UCP2.UDPP sta 0xf adr 0x1
+\_SB_.SUB3 [CIXH2030] sta 0xb uid 3; _STA region refused
+  mmio 0x9150310+0x4
+  mmio 0x9150400+0x4
+  1 resources not sent
+\_SB_.SUB3.CUB3 [CIXH2031] sta 0xb uid 3; _STA
+  mmio 0x9160000+0x4000
+  mmio 0x9164000+0x4000
+  mmio 0x9168000+0x8000
+  irq 312
+  irq 312
+  irq 313
+  irq 312 on \_SB_.PDC0
+\_SB_.U2P9 [CIXH2032] sta 0xb uid 9
+\_SB_.UCP3 [CIXH2033] sta 0xb uid 3
+  mmio 0x9180000+0x40000
+\_SB_.UCP3.USBP sta 0xf adr 0
+\_SB_.UCP3.UDPP sta 0xf adr 0x1
+\_SB_.SUB4 [CIXH2030] sta 0xb uid 4; _STA region refused
+  mmio 0x91c0314+0x4
+  mmio 0x91c0400+0x4
+  1 resources not sent
+\_SB_.SUB4.CUB4 [CIXH2031] sta 0xb uid 4; _STA
+  mmio 0x91d0000+0x4000
+  mmio 0x91d4000+0x4000
+  mmio 0x91d8000+0x8000
+  irq 284
+  irq 284
+  irq 285
+  irq 284 on \_SB_.PDC0
+\_SB_.SUB5 [CIXH2030] sta 0xb uid 5; _STA region refused
+  mmio 0x91c0324+0x4
+  mmio 0x91c0410+0x4
+  1 resources not sent
+\_SB_.SUB5.CUB5 [CIXH2031] sta 0xb uid 5; _STA
+  mmio 0x91e0000+0x4000
+  mmio 0x91e4000+0x4000
+  mmio 0x91e8000+0x8000
+  irq 289
+  irq 289
+  irq 290
+  irq 289 on \_SB_.PDC0
+\_SB_.U2P6 [CIXH2032] sta 0xb uid 6
+\_SB_.U2P7 [CIXH2032] sta 0xb uid 7
+\_SB_.U3P4 [CIXH2034] sta 0xb uid 4
+  mmio 0x9210000+0x40000
+\_SB_.U3P4.USB0 sta 0xf adr 0
+\_SB_.U3P4.USB1 sta 0xf adr 0x1
+\_SB_.HUB0 [CIXH2030] sta 0xb uid 6; _STA region refused
+  mmio 0x9250310+0x4
+  mmio 0x9250400+0x4
+  1 resources not sent
+\_SB_.HUB0.CUB0 [CIXH2031] sta 0xb uid 0; _STA
+  mmio 0x9260000+0x4000
+  mmio 0x9264000+0x4000
+  mmio 0x9268000+0x8000
+  irq 272
+  irq 272
+  irq 273
+  irq 272 on \_SB_.PDC0
+\_SB_.HUB1 [CIXH2030] sta 0xb uid 7; _STA region refused
+  mmio 0x9280310+0x4
+  mmio 0x9280400+0x4
+  1 resources not sent
+\_SB_.HUB1.CUB1 [CIXH2031] sta 0xb uid 1; _STA
+  mmio 0x9290000+0x4000
+  mmio 0x9294000+0x4000
+  mmio 0x9298000+0x8000
+  irq 275
+  irq 275
+  irq 276
+  irq 275 on \_SB_.PDC0
+\_SB_.U2P0 [CIXH2032] sta 0xb uid 0
+\_SB_.U2P1 [CIXH2032] sta 0xb uid 1
+\_SB_.HUB2 [CIXH2030] sta 0xb uid 8; _STA region refused
+  mmio 0x92b0310+0x4
+  mmio 0x92b0400+0x4
+  1 resources not sent
+\_SB_.HUB2.CUB2 [CIXH2031] sta 0xb uid 2; _STA
+  mmio 0x92c0000+0x4000
+  mmio 0x92c4000+0x4000
+  mmio 0x92c8000+0x8000
+  irq 278
+  irq 278
+  irq 279
+  irq 278 on \_SB_.PDC0
+\_SB_.U2P2 [CIXH2032] sta 0xb uid 2
+\_SB_.HUB3 [CIXH2030] sta 0xb uid 9; _STA region refused
+  mmio 0x92e0310+0x4
+  mmio 0x92e0400+0x4
+  1 resources not sent
+\_SB_.HUB3.CUB3 [CIXH2031] sta 0xb uid 3; _STA
+  mmio 0x92f0000+0x4000
+  mmio 0x92f4000+0x4000
+  mmio 0x92f8000+0x8000
+  irq 281
+  irq 281
+  irq 282
+  irq 281 on \_SB_.PDC0
+\_SB_.U2P3 [CIXH2032] sta 0xb uid 3
+\_SB_.V4L2 [CIXH3020] sta 0xb uid 0; _STA region refused
+  irq 360
+  irq 361
+\_SB_.ISP0 [CIXH3021] sta 0xb uid 0; _STA region refused
+  mmio 0x14340000+0x10000
+  mmio 0x14360000+0x50000
+\_SB_.ISP1 [CIXH3022] sta 0 uid 0
+\_SB_.ISP2 [CIXH3022] sta 0 uid 1
+\_SB_.ISP3 [CIXH3022] sta 0 uid 2
+\_SB_.ISPM [CIXH3025] sta 0xb uid 0; _STA power region refused
+\_SB_.VIHW [CIXH3026] sta 0xb uid 0; _STA region refused
+  irq 484
+  irq 485
+  irq 486
+  irq 487
+  irq 488
+  irq 489
+  irq 490
+  irq 491
+\_SB_.CSI0 [CIXH3027] sta 0xb uid 0
+  mmio 0x14270000+0x10000
+\_SB_.CSI1 [CIXH3027] sta 0 uid 1
+\_SB_.CBD0 [CIXH3028] sta 0xb uid 0
+  mmio 0x142b0000+0x10000
+  irq 492
+\_SB_.CBD1 [CIXH3028] sta 0 uid 1
+\_SB_.CBD2 [CIXH3028] sta 0 uid 2
+\_SB_.CBD3 [CIXH3028] sta 0 uid 3
+\_SB_.MPC0 [CIXH3029] sta 0xb uid 0
+  mmio 0x14280000+0x10000
+  irq 484
+  irq 485
+\_SB_.MPC1 [CIXH3029] sta 0 uid 1
+\_SB_.MPC2 [CIXH3029] sta 0 uid 2
+\_SB_.MPC3 [CIXH3029] sta 0 uid 3
+\_SB_.DPH0 [CIXH302A] sta 0xb uid 0
+  mmio 0x142a0000+0x10000
+\_SB_.DPH1 [CIXH302A] sta 0 uid 1
+\_SB_.DPR0 [CIXH302B] sta 0 uid 0
+\_SB_.DPR1 [CIXH302B] sta 0xb uid 1
+\_SB_.DPR2 [CIXH302B] sta 0 uid 2
+\_SB_.DPR3 [CIXH302B] sta 0 uid 3
+\_SB_.DPR4 [CIXH302B] sta 0 uid 4
+\_SB_.DPR5 [CIXH302B] sta 0 uid 5
+\_SB_.TEE0 [CIXHA022 PRP0001] sta 0xb uid 0
+\_SB_.DTPM [MSFT0101] sta 0xb uid 1; _CRS
+  bus 0 on \_SB_.SPI0
+\_SB_.TREE [CIXHA023] sta 0xb uid 0; _STA _CRS
+\_SB_.PEP0 [CIXHA026] sta 0xb uid 0; _STA
+\_SB_.SNDC [CIXH6070] sta 0xb uid 0
+  1 resources not sent
+\_SB_.EC0_ [CIXHA015] sta 0x3 uid 0; _STA _INI
+\_SB_.BAT0 [PNP0C0A] sta 0xf uid 0; _STA region refused
+\_SB_.PWRB [PNP0C0C] sta 0xf; _STA
+\_SB_.AC__ [ACPI0003] sta 0xf uid 0; _STA
+\_SB_.MUX0 [CIXHA016] sta 0xb uid 0
+  mmio 0x4170000+0x1000
+  38 resources not sent
+\_SB_.MUX1 [CIXHA017] sta 0xb uid 1
+  mmio 0x16007000+0x1000
+  24 resources not sent
+\_SB_.HWMN [CIXHA024] sta 0x3 uid 0; _STA
+\_SB_.PVC0 [regulator-fixed] sta 0xb uid 7
+  gpio 8 on \_SB_.GPI4
+  1 resources not sent
+\_SB_.PVC1 [regulator-fixed] sta 0xb uid 8
+  gpio 11 on \_SB_.GPI4
+  1 resources not sent
+\_SB_.PVC4 [regulator-fixed] sta 0xb uid 9
+  gpio 12 on \_SB_.GPI4
+  1 resources not sent
+\_SB_.PVC5 [regulator-fixed] sta 0xb uid 32
+  2 resources not sent
+\_SB_.GPIT [GPIT0000] sta 0xf uid 0
+  gpio 19 on \_SB_.GPI0
+  gpio 18 on \_SB_.GPI0
+  gpio 28 on \_SB_.GPI0
+  gpio 30 on \_SB_.GPI1
+  gpio 31 on \_SB_.GPI1
+  gpio 20 on \_SB_.GPI1
+  gpio 16 on \_SB_.GPI1
+  gpio 21 on \_SB_.GPI1
+  gpio 24 on \_SB_.GPI1
+  gpio 25 on \_SB_.GPI1
+  gpio 1 on \_SB_.GPI0
+  gpio 2 on \_SB_.GPI3
+  gpio 31 on \_SB_.GPI2
+  gpio 2 on \_SB_.GPI0
+  gpio 3 on \_SB_.GPI3
+  gpio 0 on \_SB_.GPI3
+  gpio 1 on \_SB_.GPI3
+  gpio 12 on \_SB_.GPI0
+  gpio 13 on \_SB_.GPI0
+  gpio 1 on \_SB_.GPI1
+  gpio 3 on \_SB_.GPI1
+  gpio 3 on \_SB_.GPI0
+  gpio 4 on \_SB_.GPI1
+  gpio 17 on \_SB_.GPI1
+  gpio 15 on \_SB_.GPI1
+  gpio 5 on \_SB_.GPI1
+  gpio 18 on \_SB_.GPI1
+  gpio 19 on \_SB_.GPI1
+\_SB_.SPB0 [SPBD0000] sta 0xf uid 0
+  bus 56 on \_SB_.I2C2
+\_SB_.SPB1 [SPBD0000] sta 0xf uid 1
+  bus 56 on \_SB_.I2C4
+\_SB_.SPB2 [SPBD0000] sta 0xf uid 2
+  bus 56 on \_SB_.I2C5
+\_SB_.SPB3 [SPBD0000] sta 0xf uid 3
+  bus 0 on \_SB_.SPI0
+\_SB_.SPB4 [SPBD0000] sta 0xf uid 4
+  bus 1 on \_SB_.SPI0
+\_SB_.C000 [ACPI0010] sta 0xf uid 0
+\_SB_.C000.C001 [ACPI0010] sta 0xf uid 1
+\_SB_.C000.C001.CPU0 [ACPI0007] sta 0xf uid 0; _STA
+\_SB_.C000.C001.CPU1 [ACPI0007] sta 0xf uid 1; _STA
+\_SB_.C000.C002 [ACPI0010] sta 0xf uid 2
+\_SB_.C000.C002.CPU2 [ACPI0007] sta 0xf uid 2; _STA
+\_SB_.C000.C002.CPU3 [ACPI0007] sta 0xf uid 3; _STA
+\_SB_.C000.C002.CPU4 [ACPI0007] sta 0xf uid 4; _STA
+\_SB_.C000.C002.CPU5 [ACPI0007] sta 0xf uid 5; _STA
+\_SB_.C000.C003 [ACPI0010] sta 0xf uid 3
+\_SB_.C000.C003.CPU6 [ACPI0007] sta 0xf uid 6; _STA
+\_SB_.C000.C003.CPU7 [ACPI0007] sta 0xf uid 7; _STA
+\_SB_.C000.C004 [ACPI0010] sta 0xf uid 4
+\_SB_.C000.C004.CPU8 [ACPI0007] sta 0xf uid 8; _STA
+\_SB_.C000.C004.CPU9 [ACPI0007] sta 0xf uid 9; _STA
+\_SB_.C000.C005 [ACPI0010] sta 0xf uid 5
+\_SB_.C000.C005.CPUA [ACPI0007] sta 0xf uid 10; _STA
+\_SB_.C000.C005.CPUB [ACPI0007] sta 0xf uid 11; _STA
+\_TZ_ sta 0xf
+acpid: 271 devices, 217 present; 121 took a method to describe (_HID 0, _CID 0, _UID 0, _STA 118, _CRS 19, _DSD 0); 3 have _INI, 17 power by method
+acpid: describing them touched operation regions for 77 (77 refused); methods failed for 0; _INI and _REG touched regions, some refused
+acpid: the AML touched 0x5040000, which the host hasn't got
+acpid: the AML touched 0xfffe0000, which the host hasn't got
+acpid: the AML touched 0x4070000, which the host hasn't got
+acpid: the AML touched 0x6510000, which the host hasn't got

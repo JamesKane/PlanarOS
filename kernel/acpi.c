@@ -535,6 +535,33 @@ bool acpi_cluster(uint32_t uid, uint32_t *cluster)
 
 /* --- The report. --- */
 
+/* Every table, as acpi_blob gives them, in hex ("acpi: " lines, each
+ * table ending "acpi: end SIG, N bytes"), for tools/acpi-from-log.py:
+ * the boot argument "dumpacpi" (docs/boards/qemu-virt/README.md). */
+void acpi_dump_tables(void)
+{
+    static const char hex[] = "0123456789abcdef";
+    char line[64 * 2 + 1];
+    uint64_t pa, len;
+
+    for (unsigned t = 1; acpi_blob(t, &pa, &len); t++) {
+        const uint8_t *b = phys_to_virt(pa);
+
+        for (uint64_t off = 0; off < len; off += 64) {
+            uint64_t n = len - off < 64 ? len - off : 64;
+
+            for (uint64_t i = 0; i < n; i++) {
+                line[2 * i] = hex[b[off + i] >> 4];
+                line[2 * i + 1] = hex[b[off + i] & 15];
+            }
+            line[2 * n] = 0;
+            kprintf("acpi: %s\n", line);
+        }
+        kprintf("acpi: end %c%c%c%c, %llu bytes\n", b[0], b[1], b[2], b[3],
+                (unsigned long long)len);
+    }
+}
+
 void acpi_report(void)
 {
     struct acpi_gic g;

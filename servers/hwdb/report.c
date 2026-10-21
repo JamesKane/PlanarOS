@@ -39,7 +39,8 @@ static bool same(const struct hw_ref *a, const struct hw_ref *b)
 {
     if (a->supplier != HW_NONE || b->supplier != HW_NONE)
         return a->supplier == b->supplier;
-    return a->target == b->target && a->handle == b->handle;
+    return a->target == b->target && a->handle == b->handle &&
+           (a->path == b->path || (a->path && b->path && hw_streq(a->path, b->path)));
 }
 
 static bool shown(const struct hw_graph *g, const struct hw_ref *r, bool unmet)
@@ -65,7 +66,10 @@ static void suppliers(struct hw_line *l, const struct hw_graph *g, const struct 
             continue;
         hw_put(l, first ? "" : "; ");
         first = false;
-        if (r->target == HW_NONE) {
+        if (r->target == HW_NONE && r->path) {
+            hw_put(l, r->path);
+            hw_put(l, ", which names no device");
+        } else if (r->target == HW_NONE) {
             hw_put(l, "phandle ");
             hw_put_hex(l, r->handle);
             hw_put(l, ", which names no node");

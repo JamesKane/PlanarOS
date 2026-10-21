@@ -9,7 +9,7 @@ Planar is an operating system for one person and one machine. It turns a modern 
 - **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
 - **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
 
-Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its first user-mode drivers are two RTCs and virtio-mmio on QEMU: hwdb starts them in its device graph's order, and restarts them when they're killed. Storage, a filesystem and a display are still to come in V4 ([V4](docs/v4-plan.md)).
+Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its first user-mode drivers are two RTCs and virtio-mmio on QEMU: hwdb starts them in its device graph's order, and restarts them when they're killed. Under ACPI, acpid runs ACPICA in user mode to describe the namespace, and the same drivers bind as through the device tree. Storage, a filesystem and a display are still to come in V4 ([V4](docs/v4-plan.md)).
 
 The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
@@ -17,6 +17,7 @@ The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which pr
 
 The structure follows omega's:
 - **Portable code** lives in `kernel/`, `lib/`, `servers/`, `drv/` (user-mode drivers), `drivers/` (the kernel's own) and `include/planar/`, and exists once.
+- **Code from elsewhere**, kept unchanged, lives in `third_party/`: ACPICA, which acpid runs.
 - **Architecture code** lives in `arch/<isa>/` and implements `kernel/arch.h`.
 - **SoC code** lives in `plat/<soc>/` and implements `kernel/plat.h`.
 - **No `#ifdef`s on architecture or platform in portable code.** `make check` enforces this. A port that's missing an `arch_*` or `plat_*` function fails to link.

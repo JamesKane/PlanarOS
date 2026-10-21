@@ -3,8 +3,8 @@
 #
 # - conformance/NAME.c: a test program, one file each.
 # - servers/NAME/ and drv/NAME/: a server or a driver, every .c in its
-#   directory but host.c and test.c (servers/hwdb's host harness).
-#   Drivers also link drv.library (lib/drv).
+#   directory but host.c and test.c (the host's harnesses). Drivers also
+#   link drv.library (lib/drv), and acpid links ACPICA (mk/acpica.mk).
 #
 # Each is linked at 0 as a position-independent executable with
 # arch/$(ARCH)/user/user.ld (it relocates itself: lib/rt/reloc.c) and
@@ -23,6 +23,8 @@ USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/s
 	$(BUILD)/user/rt/reloc.o $(BUILD)/user/exec/msg.o \
 	$(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
 USER_DRV     := $(patsubst lib/drv/%.c,$(BUILD)/user/drv-lib/%.o,$(wildcard lib/drv/*.c))
+USER_ACPICA  := $(BUILD)/user/libacpica.a
+ACPICA_OBJS  := $(patsubst third_party/acpica/source/components/%.c,$(BUILD)/user/acpica/%.o,$(ACPICA_SRCS))
 
 $(BUILD)/user/%.o: arch/$(ARCH)/user/%.S
 	@mkdir -p $(dir $@)
@@ -44,6 +46,18 @@ $(BUILD)/user/drv-lib/%.o: lib/drv/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
+# ACPICA, and acpid's files, which see its headers.
+$(BUILD)/user/acpica/%.o: third_party/acpica/source/components/%.c servers/acpid/acplanar.h
+	@mkdir -p $(dir $@)
+	@$(CC) $(ACPICA_CFLAGS) $(USER_FLAGS) -ffreestanding -fno-builtin -fno-stack-protector -fPIE \
+	  -c $< -o $@
+
+$(USER_ACPICA): $(ACPICA_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
+
+$(BUILD)/user/servers/acpid/%.o: USER_CFLAGS += $(ACPICA_INC)
+
 $(BUILD)/user/servers/%.o: servers/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
@@ -63,10 +77,10 @@ $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/
 # A program per directory: $(1) its name, $(2) the directory.
 define user_dir_prog
 $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$$(wildcard $(2)/*.c))) \
-	$(if $(filter drv/%,$(2)),$(USER_DRV))
+	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA))
 $(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) arch/$(ARCH)/user/user.ld
 	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) -o $$@
--include $$($(1)_OBJS:.o=.d)
+-include $$(patsubst %.o,%.d,$$(filter %.o,$$($(1)_OBJS)))
 endef
 $(foreach d,$(USER_DIRS),$(eval $(call user_dir_prog,$(notdir $(d)),$(d))))
 

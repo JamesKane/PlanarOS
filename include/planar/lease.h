@@ -65,4 +65,8 @@ struct FirmwareInfo {
 
 int64_t MapFirmware(Handle root, struct FirmwareInfo *info);
 
+/* The same tables, mapped into a process the caller created (acpid,
+ * which runs the AML in them): the root's holder grants them. */
+int64_t GrantFirmware(Handle root, Handle process);
+
 #endif /* PLANAR_LEASE_H */

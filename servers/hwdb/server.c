@@ -25,7 +25,6 @@
 
 constexpr int64_t SIG_PORT = 16;        /* a driver at hwdb's port */
 constexpr int64_t SIG_CONN = 17;        /* a driver's connection */
-constexpr int64_t SIG_DEAD = 18;        /* a unit's process died */
 constexpr int64_t SIG_TIMER = 19;
 constexpr unsigned CONNS = 64;
 constexpr uint64_t ARENA = 4 << 20;
@@ -88,6 +87,40 @@ void check_failed(const struct unit *u, const char *what)
 
 /* --- The firmware's description. --- */
 
+static uint64_t rd(const uint8_t *p, unsigned off, unsigned bytes)
+{
+    uint64_t v = 0;
+
+    for (unsigned i = 0; i < bytes; i++)
+        v |= (uint64_t)p[off + i] << (8 * i);
+    return v;
+}
+
+/* What MapFirmware mapped, for acpid's windows (acpid.c): the RSDP, the
+ * root table and what it lists, and the FADT's DSDT and FACS. */
+static void tables_mapped(const uint8_t *rsdp, const struct hw_table *t, unsigned n)
+{
+    struct acpid *a = &acpid;
+
+    a->tables[a->ntables++] = (typeof(a->tables[0])){ (uint64_t)rsdp, rsdp[15] >= 2 ? rd(rsdp, 20, 4) : 20 };
+    for (unsigned i = 0; i < n && a->ntables < ACPID_TABLES_MAX; i++) {
+        const uint8_t *p = t[i].data;
+
+        a->tables[a->ntables++] = (typeof(a->tables[0])){ (uint64_t)p, t[i].len };
+        if (p[0] == 'F' && p[1] == 'A' && p[2] == 'C' && p[3] == 'P' && t[i].len >= 44) {
+            uint64_t dsdt = t[i].len >= 148 && rd(p, 140, 8) ? rd(p, 140, 8) : rd(p, 40, 4);
+            uint64_t facs = t[i].len >= 140 && rd(p, 132, 8) ? rd(p, 132, 8) : rd(p, 36, 4);
+
+            for (unsigned k = 0; k < 2 && a->ntables < ACPID_TABLES_MAX; k++) {
+                const uint8_t *q = (const uint8_t *)(k ? facs : dsdt);
+
+                if (q)
+                    a->tables[a->ntables++] = (typeof(a->tables[0])){ (uint64_t)q, rd(q, 4, 4) };
+            }
+        }
+    }
+}
+
 static bool build(void)
 {
     struct FirmwareInfo fi;
@@ -121,6 +154,7 @@ static bool build(void)
         root = (const uint8_t *)at;
         len = (uint32_t)root[4] | root[5] << 8 | root[6] << 16 | (uint32_t)root[7] << 24;
         t[n++] = (struct hw_table){ root, len };
+        hwdb.rsdp = fi.fi_Rsdp;
         for (uint32_t off = 36; off + entry <= len && n < TABLES; off += entry) {
             const uint8_t *tb;
 
@@ -134,6 +168,7 @@ static bool build(void)
                 tb, (uint32_t)tb[4] | tb[5] << 8 | tb[6] << 16 | (uint32_t)tb[7] << 24
             };
         }
+        tables_mapped(rsdp, t, n);
         return hw_from_acpi(&hwdb.g, t, n);
     }
     return false;
@@ -158,6 +193,8 @@ static void fail_unit(struct unit *u, const char *why)
 
 bool hwdb_busy(void)
 {
+    if (hwdb.test && acpid.proc && !acpid.probed)
+        return true;                /* its probe isn't over */
     for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
         const struct unit *u = &hwdb.units[i];
 
@@ -259,6 +296,8 @@ static void ready(hw_id id)
 
 static void pump(void)
 {
+    if (hwdb.test && acpid.proc && !acpid.probed)
+        return;                     /* no driver holds a lease while acpid probes */
     for (;;) {
         hw_id n;
 
@@ -508,6 +547,10 @@ static void serve(unsigned c)
 {
     struct HwdbMsg *m;
 
+    if (conn_unit[c] == CONN_ACPID) {
+        acpid_serve(&conns[c]);
+        return;
+    }
     while ((m = (struct HwdbMsg *)GetMsgSized(&conns[c], sizeof *m))) {
         uint32_t op = m->hm_Op, token = m->hm_Token;
         struct unit *u = unit_of(token);
@@ -526,20 +569,58 @@ static void serve(unsigned c)
     }
 }
 
+/* Drivers at "hwdb", acpid at "hwdb.acpi". */
 static void accept_all(void)
 {
-    for (;;) {
-        struct MsgPort mp;
+    for (unsigned p = 0; p < 2; p++)
+        for (;;) {
+            struct MsgPort mp;
 
-        if (AcceptPort(&mp, hwdb.port, SIG_CONN) != 0)
-            return;
-        if (nconns == CONNS) {
-            ClosePort(&mp);
-            continue;
+            if (!(p ? acpid.port : hwdb.port) ||
+                AcceptPort(&mp, p ? acpid.port : hwdb.port, SIG_CONN) != 0)
+                break;
+            if (nconns == CONNS) {
+                ClosePort(&mp);
+                continue;
+            }
+            conn_unit[nconns] = p ? CONN_ACPID : UINT32_MAX;
+            conns[nconns++] = mp;
         }
-        conn_unit[nconns] = UINT32_MAX;
-        conns[nconns++] = mp;
+}
+
+/* Each connection's messages; one gone is closed, unless a unit's. */
+static void serve_all(void)
+{
+    for (unsigned c = 0; c < nconns;) {
+        serve(c);
+        if (PortGone(&conns[c]) && (conn_unit[c] == UINT32_MAX || conn_unit[c] == CONN_ACPID)) {
+            ClosePort(&conns[c]);
+            conns[c] = conns[--nconns];
+            conn_unit[c] = conn_unit[nconns];
+        } else {
+            c++;
+        }
     }
+}
+
+/* Before matching: acpid's namespace, until it's done, dead or late. */
+static void settle_acpid(void)
+{
+    if (!hwdb.rsdp || !acpid_start(hwdb.rsdp))
+        return;
+    while (acpid_waiting()) {
+        uint64_t got;
+
+        ArmTimer(acpid.until, SIG_TIMER);
+        got = WaitPorts(conns, nconns, 1ULL << SIG_PORT | 1ULL << SIG_CONN | 1ULL << SIG_DEAD |
+                                           1ULL << SIG_ACPI_PORT | 1ULL << SIG_TIMER);
+        if (got & (1ULL << SIG_PORT | 1ULL << SIG_ACPI_PORT))
+            accept_all();
+        serve_all();
+        acpid_reap();
+    }
+    ArmTimer(0, 0);
+    acpid_finish();
 }
 
 /* --- The report. --- */
@@ -558,6 +639,79 @@ static void report_line(void *, const char *line)
 void hwdb_report(void)
 {
     hw_report(&hwdb.g, false, report_line, nullptr);
+}
+
+/* What the drivers made of the description, once they've settled, for
+ * comparing two descriptions of one machine (make compare-hw): each
+ * device a process driver bound or failed, by its registers and line,
+ * and how many each declined. Sorted by address, so that the order the
+ * description lists them in doesn't show. */
+static uint64_t first_reg(const struct hw_node *n)
+{
+    for (unsigned i = 0; i < n->nres; i++)
+        if (n->res[i].kind == HW_MMIO || n->res[i].kind == HW_ECAM)
+            return n->res[i].base;
+    return UINT64_MAX;
+}
+
+void hwdb_facts(void)
+{
+    uint64_t last = 0;
+    bool any = true;
+
+    for (unsigned pass = 0; any; pass++) {
+        uint64_t next = UINT64_MAX;
+        hw_id at = HW_NONE;
+
+        any = false;
+        for (hw_id i = 1; i < hwdb.g.count; i++) {
+            const struct hw_node *n = &hwdb.g.nodes[i];
+            uint64_t b = first_reg(n);
+
+            if (n->driver == HW_NODRV || hwdb.g.drivers[n->driver].kind != HW_DRV_PROCESS ||
+                (n->state != HW_S_BOUND && n->state != HW_S_FAILED) || b == UINT64_MAX ||
+                (pass && b <= last) || b >= next)
+                continue;
+            next = b;
+            at = i;
+        }
+        if (at != HW_NONE) {
+            const struct hw_node *n = &hwdb.g.nodes[at];
+            struct hw_line l = { 0 };
+
+            hw_put(&l, "hw: ");
+            hw_put(&l, hwdb.g.drivers[n->driver].name);
+            hw_put(&l, n->state == HW_S_BOUND ? " bound " : " failed ");
+            hw_put_hex(&l, next);
+            for (unsigned k = 0; k < n->nres; k++)
+                if (n->res[k].kind == HW_IRQ && n->res[k].base != HW_NOLINE) {
+                    hw_put(&l, " line ");
+                    hw_put_dec(&l, n->res[k].base);
+                    break;
+                }
+            if (n->state == HW_S_FAILED && n->why) {
+                hw_put(&l, ": ");
+                hw_put(&l, n->why);
+            }
+            say(l.text);
+            last = next;
+            any = true;
+        }
+    }
+    for (unsigned d = 0; d < hwdb.g.ndrivers; d++) {
+        unsigned declined = 0;
+        struct hw_line l = { 0 };
+
+        for (hw_id i = 1; i < hwdb.g.count; i++)
+            declined += hwdb.g.nodes[i].driver == d && hwdb.g.nodes[i].state == HW_S_DECLINED;
+        if (!declined)
+            continue;
+        hw_put(&l, "hw: ");
+        hw_put(&l, hwdb.g.drivers[d].name);
+        hw_put(&l, " declined ");
+        hw_put_dec(&l, declined);
+        say(l.text);
+    }
 }
 
 /* --- The loop. --- */
@@ -600,17 +754,18 @@ int main(uint64_t arg, uint64_t root)
         say("hwdb: the firmware's description is unusable");
         return 1;
     }
+    if ((port = CreatePort("hwdb", SIG_PORT)) < 0) {
+        say("hwdb: no port");
+        return 3;
+    }
+    hwdb.port = (Handle)port;
+    settle_acpid();
     hw_prepare(&hwdb.g);
     hwdb.units = hw_alloc(&hwdb.arena, (hwdb.g.nleases ? hwdb.g.nleases : 1) * sizeof *hwdb.units);
     if (hwdb.g.full || !hwdb.units) {
         say("hwdb: out of memory for the graph");
         return 2;
     }
-    if ((port = CreatePort("hwdb", SIG_PORT)) < 0) {
-        say("hwdb: no port");
-        return 3;
-    }
-    hwdb.port = (Handle)port;
 
     while (!hwdb.finished) {
         uint64_t next, got;
@@ -623,23 +778,16 @@ int main(uint64_t arg, uint64_t root)
         next = next_deadline();
         ArmTimer(next, next ? SIG_TIMER : 0);
         got = WaitPorts(conns, nconns, 1ULL << SIG_PORT | 1ULL << SIG_CONN | 1ULL << SIG_DEAD |
-                                           1ULL << SIG_TIMER);
+                                           1ULL << SIG_ACPI_PORT | 1ULL << SIG_TIMER);
         hwdb.now = CurrentTime();
-        if (got & 1ULL << SIG_PORT)
+        if (got & (1ULL << SIG_PORT | 1ULL << SIG_ACPI_PORT))
             accept_all();
-        for (unsigned c = 0; c < nconns;) {
-            serve(c);
-            if (PortGone(&conns[c]) && conn_unit[c] == UINT32_MAX) {
-                ClosePort(&conns[c]);
-                conns[c] = conns[--nconns];
-                conn_unit[c] = conn_unit[nconns];
-            } else {
-                c++;
-            }
-        }
+        serve_all();
         reap();
+        acpid_reap();
         timers();
     }
+    acpid_stop();
     for (uint32_t i = 0; i < hwdb.g.nleases; i++)
         for (unsigned r = 0; r < HW_LEASE_RANGES; r++)
             if (hwdb.units[i].lease[r])

@@ -43,6 +43,8 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
         if (!g->board || !hw_streq(q->board, g->board))
             continue;
         id = hw_find_path(g, q->path, hw_strlen(q->path));
+        if (id == HW_NONE)
+            id = hw_find_moved(g, q->path);
         if (id == HW_NONE) {
             g->broken++;
             continue;

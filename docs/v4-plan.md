@@ -1,6 +1,6 @@
 # V4 plan: the hardware model, drivers and servers
 
-**Status: in progress (2026-10-20).** Steps 1 to 3 are done. The four decisions at the end are made, as leaned.
+**Status: in progress (2026-10-20).** Steps 1 to 3 are done, and step 4 on QEMU and on the CIX's captured tables; its run on the CIX itself is still to do. The four decisions at the end are made, as leaned.
 
 **Goal (§8):** drivers and servers in user mode, found through one device graph, on the RV2 and the CIX P1. The design is in [§9](09-hardware-description.md) (the hwdb, sources, quirks, `acpid`, `power`), [§11](11-driver-model.md) (binding, teardown, `drv.library`, classes, the kill test) and [§12](12-let-it-crash.md) (supervision). This plan puts them in order and says what each step proves.
 
@@ -25,7 +25,7 @@ Each step ends with `make test-all` green and a `V4.n done` line in the transcri
 | **1. The kernel calls drivers need** ✅ | A boot bundle of servers, `CreateProcess`, handle passing, timers, device leases, interrupt binding, DMA Areas with quarantine, and the firmware tables as a read-only Area. |
 | **2. hwdb on the host** ✅ | The device graph from the device tree and from ACPI's static tables, quirks as data, match tables, ordering and the "what blocks whom" report. Tested against the captured trees and the CIX dumps. |
 | **3. hwdb as the first server** ✅ | hwdb starts drivers in graph order, supervises and restarts them. `drv.library`. The first drivers are small ones on QEMU, and the kill test starts here. |
-| **4. `acpid`** | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
+| **4. `acpid`** ✅ (the CIX board run to do) | ACPICA in its own domain on QEMU and the CIX, as a second source for the hwdb. Its grants go through the hwdb. |
 | **5. Storage** | The `pci` server (ECAM, MSI-X through the ITS), NVMe on QEMU and the CIX, SDHCI on the RV2, the block class, GPT partitions. The queue-depth measurements. |
 | **6. Files and programs** | FAT32 under `dos`, programs loaded from storage, and the boot moved onto each board's own storage. |
 | **7. A shell on the framebuffer** | The firmware framebuffer leased to `display`, a text console on it, and a shell. Then `power` (the K1 PMU, SCMI on the CIX) and native scanout where the exit needs it. |
@@ -154,6 +154,48 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 - **Each region it asks to touch goes through the hwdb**, which refuses RAM, the interrupt controller and the IOMMU (§9.4, R5).
 - **On QEMU first** (edk2's DSDT is small), then on the CIX. This step also does §9.6's count: how many of the CIX's devices need a method run at all.
 - **The exit's "both ways" is checked here:** on QEMU, the same devices from the device tree and from ACPI, compared as `compare-hw` compares the kernel's facts.
+
+**Done on QEMU (2026-10-20).** acpid runs ACPICA in user mode, describes the namespace to hwdb, and hwdb's drivers bind the same devices through it as through the device tree. `make test-all` passes its 10 boots at `V4.3 done`. The run on the CIX board itself is still to do: the board didn't answer on the network or its console.
+
+- **ACPICA 20260930**, unchanged, in `third_party/acpica`: upstream's `source/include` and nine of `source/components` (commit `e85aa3b`, the files VectraOS-Odin used, byte for byte). `mk/acpica.mk` builds it for each ISA and for the host. `servers/acpid/acplanar.h` stands in for its `acenv.h`.
+- **acpid** (`servers/acpid/`, about 1,450 lines of C and 300 for the host), split so the host can run the same code:
+  - `osl.c` is ACPICA's OS layer, the same on Planar and the host. acpid is one task, so locks never contend and a semaphore that would wait fails at once. Deferred work is queued. I/O ports and PCI configuration space are refused.
+  - `walk.c` loads the tables, runs `_INI`, and describes each device: its path, `_HID` and `_CID`s (for `PRP0001`, its `_DSD` "compatible"), `_UID`, `_STA`, `_ADR`, a bridge's `_SEG` and `_BBN`, and its `_CRS`: registers, interrupts (GSIVs, or a line of a named controller), GPIO pins, bus addresses. A bridge's windows are marked and not leased. It also counts what took a method to learn.
+  - Operation regions in memory go through acpid's own handler, not ACPICA's. Each window is asked of hwdb once, by pages.
+  - `main.c`, `heap.c` and `clib.c` are Planar's side: hwdb's protocol, a heap of power-of-two blocks over Areas, and the eleven C library functions ACPICA calls. `host.c` is the host's: the tables from files, with its own RSDP and XSDT.
+  - 233 KiB on AArch64, 197 KiB on RISC-V. On QEMU it loads and describes the namespace in 19 ms under TCG.
+- **The protocol** (`planar/acpid.h`): hello (the RSDP), a fixed-size record per device, done, and a window request. hwdb starts acpid held, maps the firmware's tables into it with a new kernel call, `GrantFirmware` (40 calls in all), and starts it. Matching waits until acpid is done, dead, or 10 s late. Then the static tables alone describe the machine.
+- **The namespace in the graph** (`servers/hwdb/namespace.c`). Each device goes where its path says (`\_SB_.COM0` is `/_SB_/COM0`). A device a static table already has isn't added twice. The static node moves to the path and takes the device's keys first. That covers an IORT named component by its path, the MCFG's host bridge by `_SEG` and `_BBN`, and a serial port by its registers. Quirks still find a moved node by its old path. Paths in resources are resolved once all devices are in. Every offset and count in a record is checked.
+- **Windows (R5)** (`servers/hwdb/acpid.c`). The firmware's tables are already mapped. hwdb refuses the interrupt controller, an IOMMU, what the kernel drives and what a driver's lease holds, and the kernel refuses memory again. The rest is leased to acpid until it ends. Each refusal is said once.
+- **The probe**, in hwdb's test mode. After describing the namespace, acpid asks for the GIC's page, its own stack and the RSDP's page, and each device's registers, and checks each answer. Drivers don't start until it's over. hwdb then checks each window it leased against the graph, independently of the code that chose.
+- **Compared both ways.** hwdb prints what its drivers bound, failed and declined, by register address. `compare-hw` diffs that between the device tree and ACPI boots through edk2. The `-kernel` boot also has the PL031, which edk2 keeps for itself.
+- **On the host** (`make hwdb-test`): acpid-host runs on QEMU's ACPI tables (captured with the new `dumpacpi` boot argument, `tools/acpi-from-log.py`) and on the CIX's. Its reports are stored (`docs/boards/*/acpid.txt`), and its devices feed hwdb-host's reports for both. New graph checks merge records into a static graph, damaged ones too, and damaged copies of the CIX's records are merged under the address sanitizer.
+
+**What the boots show:**
+- **QEMU through ACPI:** 50 devices, none needing a method. The 32 virtio slots (`LNRO0005`) make the same four leases of eight, and the entropy device binds. The console moves to `/_SB_/COM0`, the MCFG's bridge to `/_SB_/PCI0`. QEMU's DSDT has no PL031.
+- **The kill test runs under ACPI now** (it had nothing to kill in step 3): 12 kills of the entropy driver, with the client recovering each time and its DMA held in quarantine.
+- **Both ways:** the device tree and ACPI give hwdb the same three facts: virtio-mmio bound at `0xa003e00` on line 79, 31 slots declined, and `pci` failed at `0x4010000000` (its program isn't built yet).
+- **The probe:** the GIC's page and acpid's stack refused, the RSDP's page the tables. Of six register pages, fw_cfg's was leased, and the console's and the four virtio pages were refused.
+- **Mutation:** an hwdb that refused nothing leased acpid the four virtio pages, and the check after the probe failed V4.3.
+
+**§9.6's count, from the CIX's tables on the host:**
+- 271 devices in the namespace, 217 present.
+- **121 take a method to describe:** 118 by `_STA`, 19 by `_CRS`, none by `_HID`, `_CID`, `_UID` or `_DSD`. 3 have `_INI`, and 17 are powered by method (`_PS0` or `_PR0`).
+- **Most of those `_STA` methods read firmware memory, not registers.** Describing 77 devices touches an operation region, nearly all through `GETV`, which 81 of the 123 `_STA` methods call. It reads a byte of a firmware variable block at `0xfffe0000` (GNVA). That's 64 KiB the firmware keeps, which the kernel refuses to lease, so acpid reads all ones and those devices' status follows from that, not from the firmware. Whether acpid may read it is VQ42.
+- The AML touches three register windows too: `0x5040100` (a clock rate the UARTs' `_DSD` names), `0x4070000` (an I2C controller the AML drives itself, for an embedded controller), and `0x6510900` (hardware semaphores).
+- The firmware's AML has six unresolved references (`^I2C0.UXC*`). FreeBSD's ACPICA reports the same six.
+- With the namespace, the CIX's graph has 54 devices disabled, 16 the kernel's and 178 with no driver. Three of the five PCIe host bridges fail: each shares its ECAM pages with the root complex's own registers (`CIXH2020`), which is step 5's to sort out.
+
+**Not as planned:**
+- **No run on the CIX board yet:** it didn't answer on the network or on its console. The count above is from its tables on the host, with the firmware's memory reading as all ones.
+- **acpid isn't restarted if it dies.** Its `_INI` methods ran once, and nothing asks it for anything after the namespace yet. The CIX's power resources will be the first.
+- **No `_DSD` properties beyond `PRP0001`'s "compatible"**, no `_DEP`, and no pin functions, FixedDMA or I/O ports: they're counted as not sent.
+- **No AML events.** QEMU's GED (`ACPI0013`) and the power button aren't driven.
+- **acpid takes a window by the page, first come.** A window the AML touches can't then be leased to a driver. The CIX's I2C controller at `0x4070000` will be the first such conflict.
+
+**Fixed on the way:**
+- `hw_child` looked only at nodes after their parent. A child of a moved IORT node then got a new parent with no keys.
+- The "shares pages with" reason now names a device whose pages overlap, not just one in the same run. On the RV2 that's the clock controller at `0xd4050000`, which U-Boot set up.
 
 ## 5. Storage
 

@@ -171,6 +171,12 @@ If the `power` server crashes and restarts while drivers are running, how does i
 
 Raised in §12.7.
 
+**VQ42 AML that reads firmware memory.**
+
+The CIX's `_STA` methods read a byte each from a firmware variable block at `0xfffe0000` (GNVA, 64 KiB the EFI map keeps reserved). The kernel refuses a lease over reserved memory, so acpid reads all ones, and the status of the 77 devices whose description reads it follows from that rather than from the firmware. Should hwdb grant acpid firmware memory its AML names, and on what terms? *Leaning:* a read-only lease over a range the EFI map marks ACPI NVS or reserved, for acpid only, with a write dropped and counted. A range the firmware protects (secure memory) must never be mapped, since a read there may abort, so the EFI map's type decides, not the address. It's to be checked on the board first, with the page dumped from FreeBSD.
+
+Raised in V4 step 4 ([v4-plan](v4-plan.md)).
+
 ## Workbench and UI
 
 **VQ31 Direct DPU plane promotion vs. full-screen composition.**

@@ -47,6 +47,7 @@
 #define SYS_ACK_WAIT_IRQ    37
 #define SYS_ALLOC_DMA_AREA  38
 #define SYS_MAP_FIRMWARE    39
+#define SYS_GRANT_FIRMWARE  40
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

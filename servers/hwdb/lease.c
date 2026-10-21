@@ -55,6 +55,29 @@ static void fail(struct hw_graph *g, hw_id id, const char *why)
     g->nodes[id].why = why;
 }
 
+/* What to name as the reason span k's node can't be leased: a node in
+ * the cluster [i, j) whose pages overlap k's and that isn't its driver's
+ * or hwdb's, else the cluster's 'other', else any other node in it. */
+static hw_id blocker(const struct hw_graph *g, const struct span *s, uint32_t i, uint32_t j,
+                     uint32_t k, hw_id other)
+{
+    const struct hw_node *me = &g->nodes[s[k].node];
+
+    for (uint32_t q = i; q < j; q++) {
+        const struct hw_node *n = &g->nodes[s[q].node];
+
+        if (s[q].node == s[k].node || s[q].first > s[k].last || s[k].first > s[q].last)
+            continue;
+        if (leased(g, n) ? n->driver != me->driver
+                         : n->driver == HW_NODRV || g->drivers[n->driver].kind != HW_DRV_HWDB)
+            return s[q].node;
+    }
+    for (uint32_t q = i; other == s[k].node && q < j; q++)
+        if (s[q].node != s[k].node)
+            other = s[q].node;
+    return other;
+}
+
 void hw_leases(struct hw_graph *g)
 {
     struct hw_arena *a = g->arena;
@@ -138,11 +161,7 @@ void hw_leases(struct hw_graph *g)
             for (uint32_t k = i; k < j; k++)
                 if (leased(g, &g->nodes[s[k].node]) || g->nodes[s[k].node].state == HW_S_FAILED) {
                     struct hw_line l = { 0 };
-                    hw_id o = other;
-
-                    for (uint32_t q = i; o == s[k].node && q < j; q++)
-                        if (s[q].node != s[k].node)
-                            o = s[q].node;
+                    hw_id o = blocker(g, s, i, j, k, other);
                     hw_put(&l, "shares pages with ");
                     hw_put_path(&l, g, o);
                     fail(g, s[k].node, hw_strdup(g, l.text, l.len));

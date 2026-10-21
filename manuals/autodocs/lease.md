@@ -1,6 +1,6 @@
 # lease: device leases
 
-*Checked against V4 step 1.*
+*Checked against V4 step 4.*
 
 The calls a driver and its supervisor use, in alphabetical order. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
@@ -230,6 +230,46 @@ if (l < 0)
 
 ---
 
+## lease/GrantFirmware
+
+**NAME**
+GrantFirmware -- map the firmware's description into a child
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t GrantFirmware(Handle root, Handle process);
+```
+
+**FUNCTION**
+Maps the same tables `MapFirmware` maps, read-only and at their physical addresses, into `process`, a process the caller created. hwdb grants them to acpid, which loads the AML in them with ACPICA ([V4 step 4](../../docs/v4-plan.md)).
+
+The child isn't told where they are. Its creator passes the address, which it learned from `MapFirmware`.
+
+A kernel call.
+
+**INPUTS**
+- `root` -- the device root handle, owned by the calling process.
+- `process` -- a process handle the calling process owns, held or running.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `root` isn't a device root the calling process owns, or `process` isn't a process handle it owns.
+- `ERR_NOTFOUND` -- the process is dying or dead.
+- `ERR_NOMEM` -- a page couldn't be mapped.
+
+**NOTES**
+- The mappings last until the child dies. There's no call to take them back.
+- `conformance/leaser.c` starts `conformance/fwreader.c` twice: without the grant it faults reading the tables, and with it it reads them.
+
+**BUGS**
+After `ERR_NOMEM`, whatever was mapped before the failure stays mapped.
+
+**SEE ALSO**
+[MapFirmware](#leasemapfirmware), [GrantLease](#leasegrantlease)
+
+---
+
 ## lease/GrantLease
 
 **NAME**
@@ -311,7 +351,7 @@ A kernel call.
 After `ERR_NOMEM` or `ERR_BADADDR`, whatever was mapped before the failure stays mapped.
 
 **SEE ALSO**
-[CreateLease](#leasecreatelease)
+[CreateLease](#leasecreatelease), [GrantFirmware](#leasegrantfirmware)
 
 ---
 

@@ -75,7 +75,8 @@ void hw_match(struct hw_graph *g, const struct hw_driver *drivers, unsigned ndri
             continue;
         }
         type = hw_fdt_prop(g, i, "device_type", &len);
-        if (i == g->console || (type && len == 4 && hw_streq(type, "cpu"))) {
+        if (i == g->console || (type && len == 4 && hw_streq(type, "cpu")) ||
+            hw_has_key(n, "ACPI0007")) {
             n->driver = kernel;
             if (kernel != HW_NODRV)
                 bind_kind(g, n, i == g->console ? "the console" : "a CPU");

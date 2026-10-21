@@ -84,6 +84,7 @@ endif
 CPPFLAGS := -Iinclude -Ikernel -Idrivers
 
 include mk/toolchain.mk
+include mk/acpica.mk
 
 # Kernel arguments for QEMU runs (BOOTARGS=vq3 runs the VQ3 soak).
 BOOTARGS ?=
@@ -132,7 +133,7 @@ TEST_PLATFORMS := qemu-virt-rv64 qemu-virt-a64
 # above 16 GiB); the hosted build, alone and on the CIX's ACPI tables.
 # Then the AArch64 boots' facts are compared, and hwdb's graph tested.
 test-all:
-	@rm -f $(A64_FACTS)/facts-*.txt
+	@rm -f $(A64_FACTS)/facts-*.txt $(A64_FACTS)/hwdb-facts-*.txt
 	@for p in $(TEST_PLATFORMS); do \
 	  $(MAKE) --no-print-directory PLATFORM=$$p test || exit 1; \
 	done
@@ -149,7 +150,9 @@ test-all:
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.
-# The kernel must take the same facts from each (kernel/hw.h).
+# The kernel must take the same facts from each (kernel/hw.h), and hwdb's
+# drivers must bind the same devices through edk2's device tree and
+# through acpid (servers/hwdb/server.c, hwdb_facts).
 A64_FACTS := build/qemu-virt-a64
 compare-hw:
 	@for f in kernel efi-fdt efi-acpi; do \
@@ -160,6 +163,12 @@ compare-hw:
 	    { echo "compare-hw: FAILED: the $$f boot took other facts"; exit 1; }; \
 	done
 	@echo "compare-hw: ok: $$(wc -l < $(A64_FACTS)/facts-kernel.txt | tr -d ' ') facts the same from the device tree, twice, and from ACPI"
+	@for f in efi-fdt efi-acpi; do \
+	  test -s $(A64_FACTS)/hwdb-facts-$$f.txt || { echo "compare-hw: no hwdb facts from the $$f boot"; exit 1; }; \
+	done
+	@diff -u $(A64_FACTS)/hwdb-facts-efi-fdt.txt $(A64_FACTS)/hwdb-facts-efi-acpi.txt || \
+	  { echo "compare-hw: FAILED: hwdb's drivers bound otherwise through ACPI"; exit 1; }
+	@echo "compare-hw: ok: $$(wc -l < $(A64_FACTS)/hwdb-facts-efi-fdt.txt | tr -d ' ') of hwdb's the same from the device tree and through acpid"
 
 # The VQ3 soak (docs/vq3-results.md): a random workload of Areas under
 # memory pressure, on each QEMU platform. Slow, so not part of make test.
@@ -185,37 +194,81 @@ soak: $(IMAGE)
 # blobs, then each captured description against the report it should
 # give (docs/boards/*/hwdb*.txt); HWDB_UPDATE=1 rewrites the reports.
 HWDB_BUILD := build/hwdb
+ACPID_BUILD := build/acpid
 # The graph: what the server and the host share (not the server's loop).
 HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c servers/hwdb/server.c \
-	servers/hwdb/killtest.c,$(wildcard servers/hwdb/*.c))
+	servers/hwdb/killtest.c servers/hwdb/acpid.c,$(wildcard servers/hwdb/*.c))
 HWDB_HOST := $(HWDB_BUILD)/hwdb-host
 HWDB_TEST := $(HWDB_BUILD)/hwdb-test
 HWDB_CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O1 -g \
-	-fsanitize=address,undefined -fno-sanitize-recover=all -Iservers/hwdb
+	-fsanitize=address,undefined -fno-sanitize-recover=all -Iservers/hwdb -Iinclude
 CIX_ACPI := $(wildcard docs/boards/cix-p1/acpi/*.dat)
+QEMU_ACPI := $(wildcard docs/boards/qemu-virt/a64-acpi/*.dat)
 
 # Each case: the report file, then hwdb-host's source arguments.
 HWDB_CASES := \
 	docs/boards/qemu-virt/rv64-hwdb.txt@--dtb@docs/boards/qemu-virt/rv64.dtb \
 	docs/boards/qemu-virt/a64-hwdb.txt@--dtb@docs/boards/qemu-virt/a64.dtb \
 	docs/boards/orangepi-rv2/hwdb.txt@--dtb@docs/boards/orangepi-rv2/u-boot.dtb \
-	docs/boards/cix-p1/hwdb.txt@--acpi@$(subst $(eval) ,@,$(CIX_ACPI))
+	docs/boards/cix-p1/hwdb-static.txt@--acpi@$(subst $(eval) ,@,$(CIX_ACPI)) \
+	docs/boards/cix-p1/hwdb.txt@--namespace@$(ACPID_BUILD)/cix-p1.ns@--acpi@$(subst $(eval) ,@,$(CIX_ACPI)) \
+	docs/boards/qemu-virt/a64-acpi-hwdb.txt@--namespace@$(ACPID_BUILD)/qemu-a64.ns@--acpi@$(subst $(eval) ,@,$(QEMU_ACPI))
 
-$(HWDB_HOST): $(HWDB_SRCS) servers/hwdb/host.c servers/hwdb/hwdb.h
+# acpid-host on each captured set of tables: the report it must give
+# (the devices and §9.6's count), then the namespace file the cases
+# above add.
+ACPID_CASES := \
+	docs/boards/qemu-virt/a64-acpid.txt@$(ACPID_BUILD)/qemu-a64.ns@$(subst $(eval) ,@,$(QEMU_ACPI)) \
+	docs/boards/cix-p1/acpid.txt@$(ACPID_BUILD)/cix-p1.ns@$(subst $(eval) ,@,$(CIX_ACPI))
+
+$(HWDB_HOST): $(HWDB_SRCS) servers/hwdb/host.c servers/hwdb/hwdb.h include/planar/acpid.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(HWDB_CFLAGS) $(HWDB_SRCS) servers/hwdb/host.c -o $@
 
-$(HWDB_TEST): $(HWDB_SRCS) servers/hwdb/test.c servers/hwdb/hwdb.h
+$(HWDB_TEST): $(HWDB_SRCS) servers/hwdb/test.c servers/hwdb/hwdb.h include/planar/acpid.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(HWDB_CFLAGS) $(HWDB_SRCS) servers/hwdb/test.c -o $@
+
+# acpid on the host (servers/acpid/host.c): the same ACPICA, walk and OS
+# layer on captured tables, for the CIX's count (§9.6) and the namespaces
+# hwdb-test adds to its graphs.
+ACPID_HOST := $(ACPID_BUILD)/acpid-host
+ACPID_HOST_CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -O1 -g \
+	-fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude
+ACPICA_HOST_OBJS := $(patsubst third_party/acpica/source/components/%.c,$(ACPID_BUILD)/acpica/%.o,$(ACPICA_SRCS))
+ACPID_HOST_OBJS := $(patsubst servers/acpid/%.c,$(ACPID_BUILD)/%.o,$(ACPID_COMMON) servers/acpid/host.c)
+
+$(ACPID_BUILD)/acpica/%.o: third_party/acpica/source/components/%.c servers/acpid/acplanar.h
+	@mkdir -p $(dir $@)
+	@$(CROSS_CC) $(ACPICA_CFLAGS) -g -c $< -o $@
+
+$(ACPID_BUILD)/host.o: servers/acpid/host.c servers/acpid/acpid.h include/planar/acpid.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(ACPID_HOST_CFLAGS) -c $< -o $@
+
+$(ACPID_BUILD)/%.o: servers/acpid/%.c servers/acpid/acpid.h servers/acpid/acplanar.h include/planar/acpid.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(ACPID_HOST_CFLAGS) $(ACPICA_INC) -c $< -o $@
+
+$(ACPID_HOST): $(ACPID_HOST_OBJS) $(ACPICA_HOST_OBJS)
+	@echo "link $@"
+	@$(CROSS_CC) $(ACPID_HOST_CFLAGS) $^ -o $@
 
 check: $(HWDB_HOST)
 	@tools/check-portable.sh
 	@$(HWDB_HOST) --ties
 
-hwdb-test: $(HWDB_HOST) $(HWDB_TEST)
+hwdb-test: $(HWDB_HOST) $(HWDB_TEST) $(ACPID_HOST)
 	@$(HWDB_TEST) docs/boards/qemu-virt/a64.dtb $(CIX_ACPI)
 	@$(HWDB_TEST) docs/boards/orangepi-rv2/u-boot.dtb $(CIX_ACPI) >/dev/null
+	@for c in $(ACPID_CASES); do \
+	  set -- $$(echo $$c | tr @ ' '); want=$$1; ns=$$2; shift 2; \
+	  $(ACPID_HOST) --out $$ns "$$@" > $$ns.txt 2>/dev/null || { echo "acpid-host: FAILED on $$want's tables"; exit 1; }; \
+	  if [ "$(HWDB_UPDATE)" = 1 ]; then cp $$ns.txt $$want; fi; \
+	  diff -u $$want $$ns.txt || { echo "hwdb-test: FAILED: $$want"; exit 1; }; \
+	  echo "hwdb-test: ok: $$(grep -m1 'devices,' $$want)"; \
+	done
+	@$(HWDB_TEST) --namespace $(ACPID_BUILD)/cix-p1.ns $(CIX_ACPI)
 	@for c in $(HWDB_CASES); do \
 	  set -- $$(echo $$c | tr @ ' '); want=$$1; shift; \
 	  if [ "$(HWDB_UPDATE)" = 1 ]; then $(HWDB_HOST) --detail "$$@" > $$want || exit 1; fi; \
@@ -223,7 +276,7 @@ hwdb-test: $(HWDB_HOST) $(HWDB_TEST)
 	    { echo "hwdb-test: FAILED: $$want"; exit 1; }; \
 	  echo "hwdb-test: ok: $$(tail -1 $$want)"; \
 	done
-	@echo "V4.2 done: hwdb's graph on $(words $(HWDB_CASES)) captured descriptions"
+	@echo "V4.2 done: hwdb's graph on $(words $(HWDB_CASES)) captured descriptions, $(words $(ACPID_CASES)) through acpid"
 
 clean:
 	rm -rf build

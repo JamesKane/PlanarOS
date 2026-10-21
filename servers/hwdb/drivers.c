@@ -39,12 +39,14 @@ static const struct hw_match firmware[] = {
 static const struct hw_match hwdb[] = {
     { "simple-bus",             HW_GENERIC },
     { "fixed-clock",            HW_SPECIFIC },
+    { "PNP0C02",                HW_SPECIFIC },  /* ACPI's reserved ranges: not a device */
     { nullptr, 0 },
 };
 
 /* Step 3: the first small drivers, to prove binding and restart. */
 static const struct hw_match virtio_mmio[] = {
     { "virtio,mmio",            HW_SPECIFIC },
+    { "LNRO0005",               HW_SPECIFIC },  /* QEMU's ACPI */
     { nullptr, 0 },
 };
 
@@ -55,6 +57,7 @@ static const struct hw_match rtc_goldfish[] = {
 
 static const struct hw_match rtc_pl031[] = {
     { "arm,pl031",              HW_SPECIFIC },
+    { "ARMH0031",               HW_SPECIFIC },
     { nullptr, 0 },
 };
 

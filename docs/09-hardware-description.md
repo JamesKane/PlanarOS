@@ -115,12 +115,13 @@ struct hw_node {
 - References are first class. `power-domains = <&scmi 8>` in a DT and `power-domains = <\_SB.SCMI.DVFS 8>` in CIX `_DSD` become the same `hw_ref`.
 - The hwdb hands out leases. Each resource in the graph is what `GrantLease` (§2.2) gives to the driver that binds the node.
 - **Built (V4 step 2), on the host:** `servers/hwdb/hwdb.h` has `struct hw_node` much as above, with the state and the consumers added. `props` aren't copied: a node keeps where its properties are in the blob. Static ACPI nodes take the device tree's compatible (`arm,smmu-v3`), since the tables carry no `_HID`. Quirks are C tables (D5 (a)), with four actions so far: disable, the firmware's, the console, and pin or exclude a driver. Leases are whole pages, and the report lists the pages devices share: QEMU's virtio-mmio slots, and the K1's system controllers ([v4-plan](v4-plan.md) step 2).
-- **Built (V4 step 3):** leases come from pages (`servers/hwdb/lease.c`). Devices sharing a page are one lease, served by one process of their driver, as QEMU's virtio slots are. A page shared across drivers, or with a device the kernel or the firmware drives, can't be leased: on the RV2 that's the K1's power domains, which share the MPMU's pages with the kernel's watchdog. `power` will need a quirk or the kernel's watchdog moved (step 7).
+- **Built (V4 step 3):** leases come from pages (`servers/hwdb/lease.c`). Devices sharing a page are one lease, served by one process of their driver, as QEMU's virtio slots are. A page shared across drivers, or with a device the kernel or the firmware drives, can't be leased. On the RV2 that's the K1's power domains: their registers share the MPMU's pages with the clock controller, which U-Boot set up, and the run of pages takes in the kernel's watchdog too. `power` will need a quirk, or the clock controller and the kernel's watchdog moved under it (step 7).
 
 ### Layer 2: sources and quirks (D3, D4)
 
 - **FDT source:** a direct translation.
 - **ACPI source:** `acpid` enumerates the namespace (`_HID`, `_CID`, `_CRS`, `_STA`, `_DSD`) and gives the results to the hwdb.
+  - **Built (V4 step 4):** `servers/acpid/` runs ACPICA 20260930, unchanged (`third_party/acpica`), and sends hwdb a record per device (`planar/acpid.h`). hwdb adds them before it matches anything (`servers/hwdb/namespace.c`). A device a static table already has moves the static node to its namespace path (`/_SB_/COM0`) rather than appearing twice. On QEMU the same drivers bind through ACPI as through the device tree, and `make compare-hw` checks it. `_DSD` is read only for `PRP0001`'s "compatible" so far.
   - On CIX it also *keeps running* as a provider: power-resource `_ON`/`_OFF` for the `power` server, `_TMP` for thermal, and anything else that only exists as a method.
   - `_CPC` and `_LPI` are read once and stored as static data.
 - **Merging sources (Q8B):** ACPI is the primary source. The firmware DTB is a second source, used only for the nodes that PEP hides: clock controllers, RPMh and TSENS. They are joined by quirk-table mappings from node to node. This is what AbyssBSD did by hand.
@@ -148,6 +149,7 @@ struct hw_node {
 
 - acpid runs in its own domain. It holds only the MMIO, I/O and PCI-config windows its operation regions ask for. Each grant goes through the hwdb, which refuses RAM, the interrupt controller and the IOMMU, as VectraOS-Odin's devmgr did.
 - A misbehaving method can only wreck the device it belongs to.
+- **Built (V4 step 4):** memory operation regions go through acpid's own handler, and each window is asked of hwdb once, by pages (`servers/hwdb/acpid.c`). hwdb refuses the interrupt controller, an IOMMU, what the kernel drives and what a driver's lease holds; the kernel refuses memory again. A refused read gives all ones and a refused write is dropped. I/O ports and PCI configuration space are refused outright for now. In test mode acpid probes the policy: the GIC, its own stack and each device's registers. hwdb checks what it leased afterwards.
 
 ## 9.5 Decision points
 
@@ -162,7 +164,7 @@ struct hw_node {
 
 ## 9.6 Open items for the session
 
-- **The CIX tables are dumped** ([boards/cix-p1](boards/cix-p1/README.md)). Still to do: count how many devices actually need method execution, and whether `_LPI` is a static package. **`_CPC` is static** (V3 step 4): in SSDT2 each processor device has a `Name(_CPC, Package)` whose performance levels are integer constants, so acpid can read it once without running a method.
+- **The CIX tables are dumped** ([boards/cix-p1](boards/cix-p1/README.md)). **`_CPC` is static** (V3 step 4): in SSDT2 each processor device has a `Name(_CPC, Package)` whose performance levels are integer constants, so acpid can read it once without running a method. **Counted (V4 step 4, [acpid.txt](boards/cix-p1/acpid.txt)):** of 271 devices, 121 take a method to describe, 118 of them by `_STA` and 19 by `_CRS`, and 17 are powered by method. Describing 77 of them reads a firmware variable block at `0xfffe0000` (GNVA, through the `_STA` methods' `GETV`), memory the firmware keeps, which acpid may not read yet (VQ42). **`_LPI` is a method**, in each of the 12 processors, but it only returns `\_SB.LPIB`, a static package: acpid can evaluate it once.
 - **K3:** revive the board, then dump RHCT and MADT and confirm it uses AIA.
 - **SCI and ACPI events.** Hardware-reduced ACPI uses GED or GPIO-signalled events. Does any target need them in v1? (Power button, lid.)
 - **Who owns PCIe enumeration:** the hwdb (ECAM from MCFG, or DT `ranges`) or a separate `pci` server. VectraOS-Odin ran devmgr's PCI scan before ACPI. *Proposed in [§11.6](11-driver-model.md#116-binding):* a `pci` server that is an hwdb source, as `acpid` is, publishing a child node per function.

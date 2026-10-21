@@ -260,6 +260,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_dma_call((uint32_t)a[0], a[1], (uint32_t)a[2], a[3]);
     case SYS_MAP_FIRMWARE:
         return lease_firmware_call((uint32_t)a[0], a[1]);
+    case SYS_GRANT_FIRMWARE:
+        return lease_firmware_grant_call((uint32_t)a[0], (uint32_t)a[1]);
     default:
         return ERR_NOSYS;
     }

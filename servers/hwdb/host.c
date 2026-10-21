@@ -2,17 +2,21 @@
  * servers/hwdb/host.c -- hwdb's graph on the host, for testing (§11.5)
  *
  *   hwdb-host [--detail] --dtb FILE
- *   hwdb-host [--detail] --acpi TABLE.dat...
+ *   hwdb-host [--detail] [--namespace FILE] --acpi TABLE.dat...
  *   hwdb-host --ties
  *
  * Builds the graph from a captured device tree or ACPI tables, applies
  * the quirks and the match tables, then binds as the server would, every
  * driver succeeding at once: the next ready node, then its consumers.
- * Prints the report. --ties checks the match tables (make check).
+ * Prints the report. --namespace adds the devices acpid-host found in
+ * the same tables (servers/acpid/host.c --out) as acpid would send them.
+ * --ties checks the match tables (make check).
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <planar/acpid.h>
 
 #include "hwdb.h"
 
@@ -49,7 +53,7 @@ int main(int argc, char **argv)
     struct hw_table tables[32];
     unsigned ntables = 0;
     bool detail = false, ok;
-    const char *dtb = nullptr;
+    const char *dtb = nullptr, *ns = nullptr;
     int i = 1;
 
     if (argc == 2 && strcmp(argv[1], "--ties") == 0) {
@@ -65,13 +69,17 @@ int main(int argc, char **argv)
                 argv[m] = argv[m + 1];
             argc--;
         }
-    if (i + 1 < argc && strcmp(argv[i], "--dtb") == 0) {
+    if (i + 1 < argc && strcmp(argv[i], "--namespace") == 0) {
+        ns = argv[i + 1];
+        i += 2;
+    }
+    if (i + 1 < argc && strcmp(argv[i], "--dtb") == 0 && !ns) {
         dtb = argv[i + 1];
     } else if (i + 1 < argc && strcmp(argv[i], "--acpi") == 0) {
         for (i++; i < argc && ntables < 32; i++)
             tables[ntables].data = slurp(argv[i], &tables[ntables].len), ntables++;
     } else {
-        fprintf(stderr, "usage: hwdb-host [--detail] --dtb FILE | --acpi TABLE...\n"
+        fprintf(stderr, "usage: hwdb-host [--detail] --dtb FILE | [--namespace FILE] --acpi TABLE...\n"
                         "       hwdb-host --ties\n");
         return 2;
     }
@@ -84,6 +92,18 @@ int main(int argc, char **argv)
         ok = hw_from_fdt(&g, blob, len);
     } else {
         ok = hw_from_acpi(&g, tables, ntables);
+    }
+    if (ok && ns) {
+        uint32_t len;
+        const struct AcpidDevice *d = slurp(ns, &len);
+
+        if (len % sizeof *d) {
+            fprintf(stderr, "hwdb-host: %s isn't acpid's devices\n", ns);
+            return 2;
+        }
+        for (uint32_t k = 0; k < len / sizeof *d; k++)
+            hw_ns_add(&g, &d[k]);
+        hw_ns_done(&g);
     }
     if (!ok) {
         fprintf(stderr, "hwdb-host: the source is unusable%s\n", g.full ? " (out of space)" : "");

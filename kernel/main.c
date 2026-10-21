@@ -56,8 +56,11 @@
         if (bootargs_has("dumpdtb"))
             fdt_dump_blob();
     }
-    else if (hw == HW_ACPI)
+    else if (hw == HW_ACPI) {
         acpi_report();
+        if (bootargs_has("dumpacpi"))
+            acpi_dump_tables();
+    }
     else
         kprintf("planar: no device tree or ACPI (firmware data %p)\n", (void *)firmware_data);
     if (have_memory) {

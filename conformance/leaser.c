@@ -8,7 +8,7 @@
  * kernel console's registers (in pages).
  *
  * Checks that the firmware's description is there to read (MapFirmware),
- * and that a lease can't be had over memory, over the kernel's own
+ * and readable by a child only once granted to it (GrantFirmware), and that a lease can't be had over memory, over the kernel's own
  * devices, over another lease, or with bad arguments. With a device,
  * grants it to conformance/virtiorng.c and checks it ran; then kills a
  * second driver with DMA outstanding and checks the Areas were
@@ -70,6 +70,7 @@ int main(uint64_t arg, uint64_t root_arg)
     struct ProcessInfo pi;
     struct LeaseInfo li;
     volatile uint32_t *regs;
+    uint64_t at;
     int64_t l, d;
 
     /* The firmware's description, read-only where it lies. */
@@ -88,6 +89,25 @@ int main(uint64_t arg, uint64_t root_arg)
 
         CHECK(r[0] == 'R' && r[1] == 'S' && r[2] == 'D' && r[7] == ' ');
     }
+
+    /* A child reads them only once they're granted to it. */
+    at = fi.fi_Dtb ? fi.fi_Dtb : fi.fi_Rsdp;
+    d = CreateProcess("fwreader", at, 23, PROCF_HELD);
+    CHECK(d > 0 && StartProcess((Handle)d) == 0);
+    Wait(1ULL << 23);
+    CHECK(QueryProcess((Handle)d, &pi) == 0 && pi.pi_State == PROCS_FAULTED &&
+          pi.pi_Fault == PFAULT_READ && pi.pi_FaultAddress == at);
+    CHECK(CloseHandle((Handle)d) == 0);
+    d = CreateProcess("fwreader", at, 23, PROCF_HELD);
+    CHECK(d > 0);
+    CHECK(GrantFirmware(0, (Handle)d) == ERR_BADHANDLE);
+    CHECK(GrantFirmware(root, root) == ERR_BADHANDLE);     /* not a process */
+    CHECK(GrantFirmware(root, (Handle)d) == 0 && StartProcess((Handle)d) == 0);
+    Wait(1ULL << 23);
+    CHECK(QueryProcess((Handle)d, &pi) == 0 && pi.pi_State == PROCS_EXITED &&
+          pi.pi_ExitCode == 0);
+    CHECK(CloseHandle((Handle)d) == 0);
+    CHECK(GrantFirmware(root, (Handle)d) == ERR_BADHANDLE); /* closed */
 
     /* What no lease may cover, and bad arguments. */
     CHECK(CreateLease(0, 0x1000, PAGE, nullptr, 0) == ERR_BADHANDLE);

@@ -104,6 +104,8 @@ Kernel entry contract (`arch_entry`):
 
 **Built (V4 step 3).** hwdb runs as a server (`servers/hwdb/server.c`). It builds the graph from the firmware's description, groups devices that share pages into one lease each, and starts each lease's driver in graph order. Drivers link `drv.library` (`lib/drv`), and the first three are in `drv/`: two RTCs and a virtio-mmio bus driver. A driver that dies is checked, stopped, revoked and restarted, with backoff and a cap. The kill test runs at every QEMU boot ([v4-plan](v4-plan.md)).
 
+**Built (V4 step 4).** acpid (`servers/acpid/`) runs ACPICA, unchanged, in its own process: hwdb starts it with the firmware's tables mapped in (`GrantFirmware`), adds the devices it describes to the graph before matching, and checks each register window its AML asks for. On QEMU the same drivers bind through ACPI as through the device tree ([v4-plan](v4-plan.md)).
+
 **Built (V3 step 5).** On AArch64, as on RV64, a kernel call saves only what the calling convention keeps, and zeroes the scratch registers on the way out. On the CIX a null kernel call is 258 cycles on an A720 and 586 on an A520, and a `DoMsg` round trip 1,533 and 3,366 (the RV2: 469 and 3,209). `make PROFILE=1` profiles both ISAs.
 
 **Built (V3 step 3).** One `uefi-a64` image runs on the CIX P1, with no board-specific code: the board's differences are ACPI quirk data. Leaving EL2, the entry code writes every EL2 control that can trap EL1 whole, because on a core just started by PSCI they're UNKNOWN. The direct map covers 1 TiB. The GTDT's SBSA watchdog is kept armed, so a hang resets the board.

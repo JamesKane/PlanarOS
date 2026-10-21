@@ -141,6 +141,7 @@ Erlang systems work because every process sits in a tree with a stated restart p
 ### Bus drivers and providers (`rest_for_one` along the graph)
 
 - The `hwdb` dependency graph (§11.5) already records which consumers depend on a bus (`pci`) or provider (`power`, `acpid`, a GPIO controller).
+- **Built (V4 step 4):** acpid isn't restarted yet. It describes the namespace once, its `_INI` methods have run, and nothing asks it for anything after that, so a death is logged (and fails hwdb's test mode). It will need restarting once it serves the CIX's power resources.
 - If a bus driver crashes, its child nodes' drivers cannot keep running against a dead bus. `hwdb` kills the subtree in reverse graph order (§11.4), stops the bus hardware, and restarts forward along the graph.
 - What if `power` crashes? Every driver's power votes live on its connection to `power` (§11.5). Rather than resetting the whole board when `power` restarts, `power` can reconstruct active votes in one of two ways (**VQ30**):
   - **Re-query from `hwdb`:** since `hwdb` powers a node on before granting its lease (D3, §11.5), `hwdb` already knows the set of powered nodes and re-sends that state to `power` when `power` reconnects.

@@ -3,7 +3,7 @@
 
     boot-check.py --expect 'V0 done' [--timeout 20] [--log FILE]
                   [--forbid REGEX]... [--require-lines FILE]
-                  [--facts FILE] -- CMD...
+                  [--facts FILE] [--hwdb-facts FILE] -- CMD...
 
 Starts CMD (QEMU, or the hosted executable), echoes its output, and
 succeeds as soon as a line containing the expected text appears. Fails
@@ -17,7 +17,9 @@ complete.
 
 --facts writes the transcript's "hw: " lines to FILE: the facts the
 kernel took from its firmware description (kernel/hw.h), for comparing
-two boots of one machine (make compare-hw).
+two boots of one machine (make compare-hw). --hwdb-facts writes hwdb's
+("[hwdb] hw: " lines, without the "[hwdb] "): what each driver bound,
+declined or failed, by its registers (servers/hwdb/server.c).
 """
 
 import argparse
@@ -38,6 +40,7 @@ def main() -> int:
                     help="a regex no transcript line may match")
     ap.add_argument("--require-lines", help="a file of lines the transcript must have")
     ap.add_argument("--facts", help="write the transcript's 'hw: ' lines here")
+    ap.add_argument("--hwdb-facts", help="write hwdb's 'hw: ' lines here")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
@@ -82,6 +85,9 @@ def main() -> int:
     if args.facts:
         with open(args.facts, "w") as f:
             f.writelines(line + "\n" for line in lines if line.startswith("hw: "))
+    if args.hwdb_facts:
+        with open(args.hwdb_facts, "w") as f:
+            f.writelines(line[7:] + "\n" for line in lines if line.startswith("[hwdb] hw: "))
     missing = []
     if args.require_lines:
         with open(args.require_lines) as f:

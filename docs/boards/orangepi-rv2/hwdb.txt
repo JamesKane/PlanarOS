@@ -94,7 +94,7 @@
 /soc/pinctrl@d401e000 [pinctrl-single]: firmware, U-Boot's pins
   mmio 0xd401e000+0x400
   needs /soc (parent)
-/soc/power-management@0 [ky,x1-pm-domain]: power-k1, failed: shares pages with /watchdog@D4080000
+/soc/power-management@0 [ky,x1-pm-domain]: power-k1, failed: shares pages with /soc/clock-controller@d4050000
   mmio 0xd4050000+0x3004
   mmio 0xd4282800+0x400
   needs /soc (parent)

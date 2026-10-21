@@ -1,0 +1,177 @@
+/MADT/gicd@8000000 [arm,gic-v3]: kernel, driven by the kernel
+  mmio 0x8000000+0x10000
+  mmio 0x80a0000+0xf60000
+/MADT/its@8080000 [arm,gic-v3-its]: no driver
+  mmio 0x8080000+0x20000
+/_SB_/PCI0 [PNP0A08]: pci, bound 1
+  ecam 0x4010000000+0x10000000 segment 0 buses 0-255
+  needs /MADT/its@8080000 (msi dropped)
+/_SB_/COM0 [ARMH0011]: kernel, the console
+  mmio 0x9000000+0x1000
+  irq 33 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/DBG2/serial@9000000 [arm,pl011]: no driver
+  mmio 0x9000000+0x1000
+/GTDT/timer [arm,armv8-timer]: kernel, driven by the kernel
+  irq 29 on /MADT/gicd@8000000
+  irq 30 on /MADT/gicd@8000000
+  irq 27 on /MADT/gicd@8000000
+  irq 26 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/C000 [ACPI0007]: kernel, a CPU
+/_SB_/C001 [ACPI0007]: kernel, a CPU
+/_SB_/C002 [ACPI0007]: kernel, a CPU
+/_SB_/C003 [ACPI0007]: kernel, a CPU
+/_SB_/FWCF [QEMU0002]: no driver
+  mmio 0x9020000+0x18
+/_SB_/VR00 [LNRO0005]: virtio-mmio, bound 2
+  mmio 0xa000000+0x200
+  irq 48 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR01 [LNRO0005]: virtio-mmio, bound 3
+  mmio 0xa000200+0x200
+  irq 49 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR02 [LNRO0005]: virtio-mmio, bound 4
+  mmio 0xa000400+0x200
+  irq 50 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR03 [LNRO0005]: virtio-mmio, bound 5
+  mmio 0xa000600+0x200
+  irq 51 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR04 [LNRO0005]: virtio-mmio, bound 6
+  mmio 0xa000800+0x200
+  irq 52 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR05 [LNRO0005]: virtio-mmio, bound 7
+  mmio 0xa000a00+0x200
+  irq 53 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR06 [LNRO0005]: virtio-mmio, bound 8
+  mmio 0xa000c00+0x200
+  irq 54 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR07 [LNRO0005]: virtio-mmio, bound 9
+  mmio 0xa000e00+0x200
+  irq 55 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR08 [LNRO0005]: virtio-mmio, bound 10
+  mmio 0xa001000+0x200
+  irq 56 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR09 [LNRO0005]: virtio-mmio, bound 11
+  mmio 0xa001200+0x200
+  irq 57 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR10 [LNRO0005]: virtio-mmio, bound 12
+  mmio 0xa001400+0x200
+  irq 58 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR11 [LNRO0005]: virtio-mmio, bound 13
+  mmio 0xa001600+0x200
+  irq 59 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR12 [LNRO0005]: virtio-mmio, bound 14
+  mmio 0xa001800+0x200
+  irq 60 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR13 [LNRO0005]: virtio-mmio, bound 15
+  mmio 0xa001a00+0x200
+  irq 61 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR14 [LNRO0005]: virtio-mmio, bound 16
+  mmio 0xa001c00+0x200
+  irq 62 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR15 [LNRO0005]: virtio-mmio, bound 17
+  mmio 0xa001e00+0x200
+  irq 63 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR16 [LNRO0005]: virtio-mmio, bound 18
+  mmio 0xa002000+0x200
+  irq 64 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR17 [LNRO0005]: virtio-mmio, bound 19
+  mmio 0xa002200+0x200
+  irq 65 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR18 [LNRO0005]: virtio-mmio, bound 20
+  mmio 0xa002400+0x200
+  irq 66 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR19 [LNRO0005]: virtio-mmio, bound 21
+  mmio 0xa002600+0x200
+  irq 67 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR20 [LNRO0005]: virtio-mmio, bound 22
+  mmio 0xa002800+0x200
+  irq 68 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR21 [LNRO0005]: virtio-mmio, bound 23
+  mmio 0xa002a00+0x200
+  irq 69 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR22 [LNRO0005]: virtio-mmio, bound 24
+  mmio 0xa002c00+0x200
+  irq 70 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR23 [LNRO0005]: virtio-mmio, bound 25
+  mmio 0xa002e00+0x200
+  irq 71 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR24 [LNRO0005]: virtio-mmio, bound 26
+  mmio 0xa003000+0x200
+  irq 72 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR25 [LNRO0005]: virtio-mmio, bound 27
+  mmio 0xa003200+0x200
+  irq 73 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR26 [LNRO0005]: virtio-mmio, bound 28
+  mmio 0xa003400+0x200
+  irq 74 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR27 [LNRO0005]: virtio-mmio, bound 29
+  mmio 0xa003600+0x200
+  irq 75 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR28 [LNRO0005]: virtio-mmio, bound 30
+  mmio 0xa003800+0x200
+  irq 76 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR29 [LNRO0005]: virtio-mmio, bound 31
+  mmio 0xa003a00+0x200
+  irq 77 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR30 [LNRO0005]: virtio-mmio, bound 32
+  mmio 0xa003c00+0x200
+  irq 78 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/VR31 [LNRO0005]: virtio-mmio, bound 33
+  mmio 0xa003e00+0x200
+  irq 79 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/L000 [PNP0C0F]: no driver
+  irq 35 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/L001 [PNP0C0F]: no driver
+  irq 36 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/L002 [PNP0C0F]: no driver
+  irq 37 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/L003 [PNP0C0F]: no driver
+  irq 38 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/PCI0/RES0 [PNP0C02]: hwdb, bound 34
+/_SB_/GED_ [ACPI0013]: no driver
+  irq 41 on /MADT/gicd@8000000
+  needs /MADT/gicd@8000000 (interrupts)
+/_SB_/PWRB [PNP0C0C]: no driver
+/_SB_/GEDD [PNP0C33]: no driver
+hwdb: one virtio-mmio for 8 devices sharing 0xa000000+0x1000: VR00 VR01 VR02 VR03 VR04 VR05 VR06 VR07
+hwdb: one virtio-mmio for 8 devices sharing 0xa001000+0x1000: VR08 VR09 VR10 VR11 VR12 VR13 VR14 VR15
+hwdb: one virtio-mmio for 8 devices sharing 0xa002000+0x1000: VR16 VR17 VR18 VR19 VR20 VR21 VR22 VR23
+hwdb: one virtio-mmio for 8 devices sharing 0xa003000+0x1000: VR24 VR25 VR26 VR27 VR28 VR29 VR30 VR31
+hwdb: BOCHS BXPC: 7 kernel, 10 no driver, 34 bound, 0 broken

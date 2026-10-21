@@ -12,7 +12,9 @@
 # with "qemu", so the check can see the load options arrived.
 #
 # Each run writes the facts the kernel took from its description to
-# $(BUILD)/facts-<how>.txt; make compare-hw checks the three agree.
+# $(BUILD)/facts-<how>.txt, and what hwdb's drivers made of it to
+# $(BUILD)/hwdb-facts-<how>.txt; make compare-hw checks the kernel's three
+# agree, and hwdb's two through edk2 (which keeps the PL031 for itself).
 
 include mk/arch-aarch64.mk
 
@@ -39,7 +41,7 @@ EFI_CHECK := --forbid '^V3.1 boot ok: from a device tree' \
 endif
 HW_NAME := $(if $(filter acpi,$(HW)),ACPI,the device tree)
 HW_CHECK := --forbid '^V3.2 acpi ok: described by (?!$(HW_NAME))' \
-	--facts $(BUILD)/facts-$(HOW).txt
+	--facts $(BUILD)/facts-$(HOW).txt --hwdb-facts $(BUILD)/hwdb-facts-$(HOW).txt
 
 RUN_CMD := $(QEMU) -machine $(QEMU_MACHINE) -cpu cortex-a76 -smp 4 -m $(QEMU_MEM) \
 	-global virtio-mmio.force-legacy=false -device virtio-rng-device \

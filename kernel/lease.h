@@ -64,5 +64,6 @@ int64_t lease_bind_call(uint32_t lease, uint32_t line, int64_t sigbit);
 uint64_t lease_ack_wait_call(uint32_t lease, uint32_t line, uint64_t mask);
 int64_t lease_dma_call(uint32_t lease, uint64_t size, uint32_t flags, uint64_t addr_out);
 int64_t lease_firmware_call(uint32_t root, uint64_t info_out);
+int64_t lease_firmware_grant_call(uint32_t root, uint32_t process);
 
 #endif /* KERNEL_LEASE_H */

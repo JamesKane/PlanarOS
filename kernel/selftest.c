@@ -2619,13 +2619,13 @@ void selftest_leases(void)
     if (pmm_free_pages() + (kmalloc_pages() - heap_before) != free_before)
         fail("V4.1 leases", "pages leaked");
     if (have)
-        kprintf("V4.1 leases ok: the firmware's tables read; refused over memory, the "
+        kprintf("V4.1 leases ok: the firmware's tables read, and by a child once granted; refused over memory, the "
                 "kernel's devices and another lease; "
                 "a user-mode virtio driver at %p (line %u) mapped it, took its interrupt and "
                 "DMA; killed with DMA outstanding, its Areas waited in quarantine for "
                 "RevokeLease\n", (void *)dev, irq);
     else
-        kprintf("V4.1 leases ok: the firmware's tables read; refused over memory, the "
+        kprintf("V4.1 leases ok: the firmware's tables read, and by a child once granted; refused over memory, the "
                 "kernel's devices and bad arguments (no virtio test device here)\n");
 }
 
@@ -2662,5 +2662,5 @@ void selftest_hwdb(void)
         fail("V4.3 hwdb", "pages leaked");
     kprintf("V4.3 hwdb ok: the graph built from %s, drivers started in its order and "
             "supervised; hwdb exited 0, leaving no process, lease, Area or page behind\n",
-            hw_source() == HW_FDT ? "the device tree" : "ACPI's static tables");
+            hw_source() == HW_FDT ? "the device tree" : "ACPI's tables and acpid's namespace");
 }

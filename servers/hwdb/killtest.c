@@ -180,6 +180,7 @@ static void settle(void)
 
     seed = hwdb.now | 1;
     hwdb_report();
+    hwdb_facts();
     for (uint32_t i = 0; i < n; i++) {
         struct unit *u = &hwdb.units[i];
         const struct hw_lease *ls = &hwdb.g.leases[i];
