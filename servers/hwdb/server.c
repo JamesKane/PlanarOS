@@ -415,6 +415,35 @@ static bool stop_nvme(struct unit *u)
     return true;
 }
 
+/* SDHCI's is Software Reset For All, which stops its DMA (SD Host
+ * Controller 3.00 §2.2.16). */
+static bool stop_sdhci(struct unit *u)
+{
+    const struct hw_lease *ls = lease_of(u);
+
+    for (unsigned r = 0; r < ls->nranges; r++) {
+        void *at;
+        int64_t e = MapLease(u->lease[r], &at);
+
+        if (e != 0 && e != ERR_EXISTS)
+            return false;
+    }
+    for (unsigned i = 0; i < ls->nnodes; i++) {
+        const struct hw_node *n = &hwdb.g.nodes[ls->nodes[i]];
+        volatile uint8_t *regs;
+        uint64_t until = CurrentTime() + 1000 * MS;
+
+        if (n->nres == 0 || n->res[0].kind != HW_MMIO || n->res[0].size < 0x100)
+            continue;
+        regs = (volatile uint8_t *)n->res[0].base;
+        regs[0x2f] = 1;
+        while (regs[0x2f] & 1)
+            if (CurrentTime() > until)
+                return false;
+    }
+    return true;
+}
+
 /* True if the device can't reach memory any more. */
 static bool stop(struct unit *u, uint64_t quarantined)
 {
@@ -424,6 +453,8 @@ static bool stop(struct unit *u, uint64_t quarantined)
         return stop_virtio(u);
     if (hw_streq(name, "nvme"))
         return stop_nvme(u);
+    if (hw_streq(name, "sdhci"))
+        return stop_sdhci(u);
     return quarantined == 0;    /* none: only a device that kept no DMA is safe (VQ24) */
 }
 

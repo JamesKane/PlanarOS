@@ -37,6 +37,7 @@ void FreeSignal(int64_t bit);
 #define AREAF_EXEC      (1u << 2)   /* may be made executable */
 #define AREAF_RWX       (1u << 3)   /* may be writable and executable at once */
 #define AREAF_LARGE     (1u << 4)   /* 2 MiB-aligned */
+#define AREAF_DMA32     (1u << 5)   /* below 4 GiB: for a device with 32-bit DMA */
 
 #define AREAR_READ      (1u << 0)
 #define AREAR_WRITE     (1u << 1)

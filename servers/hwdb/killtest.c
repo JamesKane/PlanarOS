@@ -304,9 +304,9 @@ static void settle(void)
                 continue;
             for (unsigned q = 0; q < sizeof c->port; q++)
                 c->port[q] = u->ports[k][q];
-            c->kind = hw_strneq(u->ports[k], "rtc.", 4)    ? K_RTC
-                      : hw_strneq(u->ports[k], "nvme.", 5) ? K_BLOCK
-                                                           : K_RNG;
+            c->kind = hw_strneq(u->ports[k], "rtc.", 4)                                  ? K_RTC
+                      : hw_strneq(u->ports[k], "nvme.", 5) || hw_strneq(u->ports[k], "sd.", 3) ? K_BLOCK
+                                                                                               : K_RNG;
             c->unit = u;
             nclients++;
             any = true;
@@ -340,10 +340,16 @@ static void bench_step(void)
         uint64_t unit = 0;
         int64_t p;
 
+        const char *d = c->port;
+
         if (c->kind != K_BLOCK)
             continue;
-        for (const char *d = c->port + 5; *d >= '0' && *d <= '9'; d++)
+        while (*d && *d != '.')
+            d++;
+        for (d++; *d >= '0' && *d <= '9'; d++)
             unit = unit * 10 + (uint64_t)(*d - '0');
+        if (c->port[0] == 's')
+            unit |= 1u << 8;            /* "sd.N", not "nvme.N" */
         if ((p = CreateProcess("blkbench", unit, SIG_DEAD, 0)) < 0) {
             fail("blkbench couldn't be started");
             continue;

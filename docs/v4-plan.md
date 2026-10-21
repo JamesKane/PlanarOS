@@ -205,7 +205,9 @@ Step 3 has to choose: one lease per run of shared pages, held by one driver that
 
 ## 5. Storage
 
-**Progress (2026-10-20): QEMU and the CIX are done.** Still to come: SDHCI on the RV2, and the step's exit line.
+**Progress (2026-10-20): QEMU and the CIX are done.** Still to come: SDHCI on the RV2, and the step's exit line. The RV2 waits until steps 6 and 7 are done on the CIX, so that the serial cable moves once.
+
+**SDHCI** (`drv/sdhci`) is written and passes on QEMU (`sdhci-pci` with an SD card, polled), in the bench and the kill test. hwdb's stop method for it is Software Reset For All. For the K1 it follows Linux's `sdhci-of-k1`: PHY and pad set-up after a reset, the base clock from the device tree (the capabilities are wrong), card detection by asking the card, and no 64-bit DMA. A buffer above 4 GiB goes through a bounce buffer from a DMA Area below it (`AREAF_DMA32`, new). It hasn't run on the RV2 yet.
 
 **On the CIX** (2026-10-20):
 - Both SMMUs were left off and passing DMA through, which hwdb now checks at start (`SMMU_CR0`, `SMMU_GBPA`). That settles this step's *(verify)*. A function behind an SMMU that translates or aborts would wait on it, named.

@@ -17,6 +17,9 @@ const struct hw_quirk hw_quirk_table[] = {
     { "ky,x1", HW_Q_FIRMWARE, "/soc/clock-controller@d4050000", "U-Boot's, until power (V4 step 7)" },
     { "ky,x1", HW_Q_FIRMWARE, "/soc/reset-controller@d4050000", "U-Boot's, until power (V4 step 7)" },
     { "ky,x1", HW_Q_FIRMWARE, "/soc/pinctrl@d401e000", "U-Boot's pins" },
+    /* Its GPIOs: the SD slot's card detect is one, which sdhci does
+     * without (it asks the card). */
+    { "ky,x1", HW_Q_FIRMWARE, "/soc/gpio@d4019000", "U-Boot's, until a GPIO driver" },
 
     /* The CIX P1 has no SPCR. The kernel takes DBG2's port as its
      * console (kernel/acpi.c's quirk), so the node is the kernel's. */

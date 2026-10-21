@@ -33,6 +33,9 @@ uint64_t pmm_alloc_contig(size_t n);
 /* The same, starting at a multiple of 'align' bytes (a power of two). */
 uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align);
 
+/* The same, ending at or below 'limit' (a device's addressing: DMA32). */
+uint64_t pmm_alloc_contig_below(size_t n, uint64_t align, uint64_t limit);
+
 /* Pages managed in total, and how many are free now. */
 uint64_t pmm_total(void);
 

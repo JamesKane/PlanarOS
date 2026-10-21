@@ -87,7 +87,7 @@
   irq 9 on /cpus/cpu@6/interrupt-controller
   irq 9 on /cpus/cpu@7/interrupt-controller
   needs /cpus/cpu@0/interrupt-controller (interrupts); /cpus/cpu@1/interrupt-controller (interrupts); /cpus/cpu@2/interrupt-controller (interrupts); /cpus/cpu@3/interrupt-controller (interrupts); /cpus/cpu@4/interrupt-controller (interrupts); /cpus/cpu@5/interrupt-controller (interrupts); /cpus/cpu@6/interrupt-controller (interrupts); /cpus/cpu@7/interrupt-controller (interrupts); /soc (parent)
-/soc/gpio@d4019000 [ky,x1-gpio]: no driver
+/soc/gpio@d4019000 [ky,x1-gpio]: firmware, U-Boot's, until a GPIO driver
   mmio 0xd4019000+0x800
   irq 58 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/clock-controller@d4050000 (clock); /soc (parent)
@@ -135,12 +135,12 @@
   mmio 0xc0a00000+0x10000
   irq 125 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/phy@c0b10000 (phy); /soc/usb2phy@0xc0a30000 (phy); /soc/usb3@0 (parent)
-/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci-k1, waits for /soc/gpio@d4019000 (gpio): no driver
+/soc/sdh@d4280000 [ky,x1-sdhci]: sdhci, bound 8
   mmio 0xd4280000+0x200
   irq 99 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc/pinctrl@d401e000 (pins); /soc/gpio@d4019000 (gpio); /soc (parent)
 /soc/sdh@d4280800 [ky,x1-sdhci]: disabled
-/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci-k1, bound 8
+/soc/sdh@d4281000 [ky,x1-sdhci]: sdhci, bound 9
   mmio 0xd4281000+0x200
   irq 101 on /soc/interrupt-controller@e0000000
   needs /soc/interrupt-controller@e0000000 (interrupts); /soc/reset-controller@d4050000 (reset); /soc/clock-controller@d4050000 (clock); /soc (parent)
@@ -220,4 +220,4 @@
 /vcc3v3-pcie-regulator [regulator-fixed]: no driver
   needs /soc/gpio@d4019000 (gpio)
 /gpio-leds [gpio-leds]: no driver
-hwdb: ky,x1: 20 disabled, 19 kernel, 5 firmware, 27 no driver, 1 waiting, 8 bound, 1 failed, 0 broken
+hwdb: ky,x1: 20 disabled, 19 kernel, 6 firmware, 26 no driver, 9 bound, 1 failed, 0 broken

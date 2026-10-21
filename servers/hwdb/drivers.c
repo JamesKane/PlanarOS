@@ -75,9 +75,10 @@ static const struct hw_match nvme[] = {
     { nullptr, 0 },
 };
 
-static const struct hw_match sdhci_k1[] = {
+static const struct hw_match sdhci[] = {
     { "ky,x1-sdhci",            HW_SPECIFIC },  /* the vendor's U-Boot tree */
     { "spacemit,k1-sdhci",      HW_SPECIFIC },  /* Linux's */
+    { "pciclass,080501",        HW_GENERIC },   /* any SDHCI with DMA (QEMU's sdhci-pci) */
     { nullptr, 0 },
 };
 
@@ -101,7 +102,7 @@ const struct hw_driver hw_drivers[] = {
     { "rtc-pl031",      HW_DRV_PROCESS,     rtc_pl031 },
     { "pci",            HW_DRV_PROCESS,     pci },
     { "nvme",           HW_DRV_PROCESS,     nvme },
-    { "sdhci-k1",       HW_DRV_PROCESS,     sdhci_k1 },
+    { "sdhci",          HW_DRV_PROCESS,     sdhci },
     { "display",        HW_DRV_PROCESS,     display },
     { "power-k1",       HW_DRV_PROCESS,     power_k1 },
 };

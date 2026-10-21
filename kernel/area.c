@@ -28,7 +28,8 @@
 #include "process.h"
 #include "sched.h"
 
-constexpr uint32_t AREAF_ALL = AREAF_CLEAR | AREAF_CONTIG | AREAF_EXEC | AREAF_RWX | AREAF_LARGE;
+constexpr uint32_t AREAF_ALL = AREAF_CLEAR | AREAF_CONTIG | AREAF_EXEC | AREAF_RWX | AREAF_LARGE |
+                               AREAF_DMA32;
 constexpr uint32_t AREAR_ALL = AREAR_READ | AREAR_WRITE | AREAR_EXEC;
 constexpr uint64_t LARGE_ALIGN = 2ULL << 20;
 
@@ -101,7 +102,7 @@ struct area *area_new(uint64_t pages, uint32_t flags, bool guard)
     if (!(a = kmalloc(sizeof *a)))
         return nullptr;
     *a = (struct area){ .size = pages * PAGE_SIZE, .flags = flags, .guard = guard };
-    if (!(a->run_pa = pmm_alloc_contig_aligned(total, align))) {
+    if (!(a->run_pa = pmm_alloc_contig_below(total, align, flags & AREAF_DMA32 ? 1ULL << 32 : ~0ULL))) {
         kfree(a);
         return nullptr;
     }

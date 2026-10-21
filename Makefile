@@ -90,13 +90,16 @@ include mk/acpica.mk
 BOOTARGS ?=
 QEMU_MEM ?= 256M
 
-# The disk QEMU's NVMe holds (tools/mkdisk.py): GPT, each block holding
-# its own number. Made once, and read only.
+# The disks QEMU's NVMe and SD card hold (tools/mkdisk.py): GPT, each
+# block holding its own number. Made once, and read only.
 DISK := build/disk.img
+SDCARD := build/sd.img
 QEMU_DISK := -drive if=none,id=disk,file=$(DISK),format=raw,readonly=on \
-	-device nvme,serial=planar0,drive=disk
+	-device nvme,serial=planar0,drive=disk \
+	-drive if=none,id=sd,file=$(SDCARD),format=raw,snapshot=on \
+	-device sdhci-pci -device sd-card,drive=sd
 
-$(DISK): tools/mkdisk.py
+$(DISK) $(SDCARD): tools/mkdisk.py
 	@mkdir -p $(dir $@)
 	python3 -I tools/mkdisk.py $@
 
@@ -130,7 +133,7 @@ $(BUILD)/%.S.o: %.S
 # console needs minutes (mk/ky-x1.mk).
 BOOT_TIMEOUT ?= 20
 
-test: $(IMAGE) $(DISK)
+test: $(IMAGE) $(DISK) $(SDCARD)
 	python3 -I tools/boot-check.py --timeout $(BOOT_TIMEOUT) --expect '$(EXPECT)' $(CHECK_FLAGS) \
 	  -- $(RUN_CMD)
 

@@ -185,12 +185,22 @@ uint64_t pmm_alloc_contig(size_t n)
 
 uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align)
 {
+    return pmm_alloc_contig_below(n, align, ~0ULL);
+}
+
+uint64_t pmm_alloc_contig_below(size_t n, uint64_t align, uint64_t limit)
+{
     uint64_t start = 0, len = 0, page = 0, step = align / PAGE_SIZE;
+    uint64_t end = npages;
 
     if (n == 0 || step == 0 || (step & (step - 1)))
         return 0;
+    if (limit >> PAGE_SHIFT < base_pfn)
+        return 0;
+    if ((limit >> PAGE_SHIFT) - base_pfn < end)
+        end = (limit >> PAGE_SHIFT) - base_pfn;     /* pages wholly below 'limit' */
     unsigned long was = spin_lock_irqsave(&lock);
-    for (uint64_t i = 0; nfree >= n && i < npages; i++) {
+    for (uint64_t i = 0; nfree >= n && i < end; i++) {
         if (i % 64 == 0 && bitmap[i / 64] == ~0ULL) {
             i += 63;                /* a word of taken pages at a time */
             len = 0;

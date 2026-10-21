@@ -3,7 +3,7 @@
  * and 32 (docs §11.8, v4-plan step 5's measurement)
  *
  * hwdb's test mode runs it on each block port before the kill test, the
- * port's unit as its argument ("nvme.N"). On the test disk it reads the
+ * port's unit as its argument ("nvme.N", or with bit 8 "sd.N"). On the test disk it reads the
  * second partition (tools/mkdisk.py: every block holds its own number,
  * which each read is checked against); on any other (a board's own) it
  * reads the whole disk and checks nothing. It never writes. It keeps
@@ -116,6 +116,7 @@ struct io {
 int main(uint64_t unit)
 {
     char port[16] = "nvme.";
+    unsigned at = 5;
     struct blk b;
     struct io io[32] = { 0 };
     uint32_t per;
@@ -123,7 +124,11 @@ int main(uint64_t unit)
     bool check = false;
     int64_t e;
 
-    for (unsigned i = 5, k = 0, u = (unsigned)unit;; ) {
+    if (unit >> 8 & 1) {                /* "sd.N" */
+        port[0] = 's', port[1] = 'd', port[2] = '.';
+        at = 3;
+    }
+    for (unsigned i = at, k = 0, u = (unsigned)(unit & 0xff);; ) {
         char d[8];
 
         do
