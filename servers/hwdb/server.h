@@ -178,6 +178,7 @@ bool input_test(void);              /* the kill test's input step: true when it'
 
 /* --- gpu-panthor (gpu.c): its stop method; the test. --- */
 bool stop_gpu(struct unit *u);      /* the MCU off and the GPU reset */
+bool stop_rogue(struct unit *u);    /* the RV2's GPU: all of it in soft reset */
 bool gpu_test(void);                /* the kill test's GPU step: true when it's over */
 
 /* --- pci (pci.c): a host bridge's driver, while it binds. --- */

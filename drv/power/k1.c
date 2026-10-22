@@ -47,6 +47,15 @@ struct domain { uint32_t cell; const char *name; uint32_t ctrl, stat, mode; };
 /* A gate is on with 'mask' set and 'inv' clear. A clock with no cell
  * (NOCELL) is a set's alone: no reference names it. */
 struct gate { uint32_t id; const char *name; uint32_t reg, mask, inv; };
+/* A clock with a rate: its mux and divider bits ('sel') to 'value', then
+ * a frequency change ('fc'), which the hardware clears when it's done
+ * (the vendor's ccu_mix.c). The change finishes only with the clock's
+ * gate open and its device's reset ('rst', in the same register)
+ * released: on the board it never cleared with the GPU held in reset.
+ * So it's made by whichever of the two goes on last; the vendor's GPU
+ * driver also releases the reset, opens the clock and then sets the
+ * rate (ky_init.c). */
+struct rate { uint32_t reg, gate, rst, sel, value, fc; };
 
 constexpr uint32_t NOCELL = UINT32_MAX;
 
@@ -76,6 +85,12 @@ static const struct gate clocks[] = {
     /* The combo PHY's port A to USB 3, not PCIe (PCIE_PHY_SEL's MODE_SEL;
      * the vendor's phy-ky-x1-combphy.c). */
     { NOCELL, "k1.sel.usb3",    0x110, 1u << 3, 0 },
+};
+
+static const struct rate rates[] = {
+    /* The GPU's 614.4 MHz, the DDK's (ky/sysconfig.h): pll1_d4_614p4 (mux
+     * 0, bits 20:18), divided by 1 (bits 14:12). U-Boot leaves pll2_d3 / 6. */
+    { 0x0cc, 1u << 4, 1u << 1, 7u << 18 | 7u << 12, 0, 1u << 15 },
 };
 
 static const struct gate resets[] = {
@@ -175,6 +190,39 @@ static int xlate(unsigned dev, const struct PowerRef *r)
     return -1;
 }
 
+static void say_reg(const char *what, uint32_t off)
+{
+    char line[96];
+    unsigned n = 0;
+    uint32_t v = *reg(off);
+
+    while (*what && n < 70)
+        line[n++] = *what++;
+    for (int sh = 28; sh >= 0; sh -= 4)
+        line[n++] = "0123456789abcdef"[v >> sh & 0xf];
+    line[n] = '\0';
+    pw_say(line);
+}
+
+/* The rates in register 'off', set once their gate and reset are both on. */
+static int64_t rate(uint32_t off)
+{
+    for (unsigned i = 0; i < sizeof rates / sizeof rates[0]; i++) {
+        const struct rate *t = &rates[i];
+        uint32_t v = *reg(off);
+
+        if (t->reg != off || (v & (t->gate | t->rst)) != (t->gate | t->rst) ||
+            (v & t->sel) == t->value)
+            continue;
+        rmw(off, t->sel, t->value | t->fc);
+        if (!pw_poll32(reg(off), t->fc, 0, 1000)) {
+            say_reg("power: k1: a frequency change didn't finish: ", off);
+            return ERR_TIMEOUT;
+        }
+    }
+    return 0;
+}
+
 static int64_t domain_set(const struct domain *d, bool on)
 {
     uint32_t bit = 1u << d->stat;
@@ -196,7 +244,10 @@ static int64_t domain_set(const struct domain *d, bool on)
         rmw(d->ctrl, PD_SLEEP1 | PD_SLEEP2, 0);
         pw_delay_us(15);
     }
-    return pw_poll32(reg(PWR_STATUS), bit, on ? bit : 0, PD_US) ? 0 : ERR_TIMEOUT;
+    if (pw_poll32(reg(PWR_STATUS), bit, on ? bit : 0, PD_US))
+        return 0;
+    say_reg("power: k1: a domain's status didn't follow: ", PWR_STATUS);
+    return ERR_TIMEOUT;
 }
 
 static volatile uint32_t *bank(uint32_t n, uint32_t off)
@@ -223,7 +274,7 @@ static int64_t set(struct pw_res *r, bool on)
         return domain_set(&domains[r->a], on);
     g = r->kind == POWER_CLOCK ? &clocks[r->a] : &resets[r->a];
     rmw(g->reg, on ? g->inv : g->mask, on ? g->mask : g->inv);
-    return 0;
+    return on ? rate(g->reg) : 0;
 }
 
 static int64_t get(struct pw_res *r)

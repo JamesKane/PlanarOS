@@ -4,11 +4,14 @@
  * Started by hwdb's GPU test (servers/hwdb/gpu.c) with one argument:
  *
  * 0: one round. It lends the server a ring and a sync object, takes a
- *    queue, and runs jobs on it, each the smallest a CSF can be seen
- *    to do: add 1 to the sync object (panthor's job epilogue, without
- *    the call). The first job's doorbell-to-update time and the kernel
- *    calls made meanwhile, machine-wide (QuerySystem), then JOBS more,
- *    spun on, then one waited for with WaitAddr, which the server wakes.
+ *    queue, and runs jobs on it, each the smallest the GPU can be seen
+ *    to do. On a CSF (the CIX): add 1 to the sync object (panthor's job
+ *    epilogue, without the call), rung by its doorbell. On Rogue (the
+ *    RV2): a NULL command and an UPDATE of the sync object to the next
+ *    value (the DDK's kicksync), kicked by GPU_KICK. The first job's
+ *    submit-to-update time and the kernel calls made meanwhile,
+ *    machine-wide (QuerySystem), then JOBS more, spun on, then one
+ *    waited for with WaitAddr, which the server wakes.
  * 1: jobs, without end: hwdb kills it with work in flight.
  * 2: a round, then it waits for the server to die (hwdb kills it),
  *    connects to the restarted one and does a second round.
@@ -57,7 +60,9 @@ static struct GpuQueueIn *qin;
 static const struct GpuQueueOut *qout;
 static volatile uint32_t *doorbell;
 static unsigned regs;
+static uint32_t kind;
 static uint64_t seqno;
+static uint32_t sync_device;            /* where the GPU sees the sync object */
 
 static void nap(uint64_t ms)
 {
@@ -89,6 +94,7 @@ static int64_t take(void)
         m->gm_Task = FindTask(nullptr);
         if ((e = ask(GPU_OPEN)) == 0) {
             regs = m->gm_Regs;
+            kind = m->gm_Kind;
             return 0;
         }
         ClosePort(&mp);
@@ -139,6 +145,7 @@ static int queue(void)
     seqno = 0;
     CHECK(said(lend(area, 2 * RING), "lending the ring") == 0);
     CHECK(said(lend(sync, 4096), "lending the sync object") == 0);
+    sync_device = (uint32_t)m->gm_Device;
     m->gm_Ring = (uint64_t)ring;
     m->gm_RingSize = RING;
     m->gm_Sync = (uint64_t)sync;
@@ -146,8 +153,47 @@ static int queue(void)
     qin = (struct GpuQueueIn *)m->gm_Input;
     qout = (const struct GpuQueueOut *)m->gm_Output;
     doorbell = (volatile uint32_t *)m->gm_Doorbell;
-    CHECK(regs >= 8);
+    CHECK(kind == GPU_CSF ? regs >= 8 && doorbell : kind == GPU_ROGUE && !doorbell);
     return 0;
+}
+
+/* A Rogue client CCB command's header (rogue_fwif_ccb_cmd_header): its
+ * type and its payload's size; the rest, job references and work
+ * estimates, zero. */
+static void rogue_header(uint8_t *at, uint32_t type, uint32_t size)
+{
+    uint32_t *w = (uint32_t *)at;
+
+    w[0] = type;
+    w[1] = size;
+    for (unsigned i = 2; i < 10; i++)
+        w[i] = 0;
+}
+
+/* One job on Rogue: a NULL command, then an UPDATE of the sync object's
+ * low word to the next seqno. A command doesn't wrap: where the ring's
+ * end is too close, a PADDING command to it first. */
+static void submit_rogue(void)
+{
+    constexpr uint32_t NULL_CMD = 0x2abc80d2, UPDATE = 0x2abc00d5, PADDING = 0x2abc00dd;
+    constexpr uint32_t HEADER = 40, JOB_BYTES = 2 * HEADER + 8;
+    uint32_t at = (uint32_t)(qin->gq_Insert % RING);
+    uint8_t *r = (uint8_t *)ring;
+
+    if (RING - at < JOB_BYTES) {
+        rogue_header(r + at, PADDING, RING - at - HEADER);
+        qin->gq_Insert += RING - at;
+        at = 0;
+    }
+    rogue_header(r + at, NULL_CMD, 0);
+    rogue_header(r + at + HEADER, UPDATE, 8);
+    ((uint32_t *)(r + at + 2 * HEADER))[0] = sync_device;            /* the UFO: where */
+    ((uint32_t *)(r + at + 2 * HEADER))[1] = (uint32_t)(seqno + 1);  /* and what */
+    drv_io_barrier();
+    qin->gq_Insert += JOB_BYTES;
+    drv_io_barrier();
+    seqno++;
+    ask(GPU_KICK);
 }
 
 /* One job written and rung: add 1 to the sync object. */
@@ -155,6 +201,11 @@ static void submit(void)
 {
     uint64_t a = regs - 4, v = regs - 2;        /* the app's registers, pairs */
     uint64_t *j = &ring[qin->gq_Insert % RING / 8];
+
+    if (kind == GPU_ROGUE) {
+        submit_rogue();
+        return;
+    }
 
     j[0] = 1ull << 56 | a << 48 | (uint64_t)sync;               /* MOV48 ra, sync */
     j[1] = 1ull << 56 | v << 48 | 1;                            /* MOV48 rv, 1 */

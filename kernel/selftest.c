@@ -1386,10 +1386,12 @@ void selftest_tasks(void *)
      * exited 0 only if that held; the firmware calls came with the shares. */
     kprintf("V5.2 done\n");
     /* And of display (servers/hwdb/display.c), of input (input.c), and of
-     * the GPU (gpu.c), where there is one. */
+     * the GPU (gpu.c), where there is one: the CIX's (step 5) or the
+     * RV2's (step 6). */
     kprintf("V5.3 done\n");
     kprintf("V5.4 done\n");
     kprintf("V5.5 done\n");
+    kprintf("V5.6 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

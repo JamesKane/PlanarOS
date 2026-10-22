@@ -283,6 +283,33 @@ The kill rounds kill `gpu-panthor` too, during bring-up and after, with no clien
 
 ## 6. `gpu-rogue` on the RV2
 
+**Done (2026-10-22), on the RV2.** An app takes a queue from `gpu.0`, writes a NULL command and an update of its sync object into its own client CCB, and asks `gpu-rogue` to kick it (`GPU_KICK`): the same API as the CIX's, through a server queue. The first job, kick to update, takes 52 µs, with 5 kernel calls made machine-wide meanwhile. 1,000 jobs take 54 µs each, and a job waited for with `WaitAddr`, woken by the server, takes 55–57 µs. The class is [Devices ch. 9](../manuals/devices/09-gpu.md).
+
+- **The class** gains `GPU_KICK`, `gm_Kind` (`GPU_CSF` or `GPU_ROGUE`, from `GPU_OPEN`; it was padding) and `gm_Device` (from `GPU_MAP`: where the GPU sees the Area). A zero `gm_Doorbell` means the server queue. `gpu-panthor` sets both new fields.
+- **The driver** (`drv/gpu-rogue`, about 1,400 lines): the core's ID; mainline's firmware loaded into the MIPS's 16 MiB heap through a 4-page table, its structures at their fixed offsets, the MIPS booted by mainline's sequence; the kernel CCB (kick, MMU flush, cleanup, health check) and the firmware CCB; one firmware context a client, on the GP data master, with the client's ring as its client CCB; the wrapper's interrupt, which moves each `gq_Extract` and wakes sync objects.
+- **hwdb**: a new quirk, `HW_Q_NODE`, adds a device the firmware's tree leaves out: U-Boot's has no GPU. The RV2's quirks give it its registers, line 75, the `"gpu"` vote and the 2 GiB DMA limit; `gpu-rogue` matches `img,rgx`; `stop_rogue` soft-resets the GPU, which holds the MIPS, before a dead server's memory leaves quarantine. The kill test's GPU phase runs it with `gputest`, which writes Rogue's commands when `gm_Kind` says so.
+- **power**: the GPU clock's rate is set once its gate is open and its reset released. Core now says which resource didn't turn on.
+- **The firmware** is copied from the NAS and checked as the CIX's is, and installed as `DEVS/rogue.fw` by `make PLATFORM=ky-x1 sdcard` (`mk/ky-x1.mk`).
+
+**Tested** on the RV2 by the kill test's GPU phase, the CIX's three rounds. The kill rounds kill `gpu-rogue` during bring-up and after, and it boots the firmware again each time.
+
+**Found on the board:**
+- **The clock's frequency change never finishes while the GPU is held in reset.** Power opened the gate, set the rate and then released the reset, as its kind order says; the change bit (APMU `0xcc` bit 15) stayed set. The vendor's driver releases the reset first (`ky_init.c`). Power's K1 backend now sets the rate after whichever of the two goes on last.
+- **A health check answers in no slot.** The firmware reads it, and its count of kernel CCB commands done (`osdata`, offset 568) goes up, but its slot's return word stays 0. Mainline's watchdog uses the count, and only waits on a slot for cleanups, MMU flushes and log changes; so does `gpu-rogue`.
+- **The firmware interrupts after each update.** `WaitAddr` is woken by the server within 2–3 µs of the spun-on time.
+- Idle, the MIPS sleeps (`MIPS_EXCEPTION_STATUS` `SI_SLEEP`), and its connection state is `ACTIVE` once it's booted.
+
+**Corrected:**
+- **The plan said hwdb already sees the GPU.** U-Boot's tree has no GPU node: hwdb adds one (`HW_Q_NODE`).
+- **The vendor's 1 MiB window** overlaps Ethernet at `0xcac80000`: the GPU's is 512 KiB.
+- **Apps' Areas aren't in the GPU's MMU.** V5's job reads no GPU memory, so a context's page catalogue stays empty, and what a client lends is mapped in the firmware's heap instead, where the firmware reads the ring and writes the UFO (`gm_Device`). The GPU's own three-level MMU comes with jobs that read memory (V6).
+- About 1,400 lines, not 3,000 to 5,000.
+
+**Not yet:**
+- The GPU's MMU, and compute (V6).
+- A context reset reaching the client as a message: as on the CIX, it's kept for `GPU_STATUS`.
+- The step 7 costs under load.
+
 The BXE-2-32 is Rogue core **36.29.52.182**, with a MIPS firmware processor. The vendor's DDK (24.2) drives it: `drivers/gpu/drm/img-rogue` on the `orange-pi-6.6-ky` branch. But the firmware on hand is **mainline's**: open-source firmware 1.0 (build 6734358) for exactly this core, in mainline's container. So `gpu-rogue` follows mainline's `imagination` driver and its interface (`pvr_rogue_fwif.h`), which doesn't list the core in its device table yet, and takes the K1's platform facts from the DDK.
 
 - **No user doorbell.** A job is kicked by a kernel CCB command and a write to `RGX_CR_MTS_SCHEDULE`, a privileged register. So the provider is a server queue (§5.1): the app writes its client CCB, which is mapped to it, and asks `gpu-rogue` to kick it. The app's API is the same as on the CIX. Only the cost differs, measured in step 7.

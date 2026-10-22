@@ -1,6 +1,6 @@
 /*
- * servers/hwdb/gpu.c -- gpu-panthor's stop method, and the GPU test
- * (v5-plan step 5)
+ * servers/hwdb/gpu.c -- the GPU servers' stop methods, and the GPU test
+ * (v5-plan steps 5 and 6)
  *
  * A dead gpu-panthor's MCU may still be running groups, which read and
  * write its clients' memory and its own: its stop is the MCU disabled
@@ -12,7 +12,9 @@
  *
  * The test (killtest.c's T_GPU), with gputest as the client: a round,
  * then a client killed with jobs in flight and another round after it,
- * then a round across gpu-panthor's own death.
+ * then a round across the server's own death. The same for either
+ * server: the CIX's gpu-panthor (step 5), where the app rings its own
+ * doorbell, and the RV2's gpu-rogue (step 6), a server queue.
  */
 #include <stddef.h>
 
@@ -27,7 +29,7 @@ constexpr uint32_t RESET_COMPLETED = 1u << 8, SOFT_RESET = 0x101;
 
 static bool is_gpu(struct unit *u)
 {
-    return hw_streq(unit_driver(u), "gpu-panthor");
+    return hw_streq(unit_driver(u), "gpu-panthor") || hw_streq(unit_driver(u), "gpu-rogue");
 }
 
 bool stop_gpu(struct unit *u)
@@ -60,6 +62,37 @@ bool stop_gpu(struct unit *u)
     return true;
 }
 
+/*
+ * gpu-rogue's (the RV2's BXE-2-32): everything back in soft reset, the
+ * MIPS with it, as mainline's pvr_fw_stop ends. Its power is hwdb's
+ * vote (a quirk), held until this has run, so its registers answer.
+ */
+constexpr uint64_t ROGUE = 0xcac00000;
+constexpr uint32_t ROGUE_SOFT_RESET = 0x100, ROGUE_SOFT_RESET2 = 0x108;
+
+bool stop_rogue(struct unit *u)
+{
+    const struct hw_lease *ls = &hwdb.g.leases[u - hwdb.units];
+    volatile uint64_t *g = (volatile uint64_t *)ROGUE;
+    bool mapped = false;
+
+    for (unsigned r = 0; r < ls->nranges; r++) {
+        void *at;
+        int64_t e = MapLease(u->lease[r], &at);
+
+        if (e != 0 && e != ERR_EXISTS)
+            return false;
+        mapped |= ls->ranges[r].base <= ROGUE && ROGUE < ls->ranges[r].base + ls->ranges[r].size;
+    }
+    if (!mapped)
+        return false;
+    g[ROGUE_SOFT_RESET / 8] = 0xffeffffffffffc3dull;
+    g[ROGUE_SOFT_RESET2 / 8] = 0x1fffff;
+    (void)g[ROGUE_SOFT_RESET / 8];
+    (void)g[ROGUE_SOFT_RESET2 / 8];
+    return true;
+}
+
 /* --- The test. --- */
 
 enum : uint8_t { G_START, G_FIRST, G_LOAD, G_KILLED, G_AFTER, G_ACROSS, G_DONE };
@@ -68,6 +101,7 @@ static struct {
     uint8_t step;
     Handle client;
     uint64_t at;
+    bool rogue;
 } gt;
 
 static void test_fail(const char *what)
@@ -133,7 +167,8 @@ static bool ended(int s, const char *what)
         return false;
     }
     if (s == 4) {
-        say("V5.5 gpu: not exercised: the GPU's firmware didn't come up");
+        say(gt.rogue ? "V5.6 gpu: not exercised: the GPU's firmware didn't come up"
+                     : "V5.5 gpu: not exercised: the GPU's firmware didn't come up");
         gt.step = G_DONE;
         return false;
     }
@@ -155,6 +190,7 @@ bool gpu_test(void)
             say("V5.5 gpu: not exercised: no GPU here");
             return true;
         }
+        gt.rogue = hw_streq(unit_driver(u), "gpu-rogue");
         if (start_client(0))
             gt.step = G_FIRST;
         return false;
@@ -182,25 +218,29 @@ bool gpu_test(void)
             gt.step = G_AFTER;
         return false;
     case G_AFTER:
-        /* Its first round, then gpu-panthor killed under it. */
+        /* Its first round, then the server killed under it. */
         if ((s = client_state()) != 0) {
-            ended(s, "gputest ended before gpu-panthor was killed");
+            ended(s, "gputest ended before the GPU server was killed");
             return true;
         }
         if (!late(5000))
             return false;
         if (!(u = gpu_unit())) {
-            test_fail("gpu-panthor isn't running");
+            test_fail("the GPU server isn't running");
             return true;
         }
         unit_kill(u);
         gt.step = G_ACROSS;
         return false;
     case G_ACROSS:
-        if (!ended(client_state(), "gputest's round across gpu-panthor's death failed"))
+        if (!ended(client_state(), "gputest's round across the GPU server's death failed"))
             return gt.step == G_DONE;
-        say("V5.5 gpu ok: jobs ran from the app's own queue, rung by its own doorbell; again "
-            "after a client was killed with jobs in flight, and after gpu-panthor was");
+        if (gt.rogue)
+            say("V5.6 gpu ok: jobs ran from the app's own client CCB, kicked through gpu-rogue; "
+                "again after a client was killed with jobs in flight, and after gpu-rogue was");
+        else
+            say("V5.5 gpu ok: jobs ran from the app's own queue, rung by its own doorbell; again "
+                "after a client was killed with jobs in flight, and after gpu-panthor was");
         return true;
     case G_DONE:
         return true;

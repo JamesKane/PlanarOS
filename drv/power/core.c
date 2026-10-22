@@ -113,6 +113,22 @@ unsigned pw_votes(void)
 
 /* --- One resource. --- */
 
+/* A resource that didn't turn on, named: the client only hears ERR_TIMEOUT. */
+static void say_failed(const struct pw_res *r)
+{
+    char line[80];
+    unsigned n = 0;
+
+    for (const char *s = "power: "; *s; s++)
+        line[n++] = *s;
+    for (const char *s = r->name; *s && n < 60; s++)
+        line[n++] = *s;
+    for (const char *s = " didn't turn on"; *s; s++)
+        line[n++] = *s;
+    line[n] = '\0';
+    pw_say(line);
+}
+
 static int64_t take(unsigned i, bool *turned)
 {
     struct pw_res *r = &pw_res[i];
@@ -120,8 +136,10 @@ static int64_t take(unsigned i, bool *turned)
 
     *turned = false;
     if (!r->on) {
-        if ((e = r->be->set(r, true)) != 0)
+        if ((e = r->be->set(r, true)) != 0) {
+            say_failed(r);
             return e;
+        }
         r->on = true;
         *turned = true;
     }

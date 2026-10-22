@@ -221,8 +221,11 @@ static void test_quirks(void)
         { "board", HW_Q_DMA_LIMIT, "/user", "0x8000F000" },
         { "other", HW_Q_DISABLE, "/m", nullptr },
         { "board", HW_Q_DISABLE, "/absent", nullptr },
+        { "board", HW_Q_NODE, "/fw/added@10", "zzz" },
+        { "board", HW_Q_MMIO, "/fw/added@10", "0x10 0x1000" },
+        { "board", HW_Q_NODE, "/absent/added", "zzz" },
     };
-    hw_id n, m, bus, child, fw, con, user;
+    hw_id n, m, bus, child, fw, con, user, added;
 
     fresh();
     g.board = "board";
@@ -236,9 +239,12 @@ static void test_quirks(void)
     con = dev("con", "zzz");
     user = dev("user", "a");
     need(user, fw, true);
-    CHECK(hw_quirks(&g, q, sizeof q / sizeof q[0]) == 6);
+    CHECK(hw_quirks(&g, q, sizeof q / sizeof q[0]) == 8);
     CHECK(g.nodes[user].dma_limit == 0x8000f000);
-    CHECK(g.broken == 1);                           /* /absent */
+    CHECK(g.broken == 2);                           /* /absent, and a node under it */
+    added = hw_find_path(&g, "/fw/added@10", 12);
+    CHECK(added != HW_NONE && g.nodes[added].parent == fw && hw_has_key(&g.nodes[added], "zzz"));
+    CHECK(g.nodes[added].nres == 1 && g.nodes[added].res[0].base == 0x10);
     run();
     CHECK(hw_streq(drivers[g.nodes[m].driver].name, "drv-a"));
     CHECK(hw_streq(drivers[g.nodes[n].driver].name, "drv-a"));

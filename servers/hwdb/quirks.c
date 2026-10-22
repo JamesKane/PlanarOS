@@ -56,6 +56,18 @@ const struct hw_quirk hw_quirk_table[] = {
     { "ky,x1", HW_Q_ALIAS, "/soc/usb2phy@0xc0a30000", "/soc/usb3@0" },
     { "ky,x1", HW_Q_ALIAS, "/soc/phy@c0b10000", "/soc/usb3@0" },
     { "ky,x1", HW_Q_DMA_LIMIT, "/soc/usb3@0", "0x80000000" },     /* dram_range0 */
+    /* The GPU, a BXE-2-32 (drv/gpu-rogue), which U-Boot's tree leaves out:
+     * the vendor's x1.dtsi node, its line 75 and its domain, clock and
+     * reset (power's set "gpu", voted for by hwdb so they outlast a dead
+     * driver until its GPU is stopped). Its registers are the first half
+     * of the node's 1 MiB, the MIPS's 512 KiB register bank: the second
+     * half is the Ethernet controller's (0xcac80000). It sits behind
+     * dram_range1, as the display does. */
+    { "ky,x1", HW_Q_NODE, "/soc/imggpu@cac00000", "img,rgx" },
+    { "ky,x1", HW_Q_MMIO, "/soc/imggpu@cac00000", "0xcac00000 0x80000" },
+    { "ky,x1", HW_Q_IRQ, "/soc/imggpu@cac00000", "0x4b /soc/interrupt-controller@e0000000" },
+    { "ky,x1", HW_Q_POWER, "/soc/imggpu@cac00000", "gpu" },
+    { "ky,x1", HW_Q_DMA_LIMIT, "/soc/imggpu@cac00000", "0x80000000" },
     /* Its hub's power and VBUS: GPIO 123 (Linux's tree; U-Boot's says 79),
      * which power drives in the set "usb". */
     { "ky,x1", HW_Q_FIRMWARE, "/usb3hub", "power's, in the set \"usb\"" },
@@ -200,6 +212,24 @@ static void disable(struct hw_graph *g, hw_id id)
             g->nodes[i].enabled = false;
 }
 
+/* A node the firmware's description leaves out, under its parent (which
+ * must be there), with its one key: the rest is the quirks after it. */
+static hw_id add_node(struct hw_graph *g, const char *path, const char *key)
+{
+    size_t len = hw_strlen(path), leaf = len;
+    hw_id parent, id;
+
+    while (leaf > 0 && path[leaf - 1] != '/')
+        leaf--;
+    if (leaf == 0 || leaf == len)
+        return HW_NONE;
+    parent = leaf == 1 ? 0 : hw_find_path(g, path, leaf - 1);
+    if (parent == HW_NONE || (id = hw_node_new(g, parent, path + leaf)) == HW_NONE ||
+        !hw_key_add(g, id, key))
+        return HW_NONE;
+    return id;
+}
+
 unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
 {
     unsigned applied = 0;
@@ -212,6 +242,15 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
         id = hw_find_path(g, q->path, hw_strlen(q->path));
         if (id == HW_NONE)
             id = hw_find_moved(g, q->path);
+        if (q->kind == HW_Q_NODE) {
+            if (id == HW_NONE)
+                id = add_node(g, q->path, q->arg);
+            if (id == HW_NONE)
+                g->broken++;
+            else
+                applied++;
+            continue;
+        }
         if (id == HW_NONE && q->kind == HW_Q_ALIAS)
             continue;           /* one of the two descriptions is missing: nothing to say */
         if (id == HW_NONE && !g->ns_first && hw_strneq(q->path, "/_SB_/", 6))
@@ -246,6 +285,8 @@ unsigned hw_quirks(struct hw_graph *g, const struct hw_quirk *q, unsigned n)
         case HW_Q_POWER:
             g->nodes[id].power_set = q->arg;
             break;
+        case HW_Q_NODE:
+            break;                      /* made above */
         case HW_Q_CALL: {
             const char *c = q->arg;
 

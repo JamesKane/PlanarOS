@@ -285,6 +285,7 @@ enum hw_quirk_kind : uint8_t {
     HW_Q_SCANOUT,       /* it scans out the firmware's framebuffer: leased with it, to one process */
     HW_Q_NOIRQ,         /* its lines through the controller at 'arg' ("[line] path") aren't used */
     HW_Q_POWER,         /* it needs power's named set 'arg', voted for before its lease */
+    HW_Q_NODE,          /* a device the firmware doesn't list, at the path, with compatible 'arg' */
 };
 
 struct hw_quirk {
@@ -292,7 +293,8 @@ struct hw_quirk {
     enum hw_quirk_kind kind;
     const char *path;
     const char *arg;    /* the driver, for PIN and EXCLUDE; numbers, in hex, for
-                         * DMA_LIMIT, REGS, MMIO and CALL; else why */
+                         * DMA_LIMIT, REGS, MMIO and CALL; the compatible for NODE;
+                         * else why */
 };
 
 extern const struct hw_quirk hw_quirk_table[];

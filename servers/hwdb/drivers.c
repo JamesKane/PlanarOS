@@ -119,6 +119,13 @@ static const struct hw_match gpu_panthor[] = {
     { nullptr, 0 },
 };
 
+/* V5 step 6: the RV2's BXE-2-32 (drv/gpu-rogue), by the vendor's
+ * compatible; U-Boot's tree has no node, so a quirk adds it. */
+static const struct hw_match gpu_rogue[] = {
+    { "img,rgx",                HW_SPECIFIC },
+    { nullptr, 0 },
+};
+
 const struct hw_driver hw_drivers[] = {
     { "kernel",         HW_DRV_KERNEL,      kernel },
     { "firmware",       HW_DRV_FIRMWARE,    firmware },
@@ -133,6 +140,7 @@ const struct hw_driver hw_drivers[] = {
     { "power",          HW_DRV_PROCESS,     power },
     { "xhci",           HW_DRV_PROCESS,     xhci },
     { "gpu-panthor",    HW_DRV_PROCESS,     gpu_panthor },
+    { "gpu-rogue",      HW_DRV_PROCESS,     gpu_rogue },
 };
 
 const unsigned hw_ndrivers = sizeof hw_drivers / sizeof hw_drivers[0];

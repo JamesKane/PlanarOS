@@ -338,6 +338,7 @@ static void message(struct drv *d, struct drv_dev *, unsigned ci, struct Message
         }
         c->open = true;
         m->gm_Server = FindTask(nullptr);
+        m->gm_Kind = GPU_CSF;
         m->gm_Id = gpu.id;
         m->gm_Cores = gpu.cores;
         m->gm_Slots = gpu.nslots;
@@ -348,6 +349,7 @@ static void message(struct drv *d, struct drv_dev *, unsigned ci, struct Message
         break;
     case GPU_MAP:
         e = map(c, m->gm_Address, m->gm_Size);
+        m->gm_Device = m->gm_Address;   /* its own address */
         break;
     case GPU_UNMAP:
         e = unmap(c, m->gm_Address);

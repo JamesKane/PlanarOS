@@ -213,6 +213,10 @@ static void k1_hardware(void)
             continue;
         apmu[0xf0 / 4] = (apmu[0xf0 / 4] & ~(1u << d[i].bit)) | (up ? 1u << d[i].bit : 0);
     }
+    /* The GPU clock's frequency change: done only with its gate open and
+     * the GPU's reset released, as on the board. */
+    if ((apmu[0xcc / 4] & 0x12) == 0x12)
+        apmu[0xcc / 4] &= ~(1u << 15);
 }
 
 static void test_k1(void)
@@ -235,13 +239,13 @@ static void test_k1(void)
     CHECK(pw_res[pw_find("k1.pd.hdmi")].kept && !pw_res[pw_find("k1.pd.gpu")].kept);
     CHECK(pw_res[pw_find("k1.clk.sdh0")].kept && pw_res[pw_find("k1.rst.sdh0")].kept);
 
-    /* The GPU: domain, then clock, then reset; the mux kept. */
+    /* The GPU: domain, clock, reset, then the clock's rate. */
     CHECK(ask(0, POWER_QUERY, 0, "gpu") == 0 && msg.pm_Total == 3 && msg.pm_On == 0);
     CHECK(ask(0, POWER_ON, 1, "gpu") == 0 && msg.pm_TurnedOn == 3);
     CHECK((apmu[0xd0 / 4] & 0xe) == 0xe && (apmu[0xf0 / 4] & 1));
-    CHECK(apmu[0xcc / 4] == (0x00145000 | 0x12));
+    CHECK(apmu[0xcc / 4] == 0x12);                  /* 614.4 MHz: mux 0, divided by 1 */
     pw_gone(0);
-    CHECK((apmu[0xd0 / 4] & 0xe) == 0 && !(apmu[0xf0 / 4] & 1) && apmu[0xcc / 4] == 0x00145000);
+    CHECK((apmu[0xd0 / 4] & 0xe) == 0 && !(apmu[0xf0 / 4] & 1) && apmu[0xcc / 4] == 0);
 
     /* SD 0 by its references (U-Boot's cells): the firmware's, so left on. */
     r[0] = (struct PowerRef){ .pr_Kind = POWER_CLOCK, .pr_Device = 0, .pr_NCells = 1, .pr_Cells = { 0xb2 } };
