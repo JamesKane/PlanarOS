@@ -1,6 +1,6 @@
 # The display class
 
-*Checked against V5.*
+*Checked against V7 step 1.*
 
 ## What it's for
 
@@ -9,7 +9,7 @@ The screen, without setting it up. The firmware lit one output on each board (UE
 It drives:
 - **the K1's HDMI DPU** (the RV2), "saturn" (`saturn.c`);
 - **the CIX's DPU4**, Arm China's Linlon-D60, komeda's D71 family (`komeda.c`);
-- **the framebuffer alone** (`fb.c`), where there's no controller it knows, or it isn't lit: QEMU's. It composes the planes itself, at 60 ticks a second.
+- **the framebuffer alone** (`fb.c`), where there's no controller it knows, or it isn't lit: QEMU's `ramfb`, on both ISAs. It composes the planes itself, at 60 ticks a second.
 
 ## Concepts
 
@@ -20,6 +20,7 @@ It drives:
 - **A plane is the client's** that first commits a buffer to it, until it commits it off, or goes.
 - **The sync page** (`dm_Sync`, `struct DisplaySync`), one page per output, mapped read-only into each client: `ds_Vblank` counts vblanks, at `ds_Time` (`CurrentTime`'s); `ds_Disp` is the last commit on the screen; `ds_Safe` the last whose predecessors' buffers the controller no longer reads. On these controllers they move together. Each is woken with `WakeAddr`: wait with `WaitAddr`.
 - **When a client goes**, dead or not, its planes go off at the next latch, and its buffers are freed after it: never while the controller may still read them ([docs §16.6](../../docs/16-rtg-display-gpu.md)). `DISPLAY_FREE` frees one the same way; a buffer a plane shows can't be freed (`ERR_BUSY`).
+- **Reading the screen back** (`DISPLAY_READ`), for tests: the CRC-32 of a rectangle of the screen as it shows now (`dm_Set[0]`'s `dp_X` and `dp_Y`, `dm_Width`, `dm_Height`; `dm_Crc` out). Each pixel is summed as 4 bytes, blue, green, red, then 0, as zlib's `crc32` would sum them. Only `fb.c` can: on a controller it's `ERR_NOSYS`, since the CPU can't cheaply read what the DPU composes. A rectangle not wholly on the screen is `ERR_BADARG`.
 - **When display goes**, its controller goes on scanning out. hwdb's stop method turns every plane off but the console's and waits for the latch, so nothing goes dark. Until then the kernel holds the planes' buffers (they're DMA Areas a client maps: [AllocDmaArea](../autodocs/lease.md#leaseallocdmaarea)'s notes). A client keeps its mapping, and may go on drawing. The restarted display shows none of them: the client connects again, and allocates and commits again.
 
 ## Using it
@@ -69,7 +70,7 @@ To flip, draw the next frame in a second buffer and commit it to the same plane.
 
 **The CIX** (`komeda.c`, `komeda.h`; komeda's `d71`, FreeBSD's `drm-komeda-kmod`, the vendor's `linlon-dp`). Registers in 0x200-byte blocks, which display walks to find its compiz, timing controller and layers. The GOP's layer (or layers, and a scaler path, if it chose to scale) feeds the lowest compiz inputs; display's planes are layers the GOP left off, each straight into an input above them. A commit writes them, then `GCU_CONFIG_VALID0`, which reads 0 again once latched. The vblank is the DOU's PL0 interrupt, line 356, at the line `BS_PROG_LINE` names: display sets it to the line before `BS_PREFETCH_LINE`, as the vendor's driver does, since the GOP's line 0 comes before the commit is taken. The DPU isn't coherent (`_CCA` 0), and **it is never reset**: a reset drops the DisplayPort link through the PS185 for good. Of the five DPUs only DPU4 is lit, and display is kept off the rest.
 
-**QEMU** (`fb.c`): edk2's GOP on `ramfb`. The console draws in a copy of the screen, and the screen is that copy with the planes over it, written out where something changed, at 60 frames a second.
+**QEMU** (`fb.c`): `ramfb`, a framebuffer in guest RAM that the guest describes to QEMU through `fw_cfg`'s `etc/ramfb`. On AArch64 edk2 sets it up, and display gets the GOP's mode. On RV64 the kernel sets it up (`plat/qemu-virt/plat.c`, V7 step 1): 1280×800 XRGB8888, under the device tree at the top of RAM's first bank, kept from the allocator like the K1's U-Boot framebuffer. QEMU's `-kernel` boots on AArch64 have no screen. The console draws in a copy of the screen, and the screen is that copy with the planes over it, written out where something changed, at 60 frames a second.
 
 **Flips, measured** by `displaytest`: 60 flips, each committed just after a vblank, timed by omega's method from the latching vblank's `ds_Time`.
 - **The RV2** (2026-10-22, 59.9 Hz): commit to latch 16.63–16.65 ms, vblank to latch 16.65–16.67 ms. Every flip latched at the next vblank: none missed.

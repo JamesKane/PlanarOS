@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V6.8 done
+EXPECT := V7.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -152,8 +152,9 @@ $(BUILD)/%.S.o: %.S
 -include $(OBJS:.o=.d)
 
 # Seconds a boot may take to reach EXPECT; a board over the serial
-# console needs minutes (mk/ky-x1.mk).
-BOOT_TIMEOUT ?= 20
+# console needs minutes (mk/ky-x1.mk). RV64 QEMU's run near 20 once it
+# had a screen and display's tests (V7 step 1).
+BOOT_TIMEOUT ?= 40
 
 # BOOT_LOG=file keeps the transcript.
 test: $(IMAGE) $(TEST_DEPS)

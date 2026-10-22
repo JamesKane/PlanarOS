@@ -27,6 +27,12 @@
  * buffers are no longer read, which a buffer the client draws into next
  * waits for. On the controllers display drives they latch together.
  * Each is woken with WakeAddr when it moves.
+ *
+ * DISPLAY_READ is for tests (v7-plan step 1): the CRC-32 of a rectangle
+ * of the screen as it shows now, each pixel's 32 bits little-endian with
+ * blue in the low byte and the top byte 0. Only where display composes
+ * the screen itself (QEMU's framebuffer); ERR_NOSYS on a controller,
+ * whose scanout the CPU can't cheaply read.
  */
 #ifndef PLANAR_DEVICES_DISPLAY_H
 #define PLANAR_DEVICES_DISPLAY_H
@@ -44,6 +50,7 @@ enum : uint32_t {
     DISPLAY_ALLOC = 0x101,      /* dm_Task, dm_Width, dm_Height, dm_Format in; dm_Buffer, dm_Address, dm_Stride out */
     DISPLAY_FREE = 0x102,       /* dm_Buffer in */
     DISPLAY_COMMIT = 0x103,     /* dm_Count planes in dm_Set; dm_Seq out */
+    DISPLAY_READ = 0x104,       /* dm_Set[0]'s dp_X, dp_Y, dm_Width, dm_Height in; dm_Crc out */
 };
 
 /* Formats: 32 bits a pixel, blue in the low byte. */
@@ -83,6 +90,8 @@ struct DisplayMsg {
     uint64_t dm_Seq;                    /* DISPLAY_COMMIT: the commit's number */
     uint32_t dm_Count;                  /* planes: of the output, or in dm_Set */
     uint32_t dm_Buffers;                /* DISPLAY_INFO: buffers allocated, every client's */
+    uint32_t dm_Crc;                    /* DISPLAY_READ */
+    uint32_t dm_Pad;
     union {
         struct DisplayPlaneInfo dm_Plane[DISPLAY_PLANES];   /* DISPLAY_INFO */
         struct DisplayPlane dm_Set[DISPLAY_PLANES];         /* DISPLAY_COMMIT */

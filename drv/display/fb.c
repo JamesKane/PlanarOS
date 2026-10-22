@@ -172,7 +172,14 @@ static uint64_t deadline(struct dp_out *)
     return tick;
 }
 
+static uint32_t pixel(const struct dp_out *o, uint32_t x, uint32_t y)
+{
+    uint32_t px = ((const volatile uint32_t *)o->fb)[(uint64_t)y * o->fb_cells[2] + x];
+
+    return (o->con_bgr ? px : swap_rb(px)) & 0xffffff;
+}
+
 const struct dp_backend dp_fb = {
     .name = "fb", .take = take, .program = program, .vblank = vblank, .damage = damage,
-    .deadline = deadline, .dma = true,
+    .deadline = deadline, .pixel = pixel, .dma = true,
 };

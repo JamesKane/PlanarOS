@@ -183,6 +183,8 @@
         kprintf("V6.7 done\n");
         kprintf("V6.8 debts skipped: no tasks\n");
         kprintf("V6.8 done\n");
+        kprintf("V7.1 screen skipped: no tasks\n");
+        kprintf("V7.1 done\n");
         arch_halt();
     }
     sched_idle();

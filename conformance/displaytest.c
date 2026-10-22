@@ -9,7 +9,9 @@
  *    the sync page, and says how long they took. Then PACED flips, each
  *    committed just after a vblank, timed as omega did (v5-plan step 7):
  *    commit to latch, vblank to latch, and the vblanks missed, which
- *    should be none: each latched at the next. Then it shows them,
+ *    should be none: each latched at the next. Between the two, the
+ *    last flip's overlay read back from the screen (DISPLAY_READ, v7-plan
+ *    step 1) where display composes it: its CRC-32 as drawn. Then it shows them,
  *    allocates a fourth buffer to say so, and waits to be killed: hwdb
  *    checks display freed its buffers.
  * 1: shows an overlay and the cursor, allocates a third buffer to say
@@ -125,6 +127,34 @@ static bool shown(uint64_t seq)
     return true;
 }
 
+/* The screen's rectangle as DISPLAY_READ sums it: 0 and *e if refused. */
+static uint32_t read_screen(int32_t x, int32_t y, uint32_t w, uint32_t h, int64_t *e)
+{
+    memset(m, 0, sizeof *m);
+    m->dm_Set[0] = (struct DisplayPlane){ .dp_X = x, .dp_Y = y };
+    m->dm_Width = w;
+    m->dm_Height = h;
+    return (*e = ask(DISPLAY_READ)) == 0 ? m->dm_Crc : 0;
+}
+
+/* What it should be: the rectangle (0, 0, w, h) of draw()'s bars. */
+static uint32_t bars_crc(uint32_t rgb, uint32_t w, uint32_t h)
+{
+    uint32_t crc = ~0u;
+
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++) {
+            uint32_t px = (x / 16 + y / 16) & 1 ? rgb : 0;
+
+            for (unsigned k = 0; k < 32; k += 8) {
+                crc ^= px >> k & 0xff;
+                for (unsigned i = 0; i < 8; i++)
+                    crc = crc >> 1 ^ (0xedb88320u & -(crc & 1));
+            }
+        }
+    return ~crc;
+}
+
 /* The last vblank: its number and its time, read together. */
 static uint64_t last_vblank(uint64_t *at)
 {
@@ -187,6 +217,8 @@ static int flips(void)
     struct buf a, b, c, d;
     uint64_t seq, worst = 0, total = 0, vb0, vblanks;
     char mode[64] = "";
+    int64_t e;
+    uint32_t crc;
 
     /* What it is, and refusals. */
     CHECK(m->dm_Width > 0 && m->dm_Height > 0 && m->dm_Count >= 3 && m->dm_Count <= DISPLAY_PLANES);
@@ -230,6 +262,18 @@ static int flips(void)
             worst = dt;
     }
     CHECK(sync_page->ds_Vblank - vb0 >= FLIPS);
+    /* The last flip's overlay (b, at 40, 40) as the screen shows it, left
+     * of the cursor: read back where display composes the screen, and
+     * refused where a controller scans it out. */
+    crc = read_screen(40, 40, 128, 32, &e);
+    CHECK(e == 0 || e == ERR_NOSYS);
+    if (e == 0) {
+        CHECK(crc == bars_crc(0x40c040, 128, 32));
+        CHECK(read_screen(40, 40, 128, 32, &e) == crc);
+        CHECK(read_screen(41, 40, 128, 32, &e) != crc);
+        read_screen(-1, 0, 1, 1, &e);
+        CHECK(e == ERR_BADARG);
+    }
     /* A buffer shown can't be freed; one that isn't can. */
     memset(m, 0, sizeof *m);
     m->dm_Buffer = b.id;

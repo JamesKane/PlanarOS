@@ -81,6 +81,7 @@ static struct {
     struct DisplayMsg *m;
     bool waiting, answered;
     uint32_t buffers;               /* the last answer's */
+    uint32_t width, height;
 } dc;
 
 void display_up(void)
@@ -109,6 +110,10 @@ void display_serve(struct MsgPort *mp)
 
     while ((m = (struct DisplayMsg *)GetMsgSized(mp, sizeof *m))) {
         dc.buffers = m->dm_Msg.mn_Error == 0 ? m->dm_Buffers : UINT32_MAX;
+        if (m->dm_Msg.mn_Error == 0) {
+            dc.width = m->dm_Width;
+            dc.height = m->dm_Height;
+        }
         dc.answered = true;
         dc.waiting = false;
     }
@@ -144,6 +149,7 @@ static struct {
     unsigned deaths;
     uint64_t held;                  /* hwdb.quarantined before display's death */
     bool native;
+    uint32_t width, height;         /* the screen's, while the first client showed */
 } dt;
 
 static void test_fail(const char *what)
@@ -208,6 +214,16 @@ static void lines(void)
     hw_put_dec(&l, hwdb.quarantined - dt.held);
     hw_put(&l, " pages of a dead display's buffers held for the client until its planes were off");
     say(l.text);
+    /* displaytest read its overlay back where display composes (v7-plan
+     * step 1), and would have failed had it not matched. */
+    l = (struct hw_line){ 0 };
+    hw_put(&l, "V7.1 screen ok: ");
+    hw_put_dec(&l, dt.width);
+    hw_put(&l, "x");
+    hw_put_dec(&l, dt.height);
+    hw_put(&l, dt.native ? " on its controller, whose scanout isn't read back"
+                         : " on QEMU's framebuffer, a client's overlay read back from it as drawn");
+    say(l.text);
 }
 
 bool display_test(void)
@@ -219,6 +235,7 @@ bool display_test(void)
     case D_START:
         if (!(u = display_unit())) {
             say("V5.3 display: not exercised: no screen here");
+            say("V7.1 screen: not exercised: no screen here");
             return true;
         }
         if (!dc.up) {
@@ -242,6 +259,8 @@ bool display_test(void)
                 test_fail("a client's planes never came up");
             return false;
         }
+        dt.width = dc.width;
+        dt.height = dc.height;
         KillProcess(dt.client);
         dt.at = hwdb.now;
         dt.step = D_KILLED;

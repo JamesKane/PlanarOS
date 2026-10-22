@@ -396,6 +396,26 @@ static void test_saturn(void)
 
 /* --- fb.c: the same, composed in memory. --- */
 
+static uint32_t read_crc(struct dp_out *o, int32_t x, int32_t y, uint32_t w, uint32_t h)
+{
+    memset(&msg, 0, sizeof msg);
+    msg.dm_Set[0] = (struct DisplayPlane){ .dp_X = x, .dp_Y = y };
+    msg.dm_Width = w;
+    msg.dm_Height = h;
+    return ask(o, 0, DISPLAY_READ) == 0 ? msg.dm_Crc : 0;
+}
+
+/* n pixels of one colour, summed as DISPLAY_READ sums them. */
+static uint32_t crc_of(uint32_t px, unsigned n)
+{
+    uint8_t b[4] = { (uint8_t)px, (uint8_t)(px >> 8), (uint8_t)(px >> 16), 0 };
+    uint32_t crc = 0;
+
+    while (n--)
+        crc = dp_crc32(crc, b, 4);
+    return crc;
+}
+
 static void test_fb(void)
 {
     static uint32_t screen[160 * 100];
@@ -427,6 +447,10 @@ static void test_fb(void)
     now_ns += 17000000;
     dp_tick(&o);
     CHECK(screen[6 * 160 + 6] == 0x7f0080);         /* blue half over red */
+    CHECK(read_crc(&o, 6, 6, 1, 1) == crc_of(0x7f0080, 1));
+    CHECK(read_crc(&o, 0, 0, 4, 2) == crc_of(0x111111, 8));
+    CHECK(read_crc(&o, 0, 0, 160, 100) != 0 && msg.dm_Msg.mn_Error == 0);
+    CHECK(read_crc(&o, 150, 0, 11, 1) == 0 && msg.dm_Msg.mn_Error == ERR_BADARG);
     CHECK(commit(&o, 0, 2, 0, 0, 0) == 3);
     now_ns += 17000000;
     dp_tick(&o);

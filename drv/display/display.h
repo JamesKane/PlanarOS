@@ -50,6 +50,9 @@ struct dp_backend {
     /* When it next wants dp_tick without an interrupt (fb.c's frames,
      * as CurrentTime goes); 0: never. */
     uint64_t (*deadline)(struct dp_out *o);
+    /* The screen's pixel at (x, y), as DISPLAY_READ sums it; nullptr
+     * where the CPU doesn't compose the screen. */
+    uint32_t (*pixel)(const struct dp_out *o, uint32_t x, uint32_t y);
     bool dma;                       /* its buffers are DMA Areas (the controller reads them) */
 };
 
@@ -111,6 +114,7 @@ void dp_message(struct dp_out *o, unsigned client, struct DisplayMsg *m);
 void dp_gone(struct dp_out *o, unsigned client);
 void dp_tick(struct dp_out *o);     /* an interrupt, or the deadline */
 unsigned dp_live_buffers(const struct dp_out *o);
+uint32_t dp_crc32(uint32_t crc, const uint8_t *p, uint64_t n);
 bool dp_streq(const char *a, const char *b);
 unsigned dp_dec(char *at, uint32_t v);  /* v in decimal at 'at': the digits written */
 unsigned dp_hex(char *at, uint64_t v);  /* "0x..." */

@@ -206,6 +206,54 @@ static int64_t commit(struct dp_out *o, unsigned client, struct DisplayMsg *m)
     return 0;
 }
 
+uint32_t dp_crc32(uint32_t crc, const uint8_t *p, uint64_t n)
+{
+    static uint32_t table[256];
+
+    if (!table[1])
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t v = i;
+
+            for (unsigned k = 0; k < 8; k++)
+                v = v >> 1 ^ (0xedb88320u & -(v & 1));
+            table[i] = v;
+        }
+    crc = ~crc;
+    while (n--)
+        crc = crc >> 8 ^ table[(crc ^ *p++) & 0xff];
+    return ~crc;
+}
+
+/* A rectangle of the screen's CRC-32, a row at a time. */
+static int64_t read_screen(const struct dp_out *o, struct DisplayMsg *m)
+{
+    int64_t x = m->dm_Set[0].dp_X, y = m->dm_Set[0].dp_Y;
+    uint8_t row[256];
+    uint32_t crc = 0;
+
+    if (!o->be->pixel)
+        return ERR_NOSYS;
+    if (x < 0 || y < 0 || !m->dm_Width || !m->dm_Height || x + m->dm_Width > o->width ||
+        y + m->dm_Height > o->height)
+        return ERR_BADARG;
+    for (uint32_t j = 0; j < m->dm_Height; j++)
+        for (uint32_t i = 0; i < m->dm_Width;) {
+            unsigned n = 0;
+
+            for (; n < sizeof row && i < m->dm_Width; i++, n += 4) {
+                uint32_t px = o->be->pixel(o, (uint32_t)x + i, (uint32_t)y + j);
+
+                row[n] = (uint8_t)px;
+                row[n + 1] = (uint8_t)(px >> 8);
+                row[n + 2] = (uint8_t)(px >> 16);
+                row[n + 3] = 0;
+            }
+            crc = dp_crc32(crc, row, n);
+        }
+    m->dm_Crc = crc;
+    return 0;
+}
+
 void dp_message(struct dp_out *o, unsigned client, struct DisplayMsg *m)
 {
     int64_t e;
@@ -222,6 +270,9 @@ void dp_message(struct dp_out *o, unsigned client, struct DisplayMsg *m)
         break;
     case DISPLAY_COMMIT:
         e = commit(o, client, m);
+        break;
+    case DISPLAY_READ:
+        e = read_screen(o, m);
         break;
     default:
         e = ERR_BADARG;

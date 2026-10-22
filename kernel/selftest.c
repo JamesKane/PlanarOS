@@ -1491,6 +1491,8 @@ void selftest_tasks(void *)
     kprintf("V6.7 done\n");
     selftest_debts();
     kprintf("V6.8 done\n");
+    /* hwdb's display test said what it read of the screen (display.c). */
+    kprintf("V7.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

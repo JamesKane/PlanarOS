@@ -14,7 +14,7 @@ Typing commands. The Shell (`cmd/shell.c`) is itself a program on the disk, `C:s
 make PLATFORM=qemu-virt-a64 EFI=1 run BOOTARGS=shell
 ```
 
-(Through edk2 with `ramfb` there's a framebuffer; with `-kernel` the output goes to the serial line alone.) On the CIX, `make PLATFORM=uefi-a64 run BOOTARGS=shell`. A board run adds `reboot`, so `EndShell` ends the system and the board starts over into its other system.
+(Through edk2 with `ramfb` there's a framebuffer; with `-kernel` the output goes to the serial line alone. RV64 QEMU has a `ramfb` too, set up by the kernel, though `-nographic` keeps its window shut: QMP's `screendump` sees it.) On the CIX, `make PLATFORM=uefi-a64 run BOOTARGS=shell`. A board run adds `reboot`, so `EndShell` ends the system and the board starts over into its other system.
 
 ## Using it
 
