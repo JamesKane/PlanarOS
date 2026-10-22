@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: in progress (2026-10-22): steps 1 to 5 done; decisions 1 to 4 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
+**Status: in progress (2026-10-22): steps 1 to 6 done; decisions 1 to 5 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -249,6 +249,22 @@ The design says three things (§3.4, §7.2, VQ12): shared libraries live in a gl
 
 Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:EFI/planar/S/test`) gets lines that use the new templates. The autodocs and DOS manual are renamed with it.
 
+**Done (2026-10-22), on QEMU.** §17.4.4's names, all at once (decision 5): `struct Dos` and `struct Con`, `OpenDos`, `OpenFile`, `ReadFile`, `ExaminePath`, `ExamineNext`, `DeletePath`, `CreateDir`, `NextVolume`, `RunCommand`, `SplitArgs`, `OpenCon`, `WriteCon`, `PutStr`. No snake_case name is left in `planar/dos.h` or a caller: the commands, the Shell, dostest, hwdb and the GPU drivers' firmware loaders. lib/dos is an archive now, `libdos.a`, of five files (the client, the loader, the console, the paths, the arguments), so a command carries only what it calls: Echo's code is 22 KiB, without the loader.
+
+- **`ReadArgs`** takes V36's templates: `/A`, `/K`, `/S`, `/N`, `/M` (giving back from its end what the `/A` items after it need), `/F`, aliases with `=`, keywords without case, `KEY=value`, quotes with AmigaDOS's `*` escapes. What's not given is left, so defaults are the caller's. The words are copied into one `AllocVec` block that `FreeArgs` gives back.
+- **Not as AmigaDOS:** there's no `Input()` or `IoErr()`, so the line is named (`rda_Source`), the `struct RDArgs` is the caller's, and the error is returned with its reason in `rda_Why` ("FILE is required"). No `/T`. `?` gives an empty reason, for the caller to show the template; there's nothing to read a new line from.
+- **`AddPart`** in place, with a volume in the name replacing the path, `:` the volume's root, and each leading `/` a step up; `FilePart` and `PathPart` as the RKM's. `dos_path` is gone: a command copies its directory and adds the name, and the Shell's `CD /` is `AddPart`'s.
+- **`Printf` and `VPrintf`** over `RawDoFmt`, gathered 64 bytes a console message. `con_dec` is gone.
+- **The commands' templates:** `Echo TEXT/M,NOLINE/S`, `Type FROM/A/M,NUMBER/S`, `List DIR/M,FILES/S,DIRS/S,QUICK/S`, `Info VOLUME`, `Touch FILE/M/A`, `Delete FILE/M/A,QUIET/S`, the Shell's `FROM` (was `-s`) and `CD DIR`. Each says why its arguments are wrong, with its template. A Shell started from a Shell begins in its directory.
+
+**Tested by:**
+- `conformance/argscheck.h`, 100 cases: the plan's template, every modifier, `/M` giving back to one and two `/A` items and not enough, `/F` from a positional and a keyword and over a 600-byte word, quotes and escapes, `=` with empty and quoted values, aliases, numbers at `INT64_MIN` and `INT64_MAX` and one past each, every reason, the template's own errors (32 items, 33, `/T`, two `/M`), defaults left, `FreeArgs` twice. `AddPart` at its volumes, steps up and room to the byte; `FilePart`, `PathPart`.
+- `conformance/dosargs.c` runs them in the guest: `V6.6 dos ok`, on every QEMU boot.
+- `make dos-lib-test` runs them on the host with the sanitizers, with `AllocVec` the host's `malloc` and the words last in the block, so a copy past it is the sanitizer's to see. Then 200,000 random lines of quotes, stars, equals signs and keywords against seven templates (120,000 parse; each value must lie in the block), and `Printf` and the console over a fake `con.0` that records each message: what's sent and in how many, a console that goes and is found again once, and none, to the log. 12 mutations caught (one, reconnecting to a console without end, by hanging), among them the block's room for `/F`'s second copy, which first got through: the overrun landed in the numbers' part of the block, until the words went last.
+- The Shell's script, on every QEMU boot with a disk: `List DIR=… QUICK FILES`, `CD C`, `CD /`, `Type FROM=… … NUMBER`, a quoted `Echo` with `NOLINE`, and the lines it had.
+
+**Costs**, under QEMU: `ReadArgs` and `FreeArgs` of a four-word line with a keyword, a switch and a quoted word, 1.8 µs on AArch64 and 3.4 µs on RV64, most of it `AllocVec`'s.
+
 ## 7. Supervision
 
 - **`OpenPort`'s wait** (VQ28): a flag and a deadline, so that `OpenPort` sleeps until a port of that name exists, or the deadline passes (`ERR_TIMEOUT`). The kernel wakes waiters on `CreatePort`. `lib/blk`'s and the tests' polling loops go. The leaning's other half, the supervisor holding a port across its server's restarts, is a decision (below).
@@ -285,6 +301,6 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 2. **A library's per-process data.** *Taken (2026-10-22): none in the library;* the program's `ProcessData`, through the thread pointer (step 4). None: libraries are code and constants, and state lives in what the caller passes. Or a per-process data block the loader allocates for each library a process opens, found through the interface. *Leaning:* none in V6. Every library step 4 builds can work that way, and it keeps the region read-only.
 3. **How a process finds `IExec`** (VQ6). *Taken (2026-10-22): a register,* the third, since hwdb's root lease has the second (step 4). The second argument register at entry, or a fixed address in the shared region, which the identity layout can't guarantee. *Leaning:* the register.
 4. **SIMD choice** (VQ22). *Taken (2026-10-22): through the table, at boot* (step 4). Once per CPU at boot, or through the interface table. *Leaning:* through the table, built at boot.
-5. **The dos rename.** At once, or with snake_case aliases for a phase. *Leaning:* at once. Every caller is in this tree.
+5. **The dos rename.** *Taken (2026-10-22): at once* (step 6). At once, or with snake_case aliases for a phase. *Leaning:* at once. Every caller is in this tree.
 6. **Ports across a restart** (VQ28). `OpenPort`'s wait alone, or also a supervisor holding each supervised server's port so its name never goes. *Leaning:* the wait in V6, and supervisor-held ports when a server's clients can't tolerate the window.
 7. **hwdb's death** (VQ29). A meditation and a reset, or restarting hwdb, which would have to adopt the leases and units of a dead one. *Leaning:* the reset, as VQ29 leans. Restarting in place is a phase of its own.

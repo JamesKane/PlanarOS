@@ -19,16 +19,17 @@ Where there's no framebuffer (QEMU booted with `-kernel`), there's no "con.0".
 
 ## Using it
 
-`dos.library` has the client: `con_open`, `con_write`, `con_puts`, `con_dec`, `con_close`. Without a console, they write to the kernel's log a line at a time, so a program needn't care.
+`dos.library` has the client: `OpenCon`, `WriteCon`, `PutStr`, `Printf`, `CloseCon`. `Printf` gathers its bytes 64 at a time, one message each. Without a console, they write to the kernel's log a line at a time, so a program needn't care.
 
 From `cmd/info.c`:
 ```c
-struct con c;
+struct Con c;
 
-con_open(&c, 16);
-con_puts(&c, "Volumes:\n");
+OpenCon(&c, 16);
+PutStr(&c, "Volumes:\n");
 ...
-con_close(&c);
+Printf(&c, "  %s: %lu MiB free, %s\n", e.de_Name, e.de_Size >> 20, ...);
+CloseCon(&c);
 ```
 
 ## Rules
@@ -38,4 +39,4 @@ con_close(&c);
 
 ## Functions used
 
-[con_open](../autodocs/dos.md#doscon_open), [GrantConsole](../autodocs/lease.md#leasegrantconsole), [ReadConsole](../autodocs/lease.md#leasereadconsole)
+[OpenCon](../autodocs/dos.md#dosopencon), [Printf](../autodocs/dos.md#dosprintf), [GrantConsole](../autodocs/lease.md#leasegrantconsole), [ReadConsole](../autodocs/lease.md#leasereadconsole)

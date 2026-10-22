@@ -7,7 +7,7 @@
  * 0. Measures each block device with blkbench (conformance/blkbench.c),
  *    one at a time, while nothing else runs. Then starts dos, the file
  *    server, and runs dostest against it, then the Shell from the disk
- *    on a script there (C:shell -s SYS:EFI/planar/S/test), which must end
+ *    on a script there (C:shell FROM SYS:EFI/planar/S/test), which must end
  *    0; dos stays through the kills, its devices restarting under it,
  *    and is stopped at the end.
  * 1. Starts a client task per class port the drivers published. Each
@@ -436,20 +436,20 @@ static void dos_step(void)
 /* The Shell, loaded from the disk, on its test script. */
 static void shell_step(void)
 {
-    static struct dos d;
+    static struct Dos d;
     struct ProcessInfo pi;
 
     if (!bench) {
         int64_t p;
 
-        if (dos_open(&d, SIG_SLEEP + 1) != 0 ||
-            (p = dos_run(&d, "C:shell", "-s SYS:EFI/planar/S/test", SIG_DEAD, 0)) < 0) {
+        if (OpenDos(&d, SIG_SLEEP + 1) != 0 ||
+            (p = RunCommand(&d, "C:shell", "FROM SYS:EFI/planar/S/test", SIG_DEAD, 0)) < 0) {
             fail("the Shell couldn't be loaded");
-            dos_close(&d);
+            CloseDos(&d);
             start_clients();
             return;
         }
-        dos_close(&d);
+        CloseDos(&d);
         bench = (Handle)p;
         phase_at = hwdb.now;
         return;

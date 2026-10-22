@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V6.5 done
+EXPECT := V6.6 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -136,7 +136,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -190,6 +190,7 @@ test-all:
 	@$(MAKE) --no-print-directory utility-test
 	@$(MAKE) --no-print-directory span-fuzz
 	@$(MAKE) --no-print-directory clib-test
+	@$(MAKE) --no-print-directory dos-lib-test
 
 # lib/rt/string.c's word loops, which the ISAs' own replace, on the host
 # with the sanitizers, renamed so as not to be the host's.
@@ -266,6 +267,21 @@ $(CLIB_TEST): $(CLIB_TEST_OBJS) lib/clib/testhost.c $(UTILITY_SRCS) lib/exec/poo
 
 clib-test: $(CLIB_TEST)
 	@$(CLIB_TEST)
+
+# dos.library's ReadArgs, path calls and console on the host with the
+# sanitizers: conformance/argscheck.h, random lines, and Printf over a
+# fake console (lib/dos/test.c).
+DOS_LIB_TEST := build/dos-lib/dos-lib-test
+DOS_LIB_SRCS := lib/dos/args.c lib/dos/path.c lib/dos/con.c
+
+$(DOS_LIB_TEST): $(DOS_LIB_SRCS) lib/dos/test.c conformance/argscheck.h include/planar/dos.h \
+		$(UTILITY_SRCS) lib/exec/fmt.c
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) $(DOS_LIB_SRCS) $(UTILITY_SRCS) \
+	  lib/exec/fmt.c lib/dos/test.c -o $@
+
+dos-lib-test: $(DOS_LIB_TEST)
+	@$(DOS_LIB_TEST)
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.

@@ -1,34 +1,46 @@
 /*
- * cmd/touch.c -- Touch FILE: make an empty file if there's none
+ * cmd/touch.c -- Touch FILE/M/A: make each file, empty, if it isn't there
  */
 #include <planar/dos.h>
 #include <planar/syscalls.h>
+#include <planar/utility.h>
+
+static const char TEMPLATE[] = "FILE/M/A";
 
 int main(uint64_t arg)
 {
-    struct con c;
-    struct dos d;
+    struct Con c;
+    struct Dos d;
+    struct RDArgs ra = { 0 };
+    int64_t a[1] = { 0 }, f;
     char cwd[DOS_PATH], path[DOS_PATH];
-    const char *args;
-    int64_t f;
+    int failed = 0;
 
-    dos_args(arg, cwd, sizeof cwd, &args);
-    con_open(&c, 16);
-    if (!*args || dos_open(&d, 17) != 0) {
-        con_puts(&c, !*args ? "Touch: which file?\n" : "Touch: no dos\n");
-        con_close(&c);
+    SplitArgs(arg, cwd, sizeof cwd, &ra.rda_Source);
+    OpenCon(&c, 16);
+    if (ReadArgs(TEMPLATE, a, &ra) != 0) {
+        Printf(&c, "Touch: %s%s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: " : "", TEMPLATE);
+        CloseCon(&c);
         return 1;
     }
-    dos_path(cwd, args, path, sizeof path);
-    if ((f = dos_file(&d, path, DOSF_WRITE | DOSF_CREATE, nullptr)) < 0) {
-        con_puts(&c, "Touch: can't make ");
-        con_puts(&c, path);
-        con_puts(&c, "\n");
-        con_close(&c);
+    if (OpenDos(&d, 17) != 0) {
+        PutStr(&c, "Touch: no dos\n");
+        FreeArgs(&ra);
+        CloseCon(&c);
         return 1;
     }
-    dos_close_file(&d, (uint32_t)f);
-    dos_close(&d);
-    con_close(&c);
-    return 0;
+    for (const char *const *n = (const char *const *)a[0]; *n; n++) {
+        SNPrintf(path, sizeof path, "%s", cwd);
+        if (!AddPart(path, *n, sizeof path) ||
+            (f = OpenFile(&d, path, DOSF_WRITE | DOSF_CREATE, nullptr)) < 0) {
+            Printf(&c, "Touch: can't make %s\n", path);
+            failed = 1;
+            continue;
+        }
+        CloseFile(&d, (uint32_t)f);
+    }
+    CloseDos(&d);
+    FreeArgs(&ra);
+    CloseCon(&c);
+    return failed;
 }

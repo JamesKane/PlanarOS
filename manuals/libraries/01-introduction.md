@@ -23,7 +23,7 @@ Planar's layout of the address space is **identity**: an address is the physical
 
 A program is a process. Its first task starts at `main()`, and **returning from `main()` calls `ExitProcess()`** with the return value (`arch/<isa>/user/crt0.S`).
 
-A process starts another with `CreateProcess`, for a program built into the kernel image, or `CreateProcessImage`, for one its caller has loaded into an Area. `dos.library`'s `dos_run` loads a program from storage that way ([DOS ch. 1](../dos/01-files-and-programs.md)), and the Shell runs commands with it. The new process's handle belongs to the caller's process:
+A process starts another with `CreateProcess`, for a program built into the kernel image, or `CreateProcessImage`, for one its caller has loaded into an Area. `dos.library`'s `RunCommand` loads a program from storage that way ([DOS ch. 1](../dos/01-files-and-programs.md)), and the Shell runs commands with it. The new process's handle belongs to the caller's process:
 - The calling task gets the signal it named when the new process is dead, and `QueryProcess` then says how it ended: its exit code, or the fault and where.
 - **A process never outlives its handle.** `CloseHandle` kills it if it's still running, and so does its owner's death.
 - `PROCF_HELD` creates it without starting it, so the caller can give it what it needs first (hwdb grants a driver its leases this way), then `StartProcess`.
@@ -109,7 +109,7 @@ The limits are the kernel's (`kernel/process.h`, `kernel/port.c`), not in a publ
 
 ## Logging
 
-A program writes text for the user with `dos.library`'s console calls (`con_open`, `con_puts`), which go to the screen where there is one ([Devices ch. 3](../devices/03-console.md)). Underneath, and for anything that is only for the log, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
+A program writes text for the user with `dos.library`'s console calls (`OpenCon`, `PutStr`, `Printf`), which go to the screen where there is one ([Devices ch. 3](../devices/03-console.md)). Underneath, and for anything that is only for the log, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
 
 ## Names in this volume
 

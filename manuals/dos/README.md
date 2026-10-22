@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 6.* Files, programs on disk, and the Shell: what AmigaDOS's manuals covered.
 
-*Checked against V5.*
+*Checked against V6.*
 
 | # | Chapter | State |
 |---|---|---|

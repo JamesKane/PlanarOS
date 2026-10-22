@@ -80,5 +80,6 @@ void selftest_exec_memory(void);
 void selftest_utility(void);
 void selftest_libraries(void);
 void selftest_clib(void);
+void selftest_dos_args(void);
 
 #endif /* KERNEL_SELFTEST_H */

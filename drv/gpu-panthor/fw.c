@@ -58,30 +58,30 @@ void *fw_cpu(uint32_t mcu_va)
 /* The whole file, into a new Area (*area): its size, or an error. */
 static int64_t read_file(void **at, int64_t *area)
 {
-    struct dos d;
+    struct Dos d;
     struct DosEntry e;
     int64_t f, n;
 
-    if (dos_open(&d, SIG_DOS) != 0)
+    if (OpenDos(&d, SIG_DOS) != 0)
         return ERR_NOTFOUND;            /* dos isn't there yet */
-    if ((f = dos_file(&d, FW_PATH, 0, &e)) < 0) {
-        dos_close(&d);
+    if ((f = OpenFile(&d, FW_PATH, 0, &e)) < 0) {
+        CloseDos(&d);
         return ERR_NOTFOUND;
     }
     if (e.de_Size < 64 || e.de_Size > FW_MAX || (*area = AllocArea(e.de_Size, 0, at)) < 0) {
-        dos_close(&d);
+        CloseDos(&d);
         return ERR_BADARG;
     }
     for (uint64_t off = 0; off < e.de_Size; off += (uint64_t)n) {
         uint32_t len = e.de_Size - off < DOS_MAX_IO ? (uint32_t)(e.de_Size - off) : DOS_MAX_IO;
 
-        if ((n = dos_read(&d, (uint32_t)f, off, (uint8_t *)*at + off, len)) <= 0) {
+        if ((n = ReadFile(&d, (uint32_t)f, off, (uint8_t *)*at + off, len)) <= 0) {
             FreeArea(*area);
-            dos_close(&d);
+            CloseDos(&d);
             return n < 0 ? n : ERR_BADARG;
         }
     }
-    dos_close(&d);
+    CloseDos(&d);
     return (int64_t)e.de_Size;
 }
 

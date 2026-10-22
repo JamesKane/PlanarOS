@@ -48,7 +48,10 @@ BUILTINS_OBJS := $(patsubst third_party/compiler-rt/lib/builtins/%.c,$(BUILD)/us
 	$(wildcard third_party/compiler-rt/lib/builtins/*.c))
 USER_DRV     := $(patsubst lib/drv/%.c,$(BUILD)/user/drv-lib/%.o,$(wildcard lib/drv/*.c))
 USER_BLK     := $(BUILD)/user/blk/blk.o
-USER_DOS     := $(BUILD)/user/dos/dos.o
+# dos.library (lib/dos): an archive, before libutility.a and libexec.a,
+# which its ReadArgs and Printf call.
+USER_DOS     := $(BUILD)/user/libdos.a
+DOS_OBJS     := $(patsubst lib/dos/%.c,$(BUILD)/user/dos/%.o,$(filter-out %/test.c,$(wildcard lib/dos/*.c)))
 USER_ACPICA  := $(BUILD)/user/libacpica.a
 ACPICA_OBJS  := $(patsubst third_party/acpica/source/components/%.c,$(BUILD)/user/acpica/%.o,$(ACPICA_SRCS))
 
@@ -74,6 +77,10 @@ $(USER_EXECLIB): $(EXECLIB_OBJS)
 	$(AR) rcs $@ $^
 
 $(USER_CLIB): $(CLIB_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
+
+$(USER_DOS): $(DOS_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 

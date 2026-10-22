@@ -1,7 +1,13 @@
-; The Shell's test (hwdb's test mode runs it: Shell -s SYS:EFI/planar/S/test)
+; The Shell's test (hwdb's test mode runs it: Shell FROM SYS:EFI/planar/S/test)
 Info
 List SYS:EFI/planar/C
+List DIR=SYS:EFI/planar/S QUICK FILES
 CD SYS:EFI/planar
 Echo The current directory is now SYS:EFI/planar
+CD C
+CD /
 Type S/greeting
+Type FROM=S/greeting S/greeting NUMBER
+Echo "Two  spaces, quoted, and no newline: " NOLINE
+Echo
 Echo Every line of SYS:EFI/planar/S/test ran.

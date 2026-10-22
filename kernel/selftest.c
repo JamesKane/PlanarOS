@@ -1405,6 +1405,8 @@ void selftest_tasks(void *)
     kprintf("V6.4 done\n");
     selftest_clib();
     kprintf("V6.5 done\n");
+    selftest_dos_args();
+    kprintf("V6.6 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2909,6 +2911,24 @@ void selftest_libraries(void)
             "processes, the tables read-only\n", library_count(),
             (unsigned long long)library_pages(),
             library_vector() ? "by the vector unit" : "by words: no vector unit");
+}
+
+/*
+ * V6 step 6: dos.library's ReadArgs, AddPart, FilePart and PathPart
+ * (conformance/dosargs.c), which need no dos server. The commands on
+ * them run in hwdb's test mode, from the Shell's script.
+ */
+void selftest_dos_args(void)
+{
+    static const char *const tests[] = { "dosargs" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.6 dos skipped: no user programs\n");
+        return;
+    }
+    run_each("V6.6 dos", tests, 1);
+    kprintf("V6.6 dos ok: ReadArgs's templates (/A /K /S /N /M /F, aliases, quotes, '=') "
+            "with their reasons, and AddPart, FilePart and PathPart, as the RKM says\n");
 }
 
 /*

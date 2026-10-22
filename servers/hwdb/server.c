@@ -960,7 +960,7 @@ static uint64_t sys_due;
 static void system_step(void)
 {
     struct ProcessInfo pi;
-    struct dos d;
+    struct Dos d;
     int64_t p;
 
     if (hwdb.stopping) {
@@ -1004,12 +1004,12 @@ static void system_step(void)
     if (sys_shell)
         return;
     /* The Shell from C:, with the console's input, once dos answers. */
-    if (dos_open(&d, SIG_DOS_CLIENT) != 0) {
+    if (OpenDos(&d, SIG_DOS_CLIENT) != 0) {
         sys_due = hwdb.now + 50 * MS;
         return;
     }
-    p = dos_run(&d, "C:shell", "", SIG_DEAD, PROCF_HELD);
-    dos_close(&d);
+    p = RunCommand(&d, "C:shell", "", SIG_DEAD, PROCF_HELD);
+    CloseDos(&d);
     if (p < 0) {
         say("hwdb: no C:shell to start");
         sys_due = hwdb.now + 5000 * MS;

@@ -3,12 +3,14 @@
  * processes, their output on the console
  *
  *   Shell              read lines from the serial console (decision 1)
- *   Shell -s FILE      run FILE's lines, then end: 0 if all succeeded
+ *   Shell FROM FILE    run FILE's lines, then end: 0 if all succeeded
  *
- * A line's first word is a built-in (CD, Help, EndShell) or a command,
- * found in C: unless it names its volume or directory; the rest of the
- * line is its arguments, and it's given the current directory with them
- * (dos_args). The Shell waits for it and says how it ended if not well.
+ * Its template is "FROM" (ReadArgs). Started from a Shell, it begins in
+ * that one's current directory. A line's first word is a built-in (CD,
+ * Help, EndShell) or a command, found in C: unless it names its volume
+ * or directory; the rest of the line is its arguments, and it's given
+ * the current directory with them (SplitArgs). The Shell waits for it
+ * and says how it ended if not well.
  * Input is the console's (GrantConsole, by hwdb) and a USB keyboard's,
  * from input's ring (planar/devices/input.h), which the Shell takes when
  * input is there and again after it restarts. Both are polled every
@@ -20,6 +22,7 @@
 #include <planar/dos.h>
 #include <planar/lease.h>
 #include <planar/syscalls.h>
+#include <planar/utility.h>
 
 void *memset(void *dst, int c, size_t n);
 
@@ -31,14 +34,14 @@ constexpr int64_t SIG_INPUT = 20;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned LINE = 200;
 
-static struct con con;
-static struct dos dos;
+static struct Con con;
+static struct Dos dos;
 static char cwd[DOS_PATH] = "SYS:";
 static unsigned number = 1;             /* the Amiga's CLI number, for the prompt */
 
 static void say(const char *s)
 {
-    con_puts(&con, s);
+    PutStr(&con, s);
 }
 
 static bool word_is(const char *w, unsigned n, const char *name)
@@ -60,39 +63,34 @@ static void nap(uint64_t ms)
     Wait(1ULL << SIG_TICK);
 }
 
-/* CD DIR: a directory that exists becomes the current one. */
-static int cd(const char *arg)
+/* CD DIR: a directory that exists becomes the current one. "/" is a
+ * step up, ":" the volume's root (AddPart). */
+static int cd(const char *line)
 {
+    struct RDArgs ra = { .rda_Source = line };
+    int64_t a[1] = { 0 };
     char path[DOS_PATH];
     struct DosEntry e;
+    int r = 0;
 
-    if (!*arg) {
-        say(cwd);
-        say("\n");
-        return 0;
-    }
-    if (arg[0] == '/' && !arg[1]) {     /* the parent */
-        unsigned n = 0, cut = 0;
-
-        while (cwd[n]) {
-            if (cwd[n] == '/' || cwd[n] == ':')
-                cut = cwd[n] == ':' ? n + 1 : n;
-            n++;
-        }
-        cwd[cut] = '\0';
-        return 0;
-    }
-    dos_path(cwd, arg, path, sizeof path);
-    if (dos_stat(&dos, path, &e) != 0 || !e.de_Dir) {
-        say("CD: not a directory: ");
-        say(path);
-        say("\n");
+    if (ReadArgs("DIR", a, &ra) != 0) {
+        Printf(&con, "CD: %s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: DIR" : "DIR");
         return 1;
     }
-    for (unsigned i = 0; i < DOS_PATH; i++)
-        if (!(cwd[i] = path[i]))
-            break;
-    return 0;
+    if (!a[0]) {
+        Printf(&con, "%s\n", cwd);
+    } else {
+        SNPrintf(path, sizeof path, "%s", cwd);
+        if (!AddPart(path, (const char *)a[0], sizeof path) || ExaminePath(&dos, path, &e) != 0 ||
+            !e.de_Dir) {
+            Printf(&con, "CD: not a directory: %s\n", path);
+            r = 1;
+        } else {
+            SNPrintf(cwd, sizeof cwd, "%s", path);
+        }
+    }
+    FreeArgs(&ra);
+    return r;
 }
 
 /* One line: 0 if it went well. */
@@ -129,14 +127,18 @@ static int run(const char *line)
         place |= line[i] == ':' || line[i] == '/';
         name[i + 1] = '\0';
     }
-    dos_path(place ? cwd : "C:", name, path, sizeof path);
+    SNPrintf(path, sizeof path, "%s", place ? cwd : "C:");
+    if (!AddPart(path, name, sizeof path)) {
+        Printf(&con, "Too long: %s\n", name);
+        return 1;
+    }
     for (const char *s = cwd; *s && k < DOS_ARGS - 2; s++)
         args[k++] = *s;
     args[k++] = '\n';
     for (const char *s = rest; *s && k < DOS_ARGS - 1; s++)
         args[k++] = *s;
     args[k] = '\0';
-    if ((p = dos_run(&dos, path, args, SIG_CHILD, 0)) < 0) {
+    if ((p = RunCommand(&dos, path, args, SIG_CHILD, 0)) < 0) {
         say(p == ERR_NOTFOUND ? "Unknown command " : "Can't run ");
         say(name);
         say("\n");
@@ -147,14 +149,10 @@ static int run(const char *line)
     CloseHandle((Handle)p);
     if (pi.pi_State == PROCS_EXITED && pi.pi_ExitCode == 0)
         return 0;
-    say(name);
-    if (pi.pi_State == PROCS_EXITED) {
-        say(" failed returncode ");
-        con_dec(&con, (uint64_t)(pi.pi_ExitCode < 0 ? -pi.pi_ExitCode : pi.pi_ExitCode));
-    } else {
-        say(" faulted");
-    }
-    say("\n");
+    if (pi.pi_State == PROCS_EXITED)
+        Printf(&con, "%s failed returncode %ld\n", name, pi.pi_ExitCode);
+    else
+        Printf(&con, "%s faulted\n", name);
     return 1;
 }
 
@@ -226,10 +224,7 @@ static int64_t keys_read(char *buf, unsigned n)
 
 static void prompt(void)
 {
-    con_dec(&con, number);
-    say(".");
-    say(cwd);
-    say("> ");
+    Printf(&con, "%u.%s> ", number, cwd);
 }
 
 /* Lines typed at the console, run as they're ended. */
@@ -270,7 +265,7 @@ static int interactive(void)
                 say("\b");
             } else if (ch >= 32 && ch < 127 && n < LINE - 1) {
                 line[n++] = ch;
-                con_write(&con, &ch, 1);
+                WriteCon(&con, &ch, 1);
             }
         }
     }
@@ -285,15 +280,13 @@ static int script(const char *file)
     int64_t f, len;
     int failed = 0;
 
-    dos_path(cwd, file, path, sizeof path);
-    if ((f = dos_file(&dos, path, 0, &e)) < 0 || e.de_Dir) {
-        say("Shell: no script ");
-        say(path);
-        say("\n");
+    SNPrintf(path, sizeof path, "%s", cwd);
+    if (!AddPart(path, file, sizeof path) || (f = OpenFile(&dos, path, 0, &e)) < 0 || e.de_Dir) {
+        Printf(&con, "Shell: no script %s\n", path);
         return 1;
     }
-    len = dos_read(&dos, (uint32_t)f, 0, text, sizeof text - 1);
-    dos_close_file(&dos, (uint32_t)f);
+    len = ReadFile(&dos, (uint32_t)f, 0, text, sizeof text - 1);
+    CloseFile(&dos, (uint32_t)f);
     if (len < 0)
         return 1;
     text[len] = '\0';
@@ -318,28 +311,31 @@ static int script(const char *file)
 
 int main(uint64_t arg)
 {
-    const char *args = arg ? (const char *)arg : "";
+    struct RDArgs ra = { 0 };
+    int64_t a[1] = { 0 };
+    char from[DOS_PATH];
     int64_t e;
 
-    con_open(&con, SIG_CON);
-    for (uint64_t since = CurrentTime(); (e = dos_open(&dos, SIG_DOS)) == ERR_NOTFOUND &&
+    /* From a Shell, its directory; from hwdb, no line but the arguments. */
+    SplitArgs(arg, from, sizeof from, &ra.rda_Source);
+    SNPrintf(cwd, sizeof cwd, "%s", from);
+    OpenCon(&con, SIG_CON);
+    if (ReadArgs("FROM", a, &ra) != 0) {
+        Printf(&con, "Shell: %s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: FROM" : "FROM");
+        CloseCon(&con);
+        return 1;
+    }
+    for (uint64_t since = CurrentTime(); (e = OpenDos(&dos, SIG_DOS)) == ERR_NOTFOUND &&
                                          CurrentTime() - since < 5000 * MS;)
         nap(5);
     if (e) {
         say("Shell: no dos\n");
-        con_close(&con);
+        FreeArgs(&ra);
+        CloseCon(&con);
         return 1;
     }
-    /* Started by hwdb, not from a Shell: its line is just the arguments. */
-    while (*args == ' ')
-        args++;
-    if (args[0] == '-' && args[1] == 's' && args[2] == ' ') {
-        int failed = script(args + 3);
-
-        con_close(&con);
-        return failed;
-    }
-    e = interactive();
-    con_close(&con);
+    e = a[0] ? script((const char *)a[0]) : interactive();
+    FreeArgs(&ra);
+    CloseCon(&con);
     return (int)e;
 }

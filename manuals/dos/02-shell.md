@@ -1,6 +1,6 @@
 # The Shell
 
-*Checked against V5.*
+*Checked against V6.*
 
 ## What it's for
 
@@ -24,59 +24,81 @@ The prompt is the CLI's number and the current directory:
 1.SYS:> cd SYS:EFI/planar
 1.SYS:EFI/planar> list C
 Directory SYS:EFI/planar/C
-  echo  84416
+  delete  104352
   ...
-1.SYS:EFI/planar> type S/greeting
-Hello from a file on the disk, typed by C:type.
+1.SYS:EFI/planar> type S/greeting number
+   1 Hello from a file on the disk, typed by C:type.
+1.SYS:EFI/planar> delete
+Delete: FILE is required. Template: FILE/M/A,QUIET/S
+delete failed returncode 1
+1.SYS:EFI/planar> delete ?
+Delete: FILE/M/A,QUIET/S
+delete failed returncode 1
 ```
 
 **Built-ins:**
 
 | Command | |
 |---|---|
-| `CD [DIR]` | Change the current directory; with none, show it. `CD /` goes up a level. |
+| `CD [DIR]` | Change the current directory; with none, show it. `CD /` goes up a level, `CD :` to the volume's root (`AddPart`'s rules). |
 | `Help` | What's built in. |
 | `EndShell` (or `EndCLI`) | End the Shell. |
 
-**Commands in C:** `List [DIR]`, `Type FILE`, `Echo ...`, `Info`, `Touch FILE` (make an empty file), `Delete NAME` (a file, or an empty directory).
+**Commands in `C:`**, each with its `ReadArgs` template:
 
-**Commands in `C:`:**
+| Command | Template | |
+|---|---|---|
+| `Info` | `VOLUME` | The volumes, or the one named, their free space, and whether they can be written |
+| `List` | `DIR/M,FILES/S,DIRS/S,QUICK/S` | Directories' entries and sizes, and the totals (the current directory if none is named); `FILES` or `DIRS` only those, `QUICK` names only |
+| `Type` | `FROM/A/M,NUMBER/S` | Files' text; `NUMBER` numbers the lines |
+| `Echo` | `TEXT/M,NOLINE/S` | Its words, a space between each; `NOLINE` no newline after |
+| `Touch` | `FILE/M/A` | Makes each file, empty, if it isn't there |
+| `Delete` | `FILE/M/A,QUIET/S` | Deletes files, or empty directories, saying which unless `QUIET` |
 
-| Command | |
-|---|---|
-| `Info` | The volumes, their free space, and whether they can be written |
-| `List [DIR]` | A directory's entries and sizes, and the totals |
-| `Type FILE` | A file's text |
-| `Echo TEXT` | Its text |
+As on the Amiga, a command's arguments go in its template's order or by keyword, in any case: `Type S/greeting NUMBER`, `type number from=S/greeting`, `List DIR=SYS:EFI QUICK`. A word in quotes is never a keyword, and may hold spaces: `Echo "Two  spaces"`. `?` alone shows the template. A command given arguments its template doesn't take says why, and shows it.
 
 Anything else is looked for as `C:NAME`, or as the path it names if it has a `:` or `/`. The rest of the line is its arguments. The Shell waits for it, and says "failed returncode N" if it ended badly, "Unknown command" if there's no such program.
 
 Backspace edits the line. Lines starting with `;` are comments.
 
-**Scripts.** `Shell -s FILE` runs a file's lines, each shown after the prompt as if typed, and ends with the number that failed. hwdb's test mode runs `C:shell -s SYS:EFI/planar/S/test` (`cmd/scripts/test`) on every test boot.
+**Scripts.** `Shell FROM FILE` (its template is `FROM`) runs a file's lines, each shown after the prompt as if typed, and ends with the number that failed. hwdb's test mode runs `C:shell FROM SYS:EFI/planar/S/test` (`cmd/scripts/test`) on every test boot, which uses each command's template: keywords, `=`, quotes and switches.
+
+A Shell started from a Shell begins in its current directory.
 
 ## Writing a command
 
 A command is one file in `cmd/`, built and installed by the Makefile. From `cmd/echo.c`:
 
 ```c
+static const char TEMPLATE[] = "TEXT/M,NOLINE/S";
+
 int main(uint64_t arg)
 {
-    struct con c;
+    struct Con c;
+    struct RDArgs ra = { 0 };
+    int64_t a[2] = { 0 };
     char cwd[DOS_PATH];
-    const char *args;
 
-    dos_args(arg, cwd, sizeof cwd, &args);
-    con_open(&c, 16);
-    con_puts(&c, args);
-    con_puts(&c, "\n");
-    con_close(&c);
+    SplitArgs(arg, cwd, sizeof cwd, &ra.rda_Source);
+    OpenCon(&c, 16);
+    if (ReadArgs(TEMPLATE, a, &ra) != 0) {
+        Printf(&c, "Echo: %s%s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: " : "", TEMPLATE);
+        CloseCon(&c);
+        return 1;
+    }
+    for (const char *const *w = (const char *const *)a[0]; w && *w; w++)
+        Printf(&c, w[1] ? "%s " : "%s", *w);
+    if (!a[1])
+        PutStr(&c, "\n");
+    FreeArgs(&ra);
+    CloseCon(&c);
     return 0;
 }
 ```
 
-- Its line is the Shell's current directory, a newline, then its arguments: split it with `dos_args`, and make paths with `dos_path`.
-- Write with `con_*`. Exit 0 for success.
+- Its line is the Shell's current directory, a newline, then its arguments: split it with `SplitArgs`, read the arguments with `ReadArgs`, and make each path whole with `AddPart` on a copy of the directory.
+- On a `ReadArgs` error, say `rda_Why` and the template, as above: `rda_Why` is empty for `?`.
+- Write with `PutStr` and `Printf`. Exit 0 for success.
 
 ## Rules
 
@@ -85,9 +107,11 @@ int main(uint64_t arg)
 
 ## Differences from AmigaDOS
 
-- No `Run`, pipes or redirection yet, and no `Execute`; `-s` is the one way to run a script.
+- No `Run`, pipes or redirection yet, and no `Execute`; `Shell FROM` is the one way to run a script, and it ends when the script does (AmigaDOS's `NewShell FROM` stays).
+- The commands' templates are AmigaDOS's where the command does the same job, and shorter: `Delete` has no `ALL` or `FORCE`, `List` no patterns or dates, `Type` no `HEX` or `TO`.
+- `?` shows the template and the command ends; AmigaDOS's then read a new line.
 - Command names in `C:` are lower case on the disk; typing any case finds them.
 
 ## Functions used
 
-[dos_run](../autodocs/dos.md#dosdos_run), [dos_args](../autodocs/dos.md#dosdos_args), [con_open](../autodocs/dos.md#doscon_open), [GrantConsole](../autodocs/lease.md#leasegrantconsole), [ReadConsole](../autodocs/lease.md#leasereadconsole)
+[RunCommand](../autodocs/dos.md#dosruncommand), [SplitArgs](../autodocs/dos.md#dossplitargs), [ReadArgs](../autodocs/dos.md#dosreadargs), [AddPart](../autodocs/dos.md#dosaddpart), [OpenCon](../autodocs/dos.md#dosopencon), [Printf](../autodocs/dos.md#dosprintf), [GrantConsole](../autodocs/lease.md#leasegrantconsole), [ReadConsole](../autodocs/lease.md#leasereadconsole)

@@ -15,6 +15,7 @@
 #ifndef PLANAR_DOS_H
 #define PLANAR_DOS_H
 
+#include <stdarg.h>
 #include <stdint.h>
 
 #include <planar/msg.h>
@@ -61,36 +62,37 @@ struct DosMsg {
     struct DosEntry dm_Entry;
 };
 
-/* --- dos.library --- */
+/* --- dos.library (V6 step 6: the RKM's names, docs §17.4.4) --- */
 
-struct dos {
-    struct MsgPort mp;
-    struct DosMsg *m;
-    uint8_t *buf;                   /* DOS_MAX_IO bytes of heap */
-    bool open;
+struct Dos {
+    struct MsgPort ds_Port;
+    struct DosMsg *ds_Msg;
+    uint8_t *ds_Buffer;             /* DOS_MAX_IO bytes of heap */
+    bool ds_Open;
 };
 
-int64_t dos_open(struct dos *d, int64_t sigbit);        /* connect to "dos" */
-void dos_close(struct dos *d);
+int64_t OpenDos(struct Dos *dos, int64_t sigBit);       /* connect to "dos" */
+void CloseDos(struct Dos *dos);
 
 /* Files: a number, or an error. */
-int64_t dos_file(struct dos *d, const char *path, uint32_t flags, struct DosEntry *entry);
-int64_t dos_close_file(struct dos *d, uint32_t file);
-int64_t dos_read(struct dos *d, uint32_t file, uint64_t off, void *buf, uint32_t len);
-int64_t dos_write(struct dos *d, uint32_t file, uint64_t off, const void *buf, uint32_t len);
-int64_t dos_stat(struct dos *d, const char *path, struct DosEntry *entry);
-int64_t dos_next(struct dos *d, uint32_t dir, uint32_t *cursor, struct DosEntry *entry);
-int64_t dos_remove(struct dos *d, const char *path);
-int64_t dos_mkdir(struct dos *d, const char *path);
-int64_t dos_volume(struct dos *d, uint32_t index, struct DosEntry *entry);
+int64_t OpenFile(struct Dos *dos, const char *path, uint32_t flags, struct DosEntry *entry);
+int64_t CloseFile(struct Dos *dos, uint32_t file);
+int64_t ReadFile(struct Dos *dos, uint32_t file, uint64_t offset, void *buffer, uint32_t length);
+int64_t WriteFile(struct Dos *dos, uint32_t file, uint64_t offset, const void *buffer,
+                  uint32_t length);
+int64_t ExaminePath(struct Dos *dos, const char *path, struct DosEntry *entry);
+int64_t ExamineNext(struct Dos *dos, uint32_t dir, uint32_t *cursor, struct DosEntry *entry);
+int64_t DeletePath(struct Dos *dos, const char *path);
+int64_t CreateDir(struct Dos *dos, const char *path);
+int64_t NextVolume(struct Dos *dos, uint32_t index, struct DosEntry *entry);
 
 /*
  * The loader (§2.2: none in the kernel). A program on a volume is an ELF
  * static PIE for this machine, linked at 0 as the built-in ones are
  * (arch/<arch>/user/user.ld): code, then page aligned, data and .bss. It
- * relocates itself. dos_run loads it into a new Area and starts it with
- * CreateProcessImage: a process handle, or an error (ERR_BADARG: not a
- * program this machine runs).
+ * relocates itself. RunCommand loads it into a new Area and starts it
+ * with CreateProcessImage: a process handle, or an error (ERR_BADARG: not
+ * a program this machine runs).
  *
  * Its command line, 'args' (up to DOS_ARGS bytes), goes in a page on the
  * end of that Area, and its argument is the line's address: the Area
@@ -98,37 +100,82 @@ int64_t dos_volume(struct dos *d, uint32_t index, struct DosEntry *entry);
  */
 constexpr unsigned DOS_ARGS = 1024;
 
+int64_t RunCommand(struct Dos *dos, const char *path, const char *args, int64_t sigBit,
+                   uint32_t flags);
+
 /*
- * A command's line from the shell is its current directory, a newline,
- * then its arguments. dos_args splits what dos_run passed (0 is "") into
- * the two; dos_path makes 'name' a whole path from 'cwd' unless it names
- * its volume ("SYS:x" is as it is; "x" in "SYS:EFI" is "SYS:EFI/x").
+ * A command's line from the Shell is its current directory, a newline,
+ * then its arguments. SplitArgs splits what RunCommand passed (0 is "")
+ * into the two.
  */
-void dos_args(uint64_t arg, char *cwd, unsigned cwd_size, const char **args);
-void dos_path(const char *cwd, const char *name, char *out, unsigned size);
-int64_t dos_run(struct dos *d, const char *path, const char *args, int64_t sigbit, uint32_t flags);
+void SplitArgs(uint64_t arg, char *cwd, unsigned cwdSize, const char **args);
+
+/*
+ * Paths (V36's). AddPart puts 'fileName' on the end of the path in
+ * 'dirName', in place: a name with a volume ("SYS:x") replaces it, one
+ * starting ':' goes from its volume, and each leading '/' is a step up.
+ * False, with 'dirName' as it was, if the result wouldn't fit in 'size'.
+ * FilePart is where a path's last part starts ("SYS:a/b" is "b");
+ * PathPart is where its directory ends ("/b", or "b" after a ':'), so a
+ * NUL written there leaves the directory.
+ */
+bool AddPart(char *dirName, const char *fileName, unsigned size);
+char *FilePart(const char *path);
+char *PathPart(const char *path);
+
+/*
+ * ReadArgs (V36's): a command's arguments by template, as
+ * "FROM/A/M,TO/A,ALL/S,LINES/K/N". Items are separated by commas; each is
+ * its names (aliases joined by '=': "TO=AS") and modifiers:
+ *
+ *   /A  required          /K  only after its keyword
+ *   /S  a switch: 1        /N  a number: a pointer to an int64_t
+ *   /M  many: a nullptr-ended array of pointers, the rest of the
+ *       positional words, less those later /A items need
+ *   /F  the rest of the line, as it is
+ *
+ * array[i] is item i's: a string, a number's pointer, a switch's 1, or a
+ * /M's array. An item not given is left as it was, so the caller sets
+ * defaults first. Words are separated by spaces; "quoted" ones may hold
+ * spaces, with *" a quote, *n a newline, *e an escape and ** a star, and
+ * are never keywords. A value goes after its keyword, or with '='
+ * ("TO=x"). The line is rda_Source; what the strings point into is
+ * AllocVec's, until FreeArgs.
+ *
+ * 0, or ERR_BADARG with rda_Why saying why ("" for a line that's only
+ * "?": the caller shows the template), or ERR_NOMEM.
+ */
+struct RDArgs {
+    const char *rda_Source;         /* the line: SplitArgs's 'args' */
+    void *rda_Buffer;               /* AllocVec's, FreeArgs's */
+    char rda_Why[80];
+};
+
+int64_t ReadArgs(const char *argTemplate, int64_t *array, struct RDArgs *rdArgs);
+void FreeArgs(struct RDArgs *rdArgs);
 
 /*
  * The console (a program's Output(), the Amiga's CON:): text to display's
  * "con.0", which draws it and logs it, and so to the serial console. Where
  * there's no framebuffer, a line at a time to the kernel's log. If the
  * console goes (display restarting) it's reconnected once; after that,
- * the log.
+ * the log. Printf formats as RawDoFmt does, 64 bytes a message.
  */
-struct con {
-    struct MsgPort mp;
-    void *m;                        /* a DrvRequest */
-    bool open;
-    bool retried;                   /* reconnected once after the console went */
-    int64_t sigbit;
-    char line[160];                 /* the log's, without a console */
-    unsigned nline;
+struct Con {
+    struct MsgPort cn_Port;
+    void *cn_Msg;                   /* a DrvRequest */
+    bool cn_Open;
+    bool cn_Retried;                /* reconnected once after the console went */
+    int64_t cn_SigBit;
+    char cn_Line[160];              /* the log's, without a console */
+    unsigned cn_Count;
 };
 
-void con_open(struct con *c, int64_t sigbit);
-void con_close(struct con *c);
-void con_write(struct con *c, const char *text, uint32_t len);
-void con_puts(struct con *c, const char *text);
-void con_dec(struct con *c, uint64_t v);
+void OpenCon(struct Con *con, int64_t sigBit);
+void CloseCon(struct Con *con);
+void WriteCon(struct Con *con, const char *text, uint32_t length);
+void PutStr(struct Con *con, const char *string);
+uint64_t VPrintf(struct Con *con, const char *format, va_list args);
+uint64_t Printf(struct Con *con, const char *format, ...);
 
 #endif /* PLANAR_DOS_H */

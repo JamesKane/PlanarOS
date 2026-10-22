@@ -174,6 +174,8 @@
         kprintf("V6.4 done\n");
         kprintf("V6.5 clib skipped: no tasks\n");
         kprintf("V6.5 done\n");
+        kprintf("V6.6 dos skipped: no tasks\n");
+        kprintf("V6.6 done\n");
         arch_halt();
     }
     sched_idle();

@@ -16,7 +16,7 @@
 | `planar/devices/gpu.h` | The GPU class: `struct GpuMsg`, `struct GpuQueueIn`, `struct GpuQueueOut`, `struct GpuSync`, `GPU_*`, `GPU_CSF` and `GPU_ROGUE` ([Devices ch. 9](../devices/09-gpu.md)) | `gpu-panthor`, `gpu-rogue`, their clients |
 | `planar/devices/block.h` | The block class's protocol: `struct BlkMsg`, `struct BlkReq`, `BLK_INFO`, `BLK_IO`, `BLK_READ`, `BLK_WRITE`, `BLK_FLUSH`, `BLK_EIO`, `BLK_BATCH`, `BLK_VERSION` | Block drivers, `lib/blk` |
 | `planar/blk.h` | The block class's client library: `struct blk`, `blk_*`, `BLK_MSGS`, `BLK_GONE_MS` | Block clients: `dos`, `blkbench`, hwdb's kill test |
-| `planar/dos.h` | The dos server's protocol (`struct DosMsg`, `struct DosEntry`, `DOS_*`, `DOSF_*`) and dos.library: files, the loader (`dos_run`), command lines (`dos_args`, `dos_path`), the console (`struct con`, `con_*`) | Commands, the Shell, hwdb |
+| `planar/dos.h` | The dos server's protocol (`struct DosMsg`, `struct DosEntry`, `DOS_*`, `DOSF_*`) and dos.library in the RKM's names: files (`struct Dos`, `OpenFile`, `ReadFile`), the loader (`RunCommand`), command lines and paths (`SplitArgs`, `ReadArgs`, `AddPart`), the console (`struct Con`, `PutStr`, `Printf`) | Commands, the Shell, hwdb |
 | `planar/acpid.h` | hwdb's protocol with `acpid`: `struct AcpidDevice`, `struct AcpidRes`, `ACPID_*` | `acpid`, hwdb |
 | `planar/msg.h` | `struct MsgPort`, `MSGPORT_STASH` and Exec's message calls | Every program that sends or serves messages |
 | `planar/syscalls.h` | Kernel call numbers (`SYS_*`) and errors (`ERR_NOSYS` to `ERR_TIMEOUT`) | Stubs; any program that tests an error |

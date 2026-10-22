@@ -626,7 +626,7 @@ int64_t CreateProcessImage(const struct ProcessImage *image, uint64_t arg, int64
 ```
 
 **FUNCTION**
-Starts a new process running a program the caller has laid out in an Area, and returns a handle to it, as `CreateProcess` does for a built-in one. The kernel has no ELF loader (§2.2). `dos.library`'s `dos_run` reads the file and calls this ([DOS ch. 1](../dos/01-files-and-programs.md#programs)).
+Starts a new process running a program the caller has laid out in an Area, and returns a handle to it, as `CreateProcess` does for a built-in one. The kernel has no ELF loader (§2.2). `dos.library`'s `RunCommand` reads the file and calls this ([DOS ch. 1](../dos/01-files-and-programs.md#programs)).
 
 `image` names the Area and its layout:
 

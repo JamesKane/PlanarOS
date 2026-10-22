@@ -9,7 +9,7 @@
 | [lease.md](lease.md) | Device leases: registers, interrupt lines, MSIs, DMA Areas, the firmware's tables and the console's input (`planar/lease.h`) |
 | [drv.md](drv.md) | drv.library, a driver's main loop (`planar/drv.h`, `lib/drv`) |
 | [blk.md](blk.md) | The block class's client library (`planar/blk.h`, `lib/blk`) |
-| [dos.md](dos.md) | dos.library: files, the loader, the console (`planar/dos.h`, `lib/dos`) |
+| [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 
 ## All calls
@@ -19,6 +19,7 @@
 | AcceptConn | [exec](exec.md#execacceptconn) | kernel |
 | AcceptPort | [msg](msg.md#execacceptport) | library |
 | AckWaitIrq | [lease](lease.md#leaseackwaitirq) | kernel |
+| AddPart, FilePart, PathPart | [dos](dos.md#dosaddpart) | library |
 | AllocArea | [exec](exec.md#execallocarea) | kernel |
 | AllocDmaArea | [lease](lease.md#leaseallocdmaarea) | kernel |
 | AllocMsg | [msg](msg.md#execallocmsg) | library |
@@ -43,8 +44,8 @@
 | CloseHandle | [exec](exec.md#execclosehandle) | kernel |
 | CloseLibrary | [exec](exec.md#execcloselibrary) | library, through `IExec` |
 | ClosePort | [msg](msg.md#execcloseport) | library |
-| con_open, con_write, con_puts, con_dec, con_close | [dos](dos.md#doscon_open) | library |
 | ConnectPort | [msg](msg.md#execconnectport) | library |
+| CreateDir, DeletePath | [dos](dos.md#doscreatedir) | library |
 | CreateLease | [lease](lease.md#leasecreatelease) | kernel |
 | CopyMem | [exec](exec.md#execcopymem) | library |
 | CopyMemQuick | [exec](exec.md#execcopymemquick) | library |
@@ -57,15 +58,6 @@
 | DeletePool | [exec](exec.md#execdeletepool) | library |
 | DeletePort | [exec](exec.md#execdeleteport) | kernel |
 | DoMsg | [msg](msg.md#execdomsg) | library |
-| dos_args, dos_path | [dos](dos.md#dosdos_args) | library |
-| dos_file, dos_close_file | [dos](dos.md#dosdos_file) | library |
-| dos_mkdir, dos_remove | [dos](dos.md#dosdos_mkdir) | library |
-| dos_next | [dos](dos.md#dosdos_next) | library |
-| dos_open, dos_close | [dos](dos.md#dosdos_open) | library |
-| dos_read, dos_write | [dos](dos.md#dosdos_read) | library |
-| dos_run | [dos](dos.md#dosdos_run) | library |
-| dos_stat | [dos](dos.md#dosdos_stat) | library |
-| dos_volume | [dos](dos.md#dosdos_volume) | library |
 | DropInterface | [exec](exec.md#execdropinterface) | library, through `IExec` |
 | drv_dma_clean, drv_dma_flush | [drv](drv.md#drvdrv_dma_clean) | library |
 | drv_hwdb_msg, drv_hwdb | [drv](drv.md#drvdrv_hwdb) | library |
@@ -75,6 +67,8 @@
 | drv_main | [drv](drv.md#drvdrv_main) | library |
 | drv_publish | [drv](drv.md#drvdrv_publish) | library |
 | drv_reply | [drv](drv.md#drvdrv_reply) | library |
+| ExamineNext | [dos](dos.md#dosexaminenext) | library |
+| ExaminePath | [dos](dos.md#dosexaminepath) | library |
 | ExitProcess | [exec](exec.md#execexitprocess) | kernel |
 | ExitTask | [exec](exec.md#execexittask) | kernel |
 | FindTagItem | [utility](utility.md#utilityfindtagitem) | library |
@@ -96,9 +90,14 @@
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
 | MapLease | [lease](lease.md#leasemaplease) | kernel |
 | NextTagItem | [utility](utility.md#utilitynexttagitem) | library |
+| NextVolume | [dos](dos.md#dosnextvolume) | library |
+| OpenCon, WriteCon, PutStr, CloseCon | [dos](dos.md#dosopencon) | library |
+| OpenDos, CloseDos | [dos](dos.md#dosopendos) | library |
+| OpenFile, CloseFile | [dos](dos.md#dosopenfile) | library |
 | OpenLibrary | [exec](exec.md#execopenlibrary) | library, through `IExec` |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
 | PortGone | [msg](msg.md#execportgone) | library |
+| Printf, VPrintf | [dos](dos.md#dosprintf) | library |
 | ProtectArea | [exec](exec.md#execprotectarea) | kernel |
 | PutMsg | [msg](msg.md#execputmsg) | library |
 | QueryArea | [exec](exec.md#execqueryarea) | kernel |
@@ -106,10 +105,13 @@
 | QueryProcess | [exec](exec.md#execqueryprocess) | kernel |
 | QuerySystem | [exec](exec.md#execquerysystem) | kernel |
 | RawDoFmt | [exec](exec.md#execrawdofmt) | library |
+| ReadArgs, FreeArgs | [dos](dos.md#dosreadargs) | library |
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
+| ReadFile, WriteFile | [dos](dos.md#dosreadfile) | library |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |
 | RevokeLease | [lease](lease.md#leaserevokelease) | kernel |
+| RunCommand | [dos](dos.md#dosruncommand) | library |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | SetMem | [exec](exec.md#execsetmem) | library |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
@@ -119,6 +121,7 @@
 | SNPrintf, VSNPrintf | [utility](utility.md#utilitysnprintf) | library |
 | SpanReadU8, SpanReadU16LE … SpanReadU64BE | [utility](utility.md#utilityspanread) | library |
 | SpanSlice | [utility](utility.md#utilityspanslice) | library |
+| SplitArgs | [dos](dos.md#dossplitargs) | library |
 | StartProcess | [exec](exec.md#execstartprocess) | kernel |
 | StrFromC | [utility](utility.md#utilitystrfromc) | library |
 | StrHasPrefix | [utility](utility.md#utilitystrhasprefix) | library |

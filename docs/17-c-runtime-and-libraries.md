@@ -293,6 +293,13 @@ Aligns `include/planar/dos.h` with Commodore RKM `CamelCase` conventions and add
 | `con_open` / `con_close` | `OpenCon` / `CloseCon` | Connect to `con.0` (with `KLog` fallback) |
 | `con_write` / `con_puts` / `con_dec` | `WriteCon` / `PutStr` / `Printf` / `VPrintf` | Console output formatted via `RawDoFmt` |
 
+As built (V6 step 6):
+- **All at once**, with no snake_case aliases (v6-plan decision 5). `struct dos` and `struct con` are `struct Dos` and `struct Con`, their fields prefixed `ds_` and `cn_`.
+- **`dos_path` is gone, not renamed:** `AddPart(dirName, fileName, size)` works in place, as V36's, so a caller copies its directory first. It also takes `:` as the volume's root and a leading `/` as a step up, which `dos_path` didn't. `con_dec` is gone too: `Printf`'s `%lu`.
+- **`ReadArgs(template, array, rdArgs)`** has V36's arguments, but returns 0 or an error, with the reason in `rdArgs->rda_Why`, and reads `rdArgs->rda_Source`: Planar has no `Input()` or `IoErr()`, and the `struct RDArgs` is the caller's. `/A /K /S /N /M /F`; no `/T`. `array` is `int64_t`, AmigaDOS's `LONG` at 64 bits.
+- **`Printf(con, format, ...)` and `PutStr(con, string)`** name the console, since there's no `Output()`.
+- **`lib/dos` is `libdos.a`**, a file for each part, linked into the program, not a shared library behind an interface: step 6 didn't ask for one. Its state is all in what the caller passes, so it could be one later.
+
 ---
 
 ### 17.4.5 `include/clib/` & `lib/clib` (Opt-in standard C23 library)
