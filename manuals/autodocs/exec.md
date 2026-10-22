@@ -1,8 +1,8 @@
 # exec: kernel calls
 
-*Checked against V5.*
+*Checked against V5; pools, `AllocVec` and `RawDoFmt`, V6.*
 
-The kernel calls, in alphabetical order, and the few library functions over them that every program links. Each kernel call is one stub in `arch/<isa>/user/syscalls.S` and traps on every call; a library function says so. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
+The kernel calls, in alphabetical order, and exec's library functions over them: those every program links, and the pools, `AllocVec` and `RawDoFmt` (`libexec.a`), which a program links if it calls them. Each kernel call is one stub in `arch/<isa>/user/syscalls.S` and traps on every call; a library function says so. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
 Most programs use connections through the [msg library](msg.md) rather than the connection calls here.
 
@@ -98,6 +98,46 @@ None known.
 
 ---
 
+## exec/AllocPooled
+
+**NAME**
+AllocPooled -- allocate a block from a pool
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void *AllocPooled(struct Pool *pool, uint64_t memSize);
+```
+
+**FUNCTION**
+Returns a block of at least `memSize` bytes from `pool`, 16-byte aligned. A block up to the pool's threshold comes from its size class's free list, or from the current puddle; when the puddle is used up, the pool allocates another. A block above the threshold is an Area of its own, recorded on the pool so that `DeletePool` frees it.
+
+A library function (`lib/exec/pool.c`, in `libexec.a`). It traps only to allocate an Area, for a new puddle or a block above the threshold.
+
+**INPUTS**
+- `pool` -- from `CreatePool` or `CreatePoolMem`.
+- `memSize` -- the block's size in bytes.
+
+**RESULT**
+The block, or `nullptr` if:
+- `pool` is `nullptr`, or `memSize` is 0;
+- the Area couldn't be allocated (out of memory, or the process holds 256 handles);
+- the pool is in a fixed buffer, and it's full, or `memSize` is more than the buffer holds.
+
+**NOTES**
+- The block isn't cleared unless the pool was created with `AREAF_CLEAR`. A block from a fresh puddle is zero anyway; one taken again from a free list holds what it held.
+- Sizes are rounded up to their class: 16-byte steps to 256 bytes, then four classes to each doubling (320, 384, 448, 512, 640, …). A block wastes at most a fifth of itself, and no header.
+- When a block doesn't fit in what's left of the current puddle, the rest of that puddle goes unused.
+- A pool without `POOLF_LOCKED` is for one task at a time.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CreatePool](#execcreatepool), [FreePooled](#execfreepooled), [AllocVec](#execallocvec), [Libraries ch. 3](../libraries/03-areas.md#pools)
+
+---
+
 ## exec/AllocSignal
 
 **NAME**
@@ -129,6 +169,60 @@ None known.
 
 **SEE ALSO**
 [FreeSignal](#execfreesignal), [Wait](#execwait), [Libraries ch. 2](../libraries/02-tasks-and-signals.md)
+
+---
+
+## exec/AllocVec
+
+**NAME**
+AllocVec -- allocate memory that remembers its size
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void *AllocVec(uint64_t byteSize, uint32_t requirements);
+```
+
+**FUNCTION**
+Returns a block of `byteSize` bytes, 16-byte aligned, to be freed by `FreeVec` without its size. A 16-byte header before the block records the size. Blocks come from a pool the process makes at its first `AllocVec`, with 64 KiB puddles and a 16 KiB threshold. The pool is locked, so the process's tasks may all use it at once.
+
+With `AREAF_DMA32` or `AREAF_NC`, the block is instead an Area of its own, with those flags. It starts 16 bytes in.
+
+A library function (`lib/exec/pool.c`, in `libexec.a`). It traps when the pool needs an Area, or when a task has to wait for another to finish with the pool.
+
+**INPUTS**
+- `byteSize` -- the block's size in bytes.
+- `requirements` -- 0, or any of:
+  - `AREAF_CLEAR` -- zero the block.
+  - `AREAF_DMA32` -- below 4 GiB, as an Area of its own.
+  - `AREAF_NC` -- not cached by the CPU, as an Area of its own.
+  - `AREAF_CONTIG` -- accepted and ignored, as for `AllocArea`: all memory is contiguous.
+
+**RESULT**
+The block, or `nullptr` if:
+- `byteSize` is 0, or so large that the header would overflow it;
+- `requirements` has any other flag, such as `AREAF_EXEC` or `AREAF_LARGE`;
+- the memory or an Area's handle couldn't be had.
+
+**EXAMPLE**
+From `conformance/pool.c`:
+```c
+uint8_t *w = AllocVec(n, AREAF_CLEAR);
+/* ... */
+FreeVec(w);
+```
+
+**NOTES**
+- **Differs from Exec:** Exec's `AllocVec` took `MEMF_*` flags, and every task could see what it returned. Here the block is the process's: its tasks share it, and no other process sees it. To give memory to another process, allocate an Area and share that ([Libraries ch. 3](../libraries/03-areas.md)).
+- Without `AREAF_CLEAR`, a block taken again from the pool holds what it held.
+- A block of more than 16,368 bytes (16 KiB less the header) is above the pool's threshold, and so an Area of its own, page-rounded with its header: one of exactly 64 KiB takes 17 pages.
+- `AREAF_DMA32` places the block, not the device's view of it. A driver's DMA memory is `AllocDmaArea`'s ([Devices ch. 1](../devices/01-drivers.md)).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[FreeVec](#execfreevec), [AllocPooled](#execallocpooled), [AllocArea](#execallocarea)
 
 ---
 
@@ -326,6 +420,56 @@ None known.
 
 **SEE ALSO**
 [CopyMem](#execcopymem)
+
+---
+
+## exec/CreatePool
+
+**NAME**
+CreatePool, CreatePoolMem -- make a memory pool
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+struct Pool *CreatePool(uint32_t flags, uint64_t puddleSize, uint64_t threshSize);
+struct Pool *CreatePoolMem(void *buf, uint64_t size);
+```
+
+**FUNCTION**
+`CreatePool` makes a pool, whose blocks come from puddles: Areas of `puddleSize` bytes, rounded up to whole pages. A block above `threshSize` bytes is an Area of its own. The pool's header and free lists are at the start of its first puddle, which is allocated at once.
+
+`CreatePoolMem` makes a pool in `size` bytes at `buf`, such as part of a connection's heap or a static array. Its header and lists are at the start of the buffer, aligned to 16, and the rest is the pool. It never allocates an Area, and never grows.
+
+Library functions (`lib/exec/pool.c`, in `libexec.a`). `CreatePool` traps once, to allocate the first puddle.
+
+**INPUTS**
+- `flags` -- 0, or any of:
+  - `AREAF_DMA32`, `AREAF_NC` -- for every Area the pool allocates ([ch. 3](../libraries/03-areas.md#flags)).
+  - `AREAF_CLEAR` -- every block is zeroed.
+  - `POOLF_LOCKED` -- the process's tasks may share the pool. Each call takes a lock, a futex on the pool's header.
+  - `AREAF_CONTIG` -- accepted and ignored.
+- `puddleSize` -- each puddle's size in bytes. 64 KiB is a good start.
+- `threshSize` -- the largest block taken from a puddle. A quarter of `puddleSize` is a good start.
+- `buf`, `size` -- `CreatePoolMem`'s memory, any alignment. It must stay valid for the pool's life.
+
+**RESULT**
+The pool, or `nullptr` if:
+- `flags` has any other flag;
+- `threshSize` is 0, or larger than `puddleSize`, or rounds up to a size class bigger than a puddle less its 16-byte header;
+- the first puddle couldn't be allocated;
+- `size` is too small for `CreatePoolMem`'s header and lists (`sizeof(struct Pool)` and 8 bytes for each size class up to `size`).
+
+**NOTES**
+- Each puddle and each block above the threshold is an Area, and so a handle against the process's 256.
+- The header takes 64 bytes and 8 for each size class up to the threshold: 256 for a threshold of 1 KiB.
+- A `CreatePoolMem` pool isn't locked. Its threshold is its size, so every block comes from the buffer.
+- **Differs from Exec:** V39 took `MEMF_*` flags; these are `AREAF_*`. Exec's `MEMF_SEM_PROTECTED` is `POOLF_LOCKED`. `CreatePoolMem` is new.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[DeletePool](#execdeletepool), [AllocPooled](#execallocpooled), [FreePooled](#execfreepooled), [Libraries ch. 3](../libraries/03-areas.md#pools)
 
 ---
 
@@ -573,6 +717,37 @@ None known.
 
 ---
 
+## exec/DeletePool
+
+**NAME**
+DeletePool -- free a pool and every block in it
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void DeletePool(struct Pool *pool);
+```
+
+**FUNCTION**
+Frees every Area the pool allocated: its puddles, and its blocks above the threshold, whether or not they were freed. The pool and every pointer into it are then invalid. A `CreatePoolMem` pool allocated none, so this does nothing to its buffer, which is the caller's to reuse.
+
+A library function (`lib/exec/pool.c`). It traps once for each Area.
+
+**INPUTS**
+- `pool` -- from `CreatePool` or `CreatePoolMem`, or `nullptr`, which does nothing.
+
+**NOTES**
+- The quick way to free many blocks with one lifetime: allocate them all from one pool, and never call `FreePooled`.
+- Don't delete a pool another task is still using, even one made with `POOLF_LOCKED`: the lock is in the pool.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CreatePool](#execcreatepool)
+
+---
+
 ## exec/DeletePort
 
 **NAME**
@@ -721,6 +896,40 @@ None known.
 
 ---
 
+## exec/FreePooled
+
+**NAME**
+FreePooled -- give a block back to its pool
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void FreePooled(struct Pool *pool, void *memory, uint64_t memSize);
+```
+
+**FUNCTION**
+Puts the block on its size class's free list, for the pool's next block of that class. A block above the pool's threshold is an Area, and is freed.
+
+A library function (`lib/exec/pool.c`). It traps only to free a block above the threshold.
+
+**INPUTS**
+- `pool` -- the pool the block came from.
+- `memory` -- the block, or `nullptr`, which does nothing.
+- `memSize` -- the size it was allocated with. Any size in the same class will do, but the same size is the rule.
+
+**NOTES**
+- The size is all the pool knows of a small block: there's no header. A wrong size puts the block on the wrong list, and a later block overlaps another. Use `AllocVec` where the size isn't to hand.
+- A block above the threshold is looked up on the pool's list, so freeing one that isn't the pool's does nothing. A small block isn't checked.
+- Puddles are never given back before `DeletePool`.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[AllocPooled](#execallocpooled), [DeletePool](#execdeletepool)
+
+---
+
 ## exec/FreeSignal
 
 **NAME**
@@ -745,6 +954,36 @@ None known.
 
 **SEE ALSO**
 [AllocSignal](#execallocsignal)
+
+---
+
+## exec/FreeVec
+
+**NAME**
+FreeVec -- free a block from AllocVec
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void FreeVec(void *memoryBlock);
+```
+
+**FUNCTION**
+Frees a block `AllocVec` returned, reading its size from the header before it. A block that is an Area of its own is freed with its Area.
+
+A library function (`lib/exec/pool.c`).
+
+**INPUTS**
+- `memoryBlock` -- from `AllocVec`, or `nullptr`, which does nothing.
+
+**NOTES**
+Only `AllocVec`'s blocks: a pointer from anywhere else is read as if it had a header, and the pool is corrupted.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[AllocVec](#execallocvec)
 
 ---
 
@@ -1046,6 +1285,69 @@ None known.
 
 **SEE ALSO**
 [QueryProcess](#execqueryprocess)
+
+---
+
+## exec/RawDoFmt
+
+**NAME**
+RawDoFmt -- format a string a byte at a time
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+typedef void (*PutChProc)(char ch, void *putChData);
+uint64_t RawDoFmt(const char *formatString, va_list dataStream, PutChProc putChProc,
+                  void *putChData);
+```
+
+**FUNCTION**
+Formats `formatString` with the arguments in `dataStream`, calling `putChProc(ch, putChData)` for each byte, and once more with `'\0'` at the end. It allocates nothing, so it can write into a fixed buffer, a console, or a log line.
+
+A conversion is `%`, then flags, a width, a precision, a length and a conversion character, as in C:
+- **Flags:** `-` (left-align), `0` (pad with zeros), `+`, space, `#` (`0x`, `0b` or a leading `0`).
+- **Width and precision:** digits, or `*` to take an `int` from the arguments. A negative `*` width means `-`.
+- **Lengths:** none for `int`; `hh` and `h`; `l`, `ll`, `z`, `t` and `j`, all 64 bits; C23's `w8`, `w16`, `w32` and `w64`, and `wf` with the same widths.
+- **Conversions:** `d`, `i`, `u`, `x`, `X`, `o`, `b` and `B` (binary, C23), `c`, `s`, `p` (`0x` and hex), `%`, and `S`, a `struct Str` by value.
+
+A library function (`lib/exec/fmt.c`, in `libexec.a`). It doesn't trap.
+
+**INPUTS**
+- `formatString` -- the format.
+- `dataStream` -- the arguments, from `va_start` in the caller. `RawDoFmt` reads a copy, so the caller's `va_list` is unchanged.
+- `putChProc` -- called for each byte, then for the NUL.
+- `putChData` -- passed to `putChProc`.
+
+**RESULT**
+The number of bytes written before the NUL.
+
+**EXAMPLE**
+A formatter into a buffer, from `conformance/fmtcheck.h` in outline:
+```c
+static void put(char c, void *data)
+{
+    struct buf *b = data;
+
+    if (c && b->len < sizeof b->text - 1)
+        b->text[b->len++] = c;
+}
+
+va_start(ap, fmt);
+RawDoFmt(fmt, ap, put, &b);
+va_end(ap);
+```
+
+**NOTES**
+- **Differs from Exec:** Exec's `%d` was 16 bits and `%ld` 32, and its arguments were packed as words; these are C's sizes, and `%ld` is 64 bits on both ISAs. Exec returned the next argument; this returns the length.
+- There's no floating point: `%f`, `%e`, `%g` and `%a` are written as they stand, as is any conversion it doesn't know.
+- `%s` of `nullptr` writes `(null)`. `%S` writes exactly `st_Len` bytes, NULs and all: no NUL is needed.
+- `SNPrintf`, over this, is utility.library's (step 3, [docs §17.4.3](../../docs/17-c-runtime-and-libraries.md)).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[KLog](#execklog)
 
 ---
 

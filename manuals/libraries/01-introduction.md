@@ -79,6 +79,8 @@ There's no C library yet. Every program links the runtime instead (`lib/rt`, `li
 - **128-bit arithmetic.** `__int128` and `_BitInt(128)` division and modulo call compiler-rt's builtins. A program links only the ones it uses.
 - **`thread_local`**, a copy for each task (chapter 2). A variable can be aligned to 64 bytes at most: the build refuses a program with more.
 
+A program also links, if it calls them, exec's pools and `AllocVec` (chapter 3) and `RawDoFmt`, the formatter ([autodoc](../autodocs/exec.md#execrawdofmt)). They're in an archive, `libexec.a`, so a program that doesn't call them doesn't carry them.
+
 Measured by `conformance/memfns.c`, 64 KiB at a time, under QEMU:
 
 | | RV64 | AArch64 |

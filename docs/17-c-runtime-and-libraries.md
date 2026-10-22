@@ -110,7 +110,8 @@ struct Pool;
 
 /*
  * V39 Pool allocator over Areas.
- * - areaFlags:  AREAF_* flags passed to AllocArea for each puddle (0, AREAF_DMA32, AREAF_NC).
+ * - areaFlags:  AREAF_* flags passed to AllocArea for each puddle (0, AREAF_DMA32, AREAF_NC);
+ *               AREAF_CLEAR to zero every block; POOLF_LOCKED for a pool tasks share.
  * - puddleSize: byte size of each shared puddle Area (page-rounded, e.g. 64 KiB or 1 MiB).
  * - threshSize: allocations > threshSize get their own dedicated Area.
  *
@@ -127,7 +128,7 @@ void  FreePooled(struct Pool *poolHeader, void *memory, uint64_t memSize);
 ```
 
 - **How `AllocPooled` / `FreePooled` work**:
-  - Small allocations (`<= threshSize`) round `memSize` up to a 16-byte multiple (or power-of-two bucket) and pop from the bucket's free list or bump-allocate from the current puddle `Area`.
+  - Small allocations (`<= threshSize`) round `memSize` up to a size class (16-byte steps to 256 bytes, then four classes to each doubling, so at most a fifth is wasted) and pop from the class's free list or bump-allocate from the current puddle `Area`.
   - Large allocations (`> threshSize`) allocate a dedicated `Area` linked onto the pool's area list so `DeletePool` frees both puddles and large `Area`s alike.
   - Because `FreePooled` takes `memSize` (canonical V39), zero header bytes are wasted on small pooled allocations, and callers that free whole lifetimes via `DeletePool(poolHeader)` never call `FreePooled` at all.
 
@@ -145,6 +146,7 @@ void *AllocVec(uint64_t byteSize, uint32_t requirements);
 void  FreeVec(void *memoryBlock);
 ```
 
+- As built (V6 step 2, `lib/exec/pool.c`): the default pool has 64 KiB puddles and a 16 KiB threshold, and is `POOLF_LOCKED`. `AREAF_CLEAR` zeroes the block; `AREAF_DMA32` and `AREAF_NC` make it an Area of its own; any other flag fails.
 - `AllocVec` / `FreeVec` replaces `servers/acpid/heap.c` (`AcpiOsAllocate` $\rightarrow$ `AllocVec(size, 0)`, `AcpiOsFree` $\rightarrow$ `FreeVec(ptr)`) and backs `lib/clib`'s `malloc` and `free`.
 
 #### 3. `RawDoFmt` and `CopyMem` / `CopyMemQuick` / `SetMem`
@@ -154,11 +156,13 @@ typedef void (*PutChProc)(char ch, void *putChData);
 
 /*
  * Canonical Exec formatter. Calls putChProc(ch, putChData) for every formatted byte;
- * emits a trailing '\0' at the end of the format string.
- * Supports: %s (NUL-terminated), %S (struct Str slice), %c, %d, %ld, %lld,
- * %u, %lu, %llu, %x, %lx, %llx, %p, field width, '-' left-align, '0' pad.
+ * emits a trailing '\0' at the end of the format string. Returns the bytes before it.
+ * Supports C's conversions but floating point's, with C's sizes (%d an int, %ld 64 bits),
+ * C23's %b and %wN/%wfN lengths, and %S (a struct Str slice, by value): flags, width and
+ * precision as C's, '*' for either.
  */
-void RawDoFmt(const char *formatString, va_list dataStream, PutChProc putChProc, void *putChData);
+uint64_t RawDoFmt(const char *formatString, va_list dataStream, PutChProc putChProc,
+                  void *putChData);
 
 void CopyMem(const void *source, void *dest, uint64_t size);
 void CopyMemQuick(const void *source, void *dest, uint64_t size);

@@ -1396,6 +1396,8 @@ void selftest_tasks(void *)
     kprintf("V5.7 done\n");
     selftest_runtime();
     kprintf("V6.1 done\n");
+    selftest_exec_memory();
+    kprintf("V6.2 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2822,6 +2824,22 @@ void selftest_shares(void)
                 "by the owner, while the lease is idle\n");
 }
 
+/* Run each of 'tests', which must exit 0, for V6 step 'step'. */
+static void run_each(const char *step, const char *const *tests, unsigned n)
+{
+    for (unsigned i = 0; i < n; i++) {
+        struct process *p = run(tests[i], 0, 30000000);
+
+        if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+            kprintf("%s: exit %lld, fault %d\n", tests[i], (long long)p->exit_code, p->fault);
+            fail(step, "a test failed");
+        }
+        process_free(p);
+    }
+    if (!processes_down_to(0, 1000000))
+        fail(step, "a test's process outlived it");
+}
+
 /*
  * V6 step 1: the runtime floor every program links. compiler-rt's 128-bit
  * builtins against the compiler's own folding (conformance/int128.c),
@@ -2836,18 +2854,28 @@ void selftest_runtime(void)
         kprintf("V6.1 runtime skipped: no user programs\n");
         return;
     }
-    for (unsigned i = 0; i < sizeof tests / sizeof tests[0]; i++) {
-        struct process *p = run(tests[i], 0, 30000000);
-
-        if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
-            kprintf("%s: exit %lld, fault %d\n", tests[i], (long long)p->exit_code, p->fault);
-            fail("V6.1 runtime", "a runtime test failed");
-        }
-        process_free(p);
-    }
-    if (!processes_down_to(0, 1000000))
-        fail("V6.1 runtime", "a test's process outlived it");
+    run_each("V6.1 runtime", tests, sizeof tests / sizeof tests[0]);
     kprintf("V6.1 runtime ok: 128-bit division by compiler-rt's builtins as the compiler "
             "folds it; memcpy, memmove and memset by the vector unit, memcmp by words, right at "
             "every length to 512 and alignment; thread_local, a copy in each task's stack\n");
+}
+
+/*
+ * V6 step 2: exec.library's pools, AllocVec and RawDoFmt (conformance/
+ * pool.c): puddles filled and reused, blocks above the threshold, a pool
+ * in a fixed buffer, DeletePool with blocks outstanding, AllocVec shared
+ * by two tasks, and the formatter against known strings.
+ */
+void selftest_exec_memory(void)
+{
+    static const char *const tests[] = { "pool" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.2 exec memory skipped: no user programs\n");
+        return;
+    }
+    run_each("V6.2 exec memory", tests, 1);
+    kprintf("V6.2 exec memory ok: pools' puddles filled and taken again, blocks above the "
+            "threshold an Area each, a pool in a fixed buffer, DeletePool leaving no handle; "
+            "AllocVec shared by two tasks; RawDoFmt as C formats\n");
 }

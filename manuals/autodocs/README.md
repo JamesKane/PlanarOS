@@ -22,7 +22,9 @@
 | AllocDmaArea | [lease](lease.md#leaseallocdmaarea) | kernel |
 | AllocMsg | [msg](msg.md#execallocmsg) | library |
 | AllocMsi | [lease](lease.md#leaseallocmsi) | kernel |
+| AllocPooled | [exec](exec.md#execallocpooled) | library |
 | AllocSignal | [exec](exec.md#execallocsignal) | kernel |
+| AllocVec | [exec](exec.md#execallocvec) | library |
 | ArmPort | [msg](msg.md#execarmport) | library |
 | ArmTimer | [exec](exec.md#execarmtimer) | kernel |
 | BindIrq | [lease](lease.md#leasebindirq) | kernel |
@@ -43,11 +45,13 @@
 | CreateLease | [lease](lease.md#leasecreatelease) | kernel |
 | CopyMem | [exec](exec.md#execcopymem) | library |
 | CopyMemQuick | [exec](exec.md#execcopymemquick) | library |
+| CreatePool, CreatePoolMem | [exec](exec.md#execcreatepool) | library |
 | CreatePort | [exec](exec.md#execcreateport) | kernel |
 | CreateProcess | [exec](exec.md#execcreateprocess) | kernel |
 | CreateProcessImage | [exec](exec.md#execcreateprocessimage) | kernel |
 | CreateTask | [exec](exec.md#execcreatetask) | library |
 | CurrentTime | [exec](exec.md#execcurrenttime) | kernel |
+| DeletePool | [exec](exec.md#execdeletepool) | library |
 | DeletePort | [exec](exec.md#execdeleteport) | kernel |
 | DoMsg | [msg](msg.md#execdomsg) | library |
 | dos_args, dos_path | [dos](dos.md#dosdos_args) | library |
@@ -72,7 +76,9 @@
 | FindTask | [exec](exec.md#execfindtask) | kernel |
 | FlushPort | [msg](msg.md#execflushport) | library |
 | FreeArea | [exec](exec.md#execfreearea) | kernel |
+| FreePooled | [exec](exec.md#execfreepooled) | library |
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
+| FreeVec | [exec](exec.md#execfreevec) | library |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
 | GrantConsole | [lease](lease.md#leasegrantconsole) | kernel |
@@ -90,6 +96,7 @@
 | QueryLease | [lease](lease.md#leasequerylease) | kernel |
 | QueryProcess | [exec](exec.md#execqueryprocess) | kernel |
 | QuerySystem | [exec](exec.md#execquerysystem) | kernel |
+| RawDoFmt | [exec](exec.md#execrawdofmt) | library |
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |

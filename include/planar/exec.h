@@ -9,6 +9,7 @@
 #ifndef PLANAR_EXEC_H
 #define PLANAR_EXEC_H
 
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -205,5 +206,56 @@ static inline void *SetMem(void *dest, uint8_t fill, uint64_t size)
 {
     return memset(dest, fill, size);
 }
+
+/*
+ * Pools (V6 step 2; Exec V39, docs §17.4.2). Blocks of any size from
+ * puddles, Areas of 'puddleSize' bytes; one above 'threshSize' is an
+ * Area of its own. The flags are the Areas' (AREAF_DMA32, AREAF_NC);
+ * with AREAF_CLEAR every block is zeroed, and with POOLF_LOCKED the
+ * process's tasks may share the pool. FreePooled takes the size the
+ * block was allocated with, which is all it knows of it. DeletePool
+ * frees every block at once. CreatePoolMem makes a pool in 'size' bytes
+ * at 'buf', which never grows. Blocks are 16-byte aligned.
+ */
+#define POOLF_LOCKED    (1u << 31)  /* a lock around each call */
+
+struct Pool;
+
+struct Pool *CreatePool(uint32_t flags, uint64_t puddleSize, uint64_t threshSize);
+struct Pool *CreatePoolMem(void *buf, uint64_t size);
+void DeletePool(struct Pool *pool);
+void *AllocPooled(struct Pool *pool, uint64_t memSize);
+void FreePooled(struct Pool *pool, void *memory, uint64_t memSize);
+
+/*
+ * AllocVec (V36): a block that knows its size, from a pool the process
+ * makes at its first call, shared by its tasks. AREAF_CLEAR zeroes it;
+ * AREAF_DMA32 or AREAF_NC makes it an Area of its own, so placed or so
+ * mapped, with the block 16 bytes in.
+ */
+void *AllocVec(uint64_t byteSize, uint32_t requirements);
+void FreeVec(void *memoryBlock);
+
+/*
+ * A string by its length (docs §17.4.3, utility.library's in V6 step 3):
+ * no NUL, so a slice of something read-only. Passed in two registers.
+ */
+struct Str {
+    const char *st_Data;
+    uint64_t st_Len;
+};
+
+#define STR(lit)    ((struct Str){ .st_Data = (lit), .st_Len = sizeof(lit) - 1 })
+
+/*
+ * RawDoFmt (docs §17.4.2): C's printf conversions but floating point's,
+ * each byte to putChProc, then a NUL. %d is an int and %ld 64 bits, as
+ * C's are (Exec's were 16 and 32); C23's %b and %wN; %S a struct Str.
+ * Returns the bytes before the NUL.
+ */
+typedef void (*PutChProc)(char ch, void *putChData);
+
+uint64_t RawDoFmt(const char *formatString, va_list dataStream, PutChProc putChProc,
+                  void *putChData);
 
 #endif /* PLANAR_EXEC_H */

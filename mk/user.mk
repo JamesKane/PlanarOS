@@ -25,6 +25,11 @@ USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/stri
 	$(BUILD)/user/rt/string.o $(BUILD)/user/rt/reloc.o $(BUILD)/user/rt/tls.o \
 	$(BUILD)/user/exec/msg.o $(BUILD)/user/exec/task.o \
 	$(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
+# exec.library's pools, AllocVec and RawDoFmt (lib/exec): an archive
+# after the program and its libraries, so only a program that calls
+# them carries them.
+USER_EXECLIB := $(BUILD)/user/libexec.a
+EXECLIB_OBJS := $(BUILD)/user/exec/pool.o $(BUILD)/user/exec/fmt.o
 # compiler-rt's 128-bit builtins (third_party/compiler-rt): an archive,
 # last on every link line, so a program takes only what it calls.
 USER_BUILTINS := $(BUILD)/user/libcompiler-rt.a
@@ -52,6 +57,10 @@ $(BUILD)/user/compiler-rt/%.o: third_party/compiler-rt/lib/builtins/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_FLAGS) -std=c23 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fPIE \
 	  -MMD -MP -c $< -o $@
+
+$(USER_EXECLIB): $(EXECLIB_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
 
 $(USER_BUILTINS): $(BUILTINS_OBJS)
 	@rm -f $@
@@ -98,9 +107,9 @@ $(BUILD)/user/%.o: conformance/%.c
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/user/%.o \
-		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
+		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_EXECLIB) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
 	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) \
-	  $(if $(filter dos%,$*),$(USER_DOS)) $(USER_BUILTINS) -o $@
+	  $(if $(filter dos%,$*),$(USER_DOS)) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
 	$(check_tls)
 
 # thread_local's segment, if a program has one, must be aligned to the
@@ -116,8 +125,8 @@ $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA)) \
 	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) \
 	$(if $(filter servers/hwdb drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
-$(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
-	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_BUILTINS) -o $$@
+$(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_EXECLIB) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
+	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_EXECLIB) $(USER_BUILTINS) -o $$@
 	$$(check_tls)
 -include $$(patsubst %.o,%.d,$$(filter %.o,$$($(1)_OBJS)))
 endef
@@ -128,7 +137,7 @@ $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 
 # Every user object's dependencies: programs, runtime, stubs (a call
 # renumbered in planar/syscalls.h must rebuild the stubs too).
--include $(USER_RT:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
+-include $(USER_RT:.o=.d) $(EXECLIB_OBJS:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 
@@ -142,9 +151,9 @@ $(BUILD)/user/cmd/%.o: cmd/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD)/user/cmd/%.elf: $(BUILD)/user/cmd/%.o $(USER_RT) $(USER_DOS) $(USER_BUILTINS) \
+$(BUILD)/user/cmd/%.elf: $(BUILD)/user/cmd/%.o $(USER_RT) $(USER_DOS) $(USER_EXECLIB) $(USER_BUILTINS) \
 		arch/$(ARCH)/user/user.ld
-	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(USER_DOS) $(USER_BUILTINS) -o $@
+	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(USER_DOS) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
 	$(check_tls)
 
 -include $(patsubst %,$(BUILD)/user/cmd/%.d,$(CMD_PROGS))

@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: proposed (2026-10-22).** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
+**Status: in progress (2026-10-22): steps 1 and 2 done.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -82,6 +82,42 @@ QEMU's figures count instructions, not the hardware.
 **Not yet on the boards.** The RV2's X60 has 256-bit vectors, twice QEMU's, and the CIX's cores have NEON. Each board runs `V6.1` the next time it's on the bench, with its own costs.
 
 ## 2. exec.library's memory and formatting
+
+**Done (2026-10-22), on QEMU.** Exec's V39 pools, V36 `AllocVec` and `RawDoFmt`, in `lib/exec/pool.c` and `fmt.c`, built into `libexec.a`, which every link line has after the program and its libraries. A program that doesn't call them doesn't carry them.
+
+- **Pools.**
+  - Size classes: 16-byte steps to 256 bytes, then four to each doubling, so a block wastes at most a fifth of itself and has no header.
+  - A free list per class, and a bump pointer in the current puddle. A block above the threshold is an Area, with a record on the pool's list, which is itself a small block.
+  - The pool's header and lists are at the start of its first puddle, so `DeletePool` frees the puddles last.
+  - `CreatePool` refuses a threshold whose class wouldn't fit in a puddle, and any flag but `AREAF_CLEAR`, `AREAF_CONTIG`, `AREAF_DMA32`, `AREAF_NC` and the new `POOLF_LOCKED` (Exec's `MEMF_SEM_PROTECTED`).
+  - `POOLF_LOCKED` is a three-state futex lock on the header, `WaitAddr` and `WakeAddr` within the one process (§12.5 rules them out only between processes).
+  - `CreatePoolMem`'s threshold is its buffer's size; it never allocates an Area.
+- **`AllocVec`.** A 16-byte header with the size, from a process pool made at the first call (64 KiB puddles, a 16 KiB threshold, locked). Two tasks making it at once keep one, by compare-and-swap. `AREAF_DMA32` or `AREAF_NC` gives an Area of its own; `AREAF_EXEC`, `AREAF_LARGE` and the rest are refused.
+- **`RawDoFmt`.** C's conversions but floating point's, with C's sizes, C23's `%b` and `%wN`/`%wfN`, and `%S` for a `struct Str` by value. `struct Str` and `STR()` are in `planar/exec.h` until step 3's `utility.h`. It returns the bytes before the NUL, where §17.4.2 had `void`.
+
+**Tested by:**
+- `conformance/pool.c`:
+  - 256 blocks over 9 puddles, checked, freed and taken again with no new puddle.
+  - Three blocks above the threshold, an Area each.
+  - `AREAF_CLEAR` on a block taken again.
+  - `DeletePool` with blocks outstanding, leaving the process's handle count (`QueryProcess(0)`) where it was before `CreatePool`.
+  - A `CreatePoolMem` pool at an odd address, filled to its last block (489 of 16 bytes in 8 KiB), freed and filled again.
+  - `AllocVec` at every size from 1 to 300 bytes, with and without `AREAF_CLEAR`, and larger ones; `AREAF_DMA32` below 4 GiB, an Area; the refusals.
+  - Two tasks churning `AllocVec` and `FreeVec` at once, each checking its blocks' bytes.
+  - `conformance/fmtcheck.h`'s 31 `RawDoFmt` cases.
+- `make exec-test`: the same `RawDoFmt` cases on the host, with the sanitizers. Pools are churned 600,000 times over fake Areas, with thresholds of 1 KiB, 3,000 bytes and 16 bytes, every block's bytes checked before it's freed, and every Area gone after `DeletePool`. Also a fixed-buffer pool, and `AllocVec`'s reuse. It's part of `make test-all`. Mutation-tested: size classes one step too small fail it.
+- `V6.2 exec memory ok`, on every QEMU boot.
+
+**Costs**, under QEMU:
+
+| | RV64 | AArch64 |
+|---|---|---|
+| `AllocPooled` and `FreePooled`, 64 bytes | 95 ns | 43 ns |
+| `AllocVec` and `FreeVec`, through the lock | 204 ns | 78 ns |
+| `RawDoFmt` of a short line | 1.3 µs | 0.66 µs |
+| `pool.o`, `fmt.o` (text) | 1.6, 3.1 KiB | 2.1, 3.8 KiB |
+
+**Not yet on the boards**, with step 1.
 
 As §17.4.2 specifies:
 - **Pools:** `CreatePool(flags, puddle, threshold)`, `CreatePoolMem`, `DeletePool`, `AllocPooled`, `FreePooled`. Puddles are Areas, allocations above the threshold are Areas of their own, and the flags carry `AREAF_*`, so a pool can be `AREAF_NC` or DMA32. `DeletePool` frees everything at once.

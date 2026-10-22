@@ -73,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V6.1 done
+EXPECT := V6.2 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -135,7 +135,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -185,6 +185,7 @@ test-all:
 	@$(MAKE) --no-print-directory power-test
 	@$(MAKE) --no-print-directory display-test
 	@$(MAKE) --no-print-directory rt-test
+	@$(MAKE) --no-print-directory exec-test
 
 # lib/rt/string.c's word loops, which the ISAs' own replace, on the host
 # with the sanitizers, renamed so as not to be the host's.
@@ -199,6 +200,18 @@ $(RT_TEST): lib/rt/string.c lib/rt/test.c conformance/memcheck.h
 
 rt-test: $(RT_TEST)
 	@$(RT_TEST)
+
+# lib/exec's pools, AllocVec and RawDoFmt on the host with the
+# sanitizers, over Areas lib/exec/test.c fakes.
+EXEC_TEST := build/exec/exec-test
+
+$(EXEC_TEST): lib/exec/pool.c lib/exec/fmt.c lib/exec/test.c conformance/fmtcheck.h include/planar/exec.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) lib/exec/pool.c lib/exec/fmt.c \
+	  lib/exec/test.c -o $@
+
+exec-test: $(EXEC_TEST)
+	@$(EXEC_TEST)
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.

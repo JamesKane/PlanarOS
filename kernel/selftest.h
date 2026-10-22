@@ -75,5 +75,6 @@ void selftest_shares(void);
 
 /* V6 step 1: the runtime floor (compiler-rt, mem*, thread_local). */
 void selftest_runtime(void);
+void selftest_exec_memory(void);
 
 #endif /* KERNEL_SELFTEST_H */
