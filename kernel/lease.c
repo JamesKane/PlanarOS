@@ -42,6 +42,7 @@
 #include "kprintf.h"
 #include "lease.h"
 #include "memmap.h"
+#include "plat.h"
 #include "pmm.h"
 #include "port.h"
 #include "process.h"
@@ -1006,6 +1007,43 @@ int64_t lease_console_read_call(uint64_t buf, uint32_t len)
     if (n && !arch_copy_to_user(buf, got, n))
         return ERR_BADADDR;
     return n;
+}
+
+/*
+ * The root, to a process the root's holder made and hasn't started:
+ * init's hwdb (V6 step 7, VQ29). Its first task starts with the handle
+ * as its second argument, as the kernel's root process does. The giver
+ * keeps its own.
+ */
+int64_t lease_root_grant_call(uint32_t root_h, uint32_t process)
+{
+    struct process *p = task_self()->process, *child;
+    struct task *t;
+    Handle h;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, p) || !(child = process_child(process)))
+        return ERR_BADHANDLE;
+    if (!(t = __atomic_exchange_n(&child->held, nullptr, __ATOMIC_ACQ_REL))) {
+        process_put(child);
+        return ERR_EXISTS;          /* started already, or given it */
+    }
+    h = lease_root(child);
+    if (h)
+        t->user_arg[1] = h;
+    __atomic_store_n(&child->held, t, __ATOMIC_RELEASE);
+    process_put(child);
+    return h ? 0 : ERR_LIMIT;
+}
+
+/* The board, reset as the kernel resets it: its own means (a watchdog, a
+ * PMIC), else the firmware's (PSCI, SBI). Returns only if neither can. */
+int64_t lease_cold_reboot_call(uint32_t root_h)
+{
+    if (!handle_get(root_h, HANDLE_DEVROOT, task_self()->process))
+        return ERR_BADHANDLE;
+    kprintf("planar: ColdReboot\n");
+    plat_reboot();
+    arch_reboot();
 }
 
 /* The same, into a process the root's holder made: acpid (step 4). */

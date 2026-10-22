@@ -71,7 +71,7 @@ static int64_t take(void)
     int64_t e = ERR_NOTFOUND;
 
     for (uint64_t until = CurrentTime() + 10000 * MS; CurrentTime() < until; nap(20)) {
-        if ((e = ConnectPort(&mp, "input", SIG_INPUT, 4, 2 * sizeof *m)) != 0)
+        if ((e = ConnectPortUntil(&mp, "input", SIG_INPUT, 4, 2 * sizeof *m, until)) != 0)
             continue;
         if (!(m = AllocMsg(&mp, sizeof *m)))
             return ERR_NOMEM;

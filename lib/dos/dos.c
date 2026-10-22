@@ -11,10 +11,16 @@ void *memcpy(void *restrict dst, const void *restrict src, size_t n);
 
 int64_t OpenDos(struct Dos *d, int64_t sigbit)
 {
+    return OpenDosUntil(d, sigbit, 0);
+}
+
+int64_t OpenDosUntil(struct Dos *d, int64_t sigbit, uint64_t deadline)
+{
     int64_t e;
 
     memset(d, 0, sizeof *d);
-    if ((e = ConnectPort(&d->ds_Port, "dos", sigbit, 4, sizeof *d->ds_Msg + DOS_MAX_IO + 64)) != 0)
+    if ((e = ConnectPortUntil(&d->ds_Port, "dos", sigbit, 4, sizeof *d->ds_Msg + DOS_MAX_IO + 64,
+                              deadline)) != 0)
         return e;
     d->ds_Open = true;
     if (!(d->ds_Msg = AllocMsg(&d->ds_Port, sizeof *d->ds_Msg)) ||
@@ -57,7 +63,9 @@ static int64_t call(struct Dos *d)
 
     if (!d->ds_Open)
         return ERR_PORT_DIED;
-    e = DoMsg(&d->ds_Port, &d->ds_Msg->dm_Msg);
+    e = DoMsgUntil(&d->ds_Port, &d->ds_Msg->dm_Msg, CurrentTime() + DOS_DEADLINE_MS * 1000000);
+    if (e == ERR_TIMEOUT)
+        ReportUnresponsive("dos");  /* and the message is dos's until it answers */
     return e ? e : d->ds_Msg->dm_Msg.mn_Error;
 }
 

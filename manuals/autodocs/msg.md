@@ -1,6 +1,6 @@
 # exec: messages (`lib/exec`)
 
-*Checked against V5.*
+*Checked against V6.*
 
 Exec's message-port calls, built on connections by `lib/exec/msg.c`, which is linked into every user program. The header is `planar/msg.h`. These are library functions: they trap only where an entry says so. The concepts are in [Libraries ch. 4](../libraries/04-messages.md).
 
@@ -140,30 +140,35 @@ None known.
 ## exec/ConnectPort
 
 **NAME**
-ConnectPort -- connect to a named port
+ConnectPort, ConnectPortUntil -- connect to a named port
 
 **SYNOPSIS**
 ```c
 #include <planar/msg.h>
 int64_t ConnectPort(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
                     uint64_t heap);
+int64_t ConnectPortUntil(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
+                         uint64_t heap, uint64_t deadline);
 ```
 
 **FUNCTION**
-`OpenPort`, then sets up `mp` as the client's end. Messages can be sent at once, before the server accepts.
+`OpenPort`, then sets up `mp` as the client's end. Messages can be sent at once, before the server accepts. `ConnectPortUntil` waits for the port to be made until `deadline` (V6 step 7): a client of a server that's starting, or restarting after a death, connects as soon as the port is there, without polling. `ConnectPort` doesn't wait.
 
 **INPUTS**
 - `mp` -- filled in.
 - `name`, `sigbit`, `slots`, `heap` -- as for `OpenPort`. 0 for `slots` or `heap` takes the default.
+- `deadline` -- `OpenPort`'s: on `CurrentTime`'s clock, `DEADLINE_NONE` for ever.
 
 **RESULT**
 0, or any error from `OpenPort`, notably:
-- `ERR_NOTFOUND` -- the server hasn't created the port yet.
+- `ERR_NOTFOUND` -- the server hasn't created the port yet (`ConnectPort`).
+- `ERR_TIMEOUT` -- nor by `deadline` (`ConnectPortUntil`).
 - `ERR_FULL` -- 32 connections already wait on the port: the server isn't accepting.
 - `ERR_LIMIT` -- the process already holds 32 connection ends, or 256 handles.
 
 **NOTES**
-The conformance clients retry on `ERR_NOTFOUND` while their server starts. A name service to wait on is **planned**.
+- The conformance clients, lib/blk, `OpenDosUntil` and the kill test's clients wait this way.
+- The port's name may go again between the wait and the server accepting: a server dying then shows as `ERR_PORT_DIED` on the first message, as at any other time. A supervisor holding a port's name across its server's restarts is **planned**, if a client is found that can't take that window (v6-plan decision 6).
 
 **BUGS**
 None known.
@@ -209,7 +214,55 @@ Replies to other messages that arrive first are set aside for `GetMsg`, oldest f
 None known.
 
 **SEE ALSO**
-[PutMsg](#execputmsg), [SignalWaitConn](exec.md#execsignalwaitconn), [Libraries ch. 4](../libraries/04-messages.md)
+[DoMsgUntil](#execdomsguntil), [PutMsg](#execputmsg), [SignalWaitConn](exec.md#execsignalwaitconn), [Libraries ch. 4](../libraries/04-messages.md)
+
+---
+
+## exec/DoMsgUntil
+
+**NAME**
+DoMsgUntil -- DoMsg, with a deadline
+
+**SYNOPSIS**
+```c
+#include <planar/msg.h>
+int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline);
+```
+
+**FUNCTION**
+`DoMsg`, giving up at `deadline` (V6 step 7). It sleeps with `SignalWaitConn` and `WaitUntil`, so the handoff to an asleep server is the same as `DoMsg`'s. `DoMsg` is `DoMsgUntil(mp, m, DEADLINE_NONE)`.
+
+A message given up on is still the server's: it may be reading or writing it. It's kept in `mp->mp_Lost` until its reply comes, and that reply is dropped wherever it's taken (by `DoMsgUntil`, `DoMsg` or `GetMsg`), which makes the message the caller's again. Until then the server gets nothing more on this port: a server that missed one deadline is behind.
+
+**INPUTS**
+- `mp` -- the client's end.
+- `m` -- a message in the arena, with `mn_Length` set.
+- `deadline` -- on `CurrentTime`'s clock; `DEADLINE_NONE` never.
+
+**RESULT**
+`DoMsg`'s, and:
+- `ERR_TIMEOUT` -- no reply by `deadline`; `m` is in `mp_Lost`. Don't reuse it until `mp_Lost` is `nullptr`.
+- `ERR_BUSY` -- an earlier message is still in `mp_Lost`, unanswered. Nothing was sent.
+- `ERR_PORT_DIED` rather than `ERR_BUSY` once the server has gone: the lost message is the caller's then.
+
+**EXAMPLE**
+From `lib/blk/blk.c`, a class's deadline, and the report:
+```c
+int64_t e = DoMsgUntil(&b->mp, &m->bm_Msg, CurrentTime() + BLK_IO_MS * MS);
+
+if (e == ERR_TIMEOUT)
+    ReportUnresponsive(b->port);
+```
+
+**NOTES**
+- The deadlines each class states: `DOS_DEADLINE_MS` (10 s), `BLK_IO_MS` (5 s), `POWER_DEADLINE_MS` (2 s), `CON_DEADLINE_MS` (1 s), `DRV_HWDB_MS` (5 s, for drv.library's calls to hwdb, which answers at once).
+- Tested by `conformance/deadline.c`: an answer in time, one too late and the `ERR_BUSY`s after it, the late answer dropped, and a server dying with a message lost. Under QEMU a round trip to another process costs about 24 µs, against `DoMsg`'s 18 µs, on both ISAs: the kernel arms and stops its timer around each wait, and the deadline is read from `CurrentTime`. The boards' are measured when each is next on the bench.
+
+**BUGS**
+One message at most can be lost on a port: a client that wants to send more to a server that's behind needs another connection.
+
+**SEE ALSO**
+[DoMsg](#execdomsg), [WaitUntil](exec.md#execwaituntil), [ReportUnresponsive](#execreportunresponsive)
 
 ---
 
@@ -430,6 +483,39 @@ None known.
 
 **SEE ALSO**
 [FlushPort](#execflushport), [WaitPorts](#execwaitports)
+
+---
+
+## exec/ReportUnresponsive
+
+**NAME**
+ReportUnresponsive -- tell hwdb a server missed a deadline
+
+**SYNOPSIS**
+```c
+#include <planar/msg.h>
+int64_t ReportUnresponsive(const char *portName);
+```
+
+**FUNCTION**
+Connects to hwdb's port "hwdb", sends `HWDB_UNRESPONSIVE` naming `portName`, waits up to a second for the answer, and closes (V6 step 7, `lib/exec/report.c`, in `libexec.a`). hwdb restarts the server: the driver that published the port (its first class port), or dos for "dos". It restarts each once a second at most, and only one that's running and not already stopping.
+
+**INPUTS**
+- `portName` -- the server's port, up to 31 characters.
+
+**RESULT**
+0 once hwdb has the report, or why it couldn't be given: `ConnectPort`'s errors, `ERR_NOMEM`, `ERR_TIMEOUT`.
+
+**NOTES**
+- dos.library, lib/blk, the console's `WriteCon` and xhci's power vote call it when their deadlines pass.
+- It waits on signal bit 63.
+- Tested by hwdb's kill test (`V6.7 report`): a client's report of a running driver's port has hwdb restart it.
+
+**BUGS**
+Any process can report any port, and so have a driver restarted once a second.
+
+**SEE ALSO**
+[DoMsgUntil](#execdomsguntil), [drv.library's protocol](drv.md)
 
 ---
 

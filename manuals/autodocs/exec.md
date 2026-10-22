@@ -1,6 +1,6 @@
 # exec: kernel calls
 
-*Checked against V5; pools, `AllocVec`, `RawDoFmt` and the library calls, V6.*
+*Checked against V5; pools, `AllocVec`, `RawDoFmt`, the library calls and the deadlines (`OpenPort`, `SignalWaitConn`, `WaitUntil`), V6.*
 
 The kernel calls, in alphabetical order, and exec's library functions over them: those every program links, and the pools, `AllocVec` and `RawDoFmt` (`libexec.a`), which a program links if it calls them. Each kernel call is one stub in `arch/<isa>/user/syscalls.S` and traps on every call; a library function says so. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
@@ -30,6 +30,7 @@ A kernel call.
 - `port` -- a port handle owned by the calling process.
 - `sigbit` -- the signal bit, 16–63, to be woken with for this connection.
 - `arena` -- where to store the arena's address.
+- `deadline` -- how long to wait for the name, on `CurrentTime`'s clock: 0 not at all, `DEADLINE_NONE` (`planar/syscalls.h`) for ever.
 
 **RESULT**
 The connection's handle, or:
@@ -1223,11 +1224,11 @@ OpenPort -- connect to a port
 ```c
 #include <planar/ipc.h>
 int64_t OpenPort(const char *name, int64_t sigbit, uint32_t slots, uint64_t heap,
-                 struct ConnArena **arena);
+                 struct ConnArena **arena, uint64_t deadline);
 ```
 
 **FUNCTION**
-Makes a connection to the port called `name`:
+Makes a connection to the port called `name`, waiting for it to be made if there's none yet and `deadline` hasn't passed (V6 step 7, VQ28). The wait ends when a task calls `CreatePort` with that name: no polling.
 - allocates an arena Area, writes its header and two empty rings of `slots` entries, and maps it read-write into the calling process;
 - queues the connection on the port and signals the port's owner.
 
@@ -1246,7 +1247,8 @@ A kernel call.
 The connection's handle, or:
 - `ERR_BADARG` -- `sigbit`, `slots` or `heap` out of range, or the port belongs to the calling process.
 - `ERR_BADADDR` -- `name` or `arena` isn't accessible, or `name` is longer than 31 characters.
-- `ERR_NOTFOUND` -- no port has that name.
+- `ERR_NOTFOUND` -- no port has that name, and `deadline` is 0; or the task was killed while it waited.
+- `ERR_TIMEOUT` -- no port had that name by `deadline` (one already past included).
 - `ERR_FULL` -- 32 connections are already waiting on the port to be accepted. Try again later. **Built, untested**: no conformance program fills a port's queue.
 - `ERR_LIMIT` -- the calling process already holds 32 connection ends, or 256 handles.
 - `ERR_NOMEM` -- out of memory, or the system's handle table is full.
@@ -1255,9 +1257,11 @@ The connection's handle, or:
 - The connection is usable before it's accepted: the client may fill the request ring at once.
 - A connection waiting to be accepted counts against the client's 32 connection ends.
 - If `arena` stops being writable during the call, the result is `ERR_BADADDR` but the connection exists. It's closed when the task ends.
+- A waiter is listed while the name is missing, under the lock `CreatePort` takes, so a port made between the look and the sleep wakes it (`wait_name` in `kernel/port.c`). A port made and deleted before the woken waiter opens it is waited for again, until the deadline.
+- Measured by `conformance/deadline.c`: a client waiting from before its server's `CreatePort` connects as it's made; a waiter killed in the wait is gone within a millisecond.
 
 **BUGS**
-In that last case the handle is lost to the caller.
+In the `ERR_BADADDR` case the handle is lost to the caller.
 
 **SEE ALSO**
 [ConnectPort](msg.md#execconnectport), [AcceptConn](#execacceptconn), [CloseConn](#execcloseconn), `planar/ipc.h`
@@ -1729,22 +1733,23 @@ SignalWaitConn -- wake the other end and wait, in one call
 **SYNOPSIS**
 ```c
 #include <planar/ipc.h>
-uint64_t SignalWaitConn(Handle conn, uint64_t mask);
+uint64_t SignalWaitConn(Handle conn, uint64_t mask, uint64_t deadline);
 ```
 
 **FUNCTION**
-`SignalConn(conn)` then `Wait(mask)`, with two differences:
+`SignalConn(conn)` then `WaitUntil(mask, deadline)`, with two differences:
 - If the other end was waiting and may run on this CPU, it runs next here: the CPU is handed straight to it.
 - From the client end, a server handed the CPU this way runs at no less than the client's priority until it next signals or waits.
 
-A kernel call. `DoMsg` and `WaitPorts` use it.
+A kernel call. `DoMsg`, `DoMsgUntil` and `WaitPorts` use it.
 
 **INPUTS**
 - `conn` -- a connection handle owned by the calling process.
 - `mask` -- the signals to wait for.
+- `deadline` -- when to give up, as for `WaitUntil`; `DEADLINE_NONE` never (V6 step 7).
 
 **RESULT**
-The signals in `mask` that ended the wait, as for `Wait`. 0, without waiting, if the other end has closed or `conn` isn't a connection handle.
+The signals in `mask` that ended the wait, as for `Wait`; 0 at the deadline. 0, without waiting, if the other end has closed or `conn` isn't a connection handle.
 
 **NOTES**
 The loan is handoff boosting, not full priority inheritance ([docs §4.4](../../docs/04-ipc.md)). A server that was already running or ready is lent nothing; a loan isn't passed on when the server waits on a server of its own; and it ends at the server's next signal or wait, not when the request is answered (`task_post` in `kernel/sched.c`).
@@ -1911,6 +1916,41 @@ None known.
 
 **SEE ALSO**
 [WakeAddr](#execwakeaddr), [Wait](#execwait), [CurrentTime](#execcurrenttime)
+
+---
+
+## exec/WaitUntil
+
+**NAME**
+WaitUntil -- wait for signals, until a deadline
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+uint64_t WaitUntil(uint64_t mask, uint64_t deadline);
+```
+
+**FUNCTION**
+`Wait`, giving up at `deadline` (V6 step 7). A deadline already past only takes the signals there are, without sleeping: `WaitUntil(mask, 0)` is a poll. Its alarm is the kernel's own, not the task's `ArmTimer`'s, which stays as it was.
+
+A kernel call. exec.library's interface version 2 adds it (`IExec->WaitUntil`).
+
+**INPUTS**
+- `mask` -- the signals to wait for. The kernel's own bits are removed.
+- `deadline` -- on `CurrentTime`'s clock; `DEADLINE_NONE` (`planar/syscalls.h`) never comes.
+
+**RESULT**
+The signals in `mask` that were set, cleared; 0 if none was by `deadline`.
+
+**NOTES**
+- Without a timer interrupt (`ArmTimer`'s `ERR_NOSYS`) there's nothing to end the wait, and a deadline in the future is waited as `Wait` waits.
+- `DoMsgUntil` sleeps with it (`task_wait_until` in `kernel/sched.c`).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[Wait](#execwait), [ArmTimer](#execarmtimer), [DoMsgUntil](msg.md#execdomsguntil)
 
 ---
 

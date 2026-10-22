@@ -156,6 +156,7 @@ static void ask(struct unit *u)
         return;
     }
     u->asked = send(m);
+    u->due = hwdb.now + POWER_DEADLINE_MS * MS;    /* the answer's deadline (server.c) */
 }
 
 void power_vote(struct unit *u)

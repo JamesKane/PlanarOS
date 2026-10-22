@@ -83,11 +83,14 @@ struct Message {
  * handle return it, or a negative error. */
 int64_t CreatePort(const char *name, int64_t sigbit);
 int64_t DeletePort(Handle port);
+/* With 'deadline' (V6 step 7) not yet past, OpenPort waits for a port
+ * named 'name' to be made until then (ERR_TIMEOUT); DEADLINE_NONE waits
+ * for ever, and 0 not at all (ERR_NOTFOUND). */
 int64_t OpenPort(const char *name, int64_t sigbit, uint32_t slots, uint64_t heap,
-                 struct ConnArena **arena);
+                 struct ConnArena **arena, uint64_t deadline);
 int64_t AcceptConn(Handle port, int64_t sigbit, struct ConnArena **arena);
 int64_t SignalConn(Handle conn);
-uint64_t SignalWaitConn(Handle conn, uint64_t mask);
+uint64_t SignalWaitConn(Handle conn, uint64_t mask, uint64_t deadline);  /* 0 at the deadline */
 int64_t CloseConn(Handle conn);
 
 #endif /* PLANAR_IPC_H */

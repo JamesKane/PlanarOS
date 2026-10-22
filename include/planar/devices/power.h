@@ -35,6 +35,7 @@
 constexpr uint32_t POWER_VERSION = 1;
 constexpr unsigned POWER_REFS = 24;
 constexpr unsigned POWER_NAME = 24;
+constexpr uint64_t POWER_DEADLINE_MS = 2000;   /* a vote's answer, at most (V6 step 7) */
 
 /* PowerMsg.pm_Op */
 enum : uint32_t {

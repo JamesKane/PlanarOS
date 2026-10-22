@@ -6,6 +6,11 @@
  * because a task leaving its process first detaches from everything here
  * (ipc_task_gone), under the same lock. Signals are posted under the
  * lock and the CPUs they call for are kicked once it's let go.
+ *
+ * OpenPort may wait for a name (V6 step 7, VQ28): the waiter is listed
+ * under the lock while the name is missing, and CreatePort, under the
+ * same lock, takes off and signals everyone waiting for the name it
+ * makes, so a port made between the look and the sleep isn't missed.
  */
 #include <planar/ipc.h>
 #include <planar/syscalls.h>
@@ -56,7 +61,16 @@ struct port {
     struct port *next;
 };
 
+/* A task in OpenPort, waiting for a port of this name: on its stack. */
+struct name_waiter {
+    const char *name;
+    struct task *task;
+    bool woken;                     /* by CreatePort, not the deadline */
+    struct name_waiter *next;
+};
+
 static spinlock_t lock;
+static struct name_waiter *name_waiters;
 static struct port *ports;
 static struct conn *conns;
 static atomic_uint live;
@@ -219,6 +233,7 @@ int64_t port_create_call(uint64_t user_name, int64_t sigbit)
 {
     struct task *self = task_self();
     struct port *pt;
+    uint64_t kicks = 0;
     unsigned long was;
 
     if (!syscall_sigbit(sigbit))
@@ -244,7 +259,19 @@ int64_t port_create_call(uint64_t user_name, int64_t sigbit)
     pt->next = ports;
     ports = pt;
     atomic_fetch_add(&live, 1);
+    for (struct name_waiter **pp = &name_waiters; *pp;) {
+        struct name_waiter *w = *pp;
+
+        if (!kstreq(w->name, pt->name)) {
+            pp = &w->next;
+            continue;
+        }
+        *pp = w->next;
+        w->woken = true;
+        post(w->task, SIGF_PORT, &kicks);
+    }
     spin_unlock_irqrestore(&lock, was);
+    kick_all(kicks);
     return pt->handle;
 }
 
@@ -261,18 +288,67 @@ int64_t port_delete_call(uint32_t h)
     return pt ? 0 : ERR_BADHANDLE;
 }
 
+/* Wait for a port named 'name' until 'deadline' (ns): 0 once there is
+ * one, ERR_TIMEOUT, or ERR_NOTFOUND if the task was killed meanwhile. */
+static int64_t wait_name(const char *name, uint64_t deadline)
+{
+    struct task *self = task_self();
+    struct name_waiter w = { .name = name, .task = self };
+    unsigned long was = spin_lock_irqsave(&lock);
+
+    if (find_port(name)) {
+        spin_unlock_irqrestore(&lock, was);
+        return 0;
+    }
+    task_set_signal(0, SIGF_PORT);  /* under the lock: CreatePort's comes after */
+    w.next = name_waiters;
+    name_waiters = &w;
+    spin_unlock_irqrestore(&lock, was);
+    task_wait_until(SIGF_PORT, deadline, nullptr);
+    was = spin_lock_irqsave(&lock);
+    if (!w.woken)                   /* CreatePort takes it off itself */
+        for (struct name_waiter **pp = &name_waiters; *pp; pp = &(*pp)->next)
+            if (*pp == &w) {
+                *pp = w.next;
+                break;
+            }
+    spin_unlock_irqrestore(&lock, was);
+    task_set_signal(0, SIGF_PORT);
+    if (atomic_load(&self->killed))
+        return ERR_NOTFOUND;        /* back out: user_return() ends it */
+    return w.woken ? 0 : ERR_TIMEOUT;
+}
+
 /* The arena: header, request ring, reply ring, heap, each 64-byte aligned. */
 static uint64_t ring_bytes(uint32_t slots)
 {
     return (sizeof(struct ConnRing) + slots * sizeof(uint64_t) + 63) & ~63ULL;
 }
 
+static int64_t open_once(const char *name, int64_t sigbit, uint64_t slots, uint64_t heap,
+                         uint64_t arena_out);
+
 int64_t port_open_call(uint64_t user_name, int64_t sigbit, uint64_t slots, uint64_t heap,
-                       uint64_t arena_out)
+                       uint64_t arena_out, uint64_t deadline)
+{
+    char name[PORT_NAME];
+    int64_t r;
+
+    if (!syscall_copy_string(name, user_name, sizeof name))
+        return ERR_BADADDR;
+    /* Until the name's there and the open works, or the deadline: a port
+     * made and gone between the wake and the open is waited for again. */
+    while ((r = open_once(name, sigbit, slots, heap, arena_out)) == ERR_NOTFOUND &&
+           deadline != 0 && (r = wait_name(name, deadline)) == 0)
+        ;
+    return r;
+}
+
+static int64_t open_once(const char *name, int64_t sigbit, uint64_t slots, uint64_t heap,
+                         uint64_t arena_out)
 {
     struct task *self = task_self();
     struct process *p = self->process;
-    char name[PORT_NAME];
     struct ConnArena hdr;
     struct area *arena;
     struct conn *c;
@@ -288,8 +364,7 @@ int64_t port_open_call(uint64_t user_name, int64_t sigbit, uint64_t slots, uint6
     if (!syscall_sigbit(sigbit) || slots < 2 || slots > CONN_SLOTS_MAX || (slots & (slots - 1)) ||
         heap > CONN_HEAP_MAX)
         return ERR_BADARG;
-    if (!syscall_copy_string(name, user_name, sizeof name) ||
-        !arch_copy_to_user(arena_out, &va, sizeof va))
+    if (!arch_copy_to_user(arena_out, &va, sizeof va))
         return ERR_BADADDR;
 
     hdr = (struct ConnArena){ .ca_Magic = CONN_MAGIC, .ca_Version = CONN_VERSION,
@@ -424,7 +499,7 @@ int64_t conn_signal_call(uint32_t h)
     return err;
 }
 
-uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
+uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask, uint64_t deadline)
 {
     struct cpu *c = nullptr, *here;
     struct end *e, *peer = nullptr;
@@ -452,7 +527,7 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask)
         sched_kick(c);
         c = nullptr;
     }
-    return task_wait_kick(mask, c);
+    return task_wait_until(mask, deadline, c);
 }
 
 int64_t conn_close_call(uint32_t h)

@@ -325,10 +325,7 @@ int main(uint64_t arg)
         CloseCon(&con);
         return 1;
     }
-    for (uint64_t since = CurrentTime(); (e = OpenDos(&dos, SIG_DOS)) == ERR_NOTFOUND &&
-                                         CurrentTime() - since < 5000 * MS;)
-        nap(5);
-    if (e) {
+    if ((e = OpenDosUntil(&dos, SIG_DOS, CurrentTime() + 5000 * MS)) != 0) {
         say("Shell: no dos\n");
         FreeArgs(&ra);
         CloseCon(&con);

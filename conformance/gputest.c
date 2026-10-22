@@ -85,7 +85,9 @@ static int64_t take(void)
     int64_t e = ERR_NOTFOUND;
 
     for (uint64_t until = CurrentTime() + 30000 * MS; CurrentTime() < until; nap(50)) {
-        if ((e = ConnectPort(&mp, "gpu.0", SIG_GPU, 4, 2 * sizeof *m)) != 0)
+        /* Its port, as soon as it's made; then the server may still be
+         * bringing its firmware up (GPU_OPEN refused until it has). */
+        if ((e = ConnectPortUntil(&mp, "gpu.0", SIG_GPU, 4, 2 * sizeof *m, until)) != 0)
             continue;
         if (!(m = AllocMsg(&mp, sizeof *m)))
             return ERR_NOMEM;

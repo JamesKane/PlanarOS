@@ -83,7 +83,7 @@ static void *set_vector(void *dest, uint8_t fill, uint64_t size)
 static const struct Library base;
 
 static const struct ExecIFace main_iface = {
-    .Data = { "main", 1, sizeof(struct ExecIFace), (struct Library *)&base },
+    .Data = { "main", 2, sizeof(struct ExecIFace), (struct Library *)&base },
 
     .OpenLibrary = OpenLibrary,
     .CloseLibrary = CloseLibrary,
@@ -135,6 +135,8 @@ static const struct ExecIFace main_iface = {
     .FreeVec = FreeVec,
 
     .RawDoFmt = RawDoFmt,
+
+    .WaitUntil = WaitUntil,
 };
 
 static struct Interface *const interfaces[] = { (struct Interface *)&main_iface, nullptr };
@@ -142,8 +144,8 @@ static struct Interface *const interfaces[] = { (struct Interface *)&main_iface,
 static const struct Library base = {
     .lib_Name = "exec.library",
     .lib_Version = 6,
-    .lib_Revision = 4,
-    .lib_IdString = "exec.library 6.4 (22.10.2026)",
+    .lib_Revision = 7,
+    .lib_IdString = "exec.library 6.7 (22.10.2026)",
     .lib_Interfaces = interfaces,
 };
 

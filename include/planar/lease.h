@@ -138,6 +138,12 @@ int64_t GrantFirmware(Handle root, Handle process);
  * wasn't given the console. Polled; the kernel keeps writing its log.
  */
 int64_t GrantConsole(Handle root, Handle process);
+/* The root, to a process this one made, held: its first task gets the
+ * handle as its second argument (init's hwdb, V6 step 7). */
+int64_t GrantRoot(Handle root, Handle process);
+/* Reset the board: a watchdog or PMIC, else PSCI or SBI. Returns only
+ * if none can (V6 step 7). */
+int64_t ColdReboot(Handle root);
 int64_t ReadConsole(char *buf, uint32_t len);
 
 struct MsiInfo {

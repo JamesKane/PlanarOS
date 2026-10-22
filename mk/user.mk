@@ -31,7 +31,7 @@ USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/stri
 # after the program and its libraries, so only a program that calls
 # them carries them.
 USER_EXECLIB := $(BUILD)/user/libexec.a
-EXECLIB_OBJS := $(BUILD)/user/exec/pool.o $(BUILD)/user/exec/fmt.o
+EXECLIB_OBJS := $(BUILD)/user/exec/pool.o $(BUILD)/user/exec/fmt.o $(BUILD)/user/exec/report.o
 # utility.library (lib/utility) the same way, before libexec.a, which
 # its SNPrintf calls.
 USER_UTILLIB := $(BUILD)/user/libutility.a

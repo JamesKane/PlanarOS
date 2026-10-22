@@ -84,12 +84,8 @@ int main(void)
     bool writable = false, test_disk = false;
     struct ProcessInfo pi;
 
-    /* dos may still be mounting. */
-    for (uint64_t since = CurrentTime(); (r = OpenDos(&d, SIG_DOS)) == ERR_NOTFOUND;) {
-        if (CurrentTime() - since > 5000 * MS)
-            break;
-        nap(2);
-    }
+    /* dos may still be mounting: its port comes when it's done. */
+    r = OpenDosUntil(&d, SIG_DOS, CurrentTime() + 5000 * MS);
     if (r) {
         KLog("dostest: no dos server");
         return 1;

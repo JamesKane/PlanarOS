@@ -63,7 +63,7 @@ static int interfaces(void)
 {
     struct Library *exec, *util;
 
-    CHECK(10, IExec && same(IExec->Data.if_Name, "main") && IExec->Data.if_Version == 1);
+    CHECK(10, IExec && same(IExec->Data.if_Name, "main") && IExec->Data.if_Version == 2);
     CHECK(11, IExec->Data.if_Size == sizeof(struct ExecIFace));
     exec = IExec->Data.if_Library;
     CHECK(12, same(exec->lib_Name, "exec.library") && exec->lib_Version == 6);

@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V5.*
+*Checked against V5; `STOP` and the deadlines, V6.*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 
@@ -44,7 +44,7 @@ int64_t drv_hwdb(struct drv *d, struct HwdbMsg *m);
 For a bus driver's Bind, which tells hwdb about what it found. `drv_hwdb_msg` gives the driver's one spare message, cleared, with `op` and the driver's token filled in. `drv_hwdb` sends it and waits for hwdb's answer.
 
 **RESULT**
-`drv_hwdb_msg`: the message, or `nullptr` if there's no heap for it. `drv_hwdb`: 0, or the error hwdb or the connection gave.
+`drv_hwdb_msg`: the message, or `nullptr` if there's no heap for it. `drv_hwdb`: 0, or the error hwdb or the connection gave; `ERR_TIMEOUT` if hwdb hasn't answered in `DRV_HWDB_MS` (5 s), which it never takes.
 
 **EXAMPLE**
 From `drv/pci/main.c`:
@@ -163,18 +163,28 @@ Runs a driver, given its token (its `main`'s argument) and its callbacks:
 1. Connects to "hwdb", asks for its devices (`HWDB_BIND`), checks the answer and maps every range of registers where it is. A device may have no registers (`dd_Size` 0, and no line): QEMU's power model, which hwdb's test mode adds, is leased no range at all.
 2. Calls `bind` for each device: `DRV_OK` to take it, `DRV_DECLINE` (not one this driver drives), or a negative error, which ends the process. Binds each taken device's line, or its MSI-X lines (`dd_NLines`), or, if `every_line` is set, every line its description gives it (`dd_NLines` from `dd_Line` on: the G720's job, MMU and GPU lines). `interrupt` is called once for any of a device's lines; it reads the device to see which.
 3. Calls `start` for each taken device, to publish its class port (`drv_publish`).
-4. Tells hwdb what it took and published (`HWDB_STARTED`). A driver that took nothing exits 0.
+4. Tells hwdb what it took and published (`HWDB_STARTED`). A driver that took nothing exits 0. Then leaves an `HWDB_STOP` with hwdb, which hwdb answers when the driver is to stop (V6 step 7, §11 D1).
 5. Loops: accepts clients at the class ports (8 a port, `DRV_CLIENTS`), calls `interrupt` when a device's line fires and acknowledges it, and gives each client message to `request` (answered when it returns) or `message` (answered with `drv_reply`). With a `poll` callback that says work is outstanding, it looks again without sleeping. With a `deadline` callback that gives a time, it sleeps until then at most and calls `poll` (a command whose interrupt may not come).
 
 When a client's connection goes, by `CloseConn` or its death, the loop calls `gone` with its number before closing it: what the driver holds for that client is to go (§11.5, provider state per connection). power drops the client's votes there.
+
+**Stopping.** When hwdb answers the `HWDB_STOP`, the loop calls `stop` for each device it took, then exits 0. By `hm_Deadline`, `DRV_STOP_MS` (1 s) on, `stop` turns the device off so it touches no more memory, and `FreeArea`s its DMA Areas: hwdb then finds the leases with nothing quarantined, and revokes them idle. A driver with no `stop` only exits, and the kernel quarantines its DMA as when it's killed; hwdb's stop method stops the device. One still running at the deadline is killed. hwdb asks when it stops, in reverse graph order (a unit no running unit depends on first), and the kill test asks some drivers alone.
 
 It exits when hwdb's connection goes.
 
 **INPUTS**
 - `token` -- `main`'s argument, from hwdb.
-- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`, and the flag `every_line`. Any but `name` and `bind` may be `nullptr`.
+- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`, `stop`, and the flag `every_line`. Any but `name` and `bind` may be `nullptr`.
 
 **EXAMPLE**
+virtio-mmio's `stop` (`drv/virtio-mmio/main.c`): a reset, after which the device touches no memory, then its queue's Area:
+```c
+wr(dev, STATUS, 0);
+while (rd(dev, STATUS) != 0)
+    ;
+FreeArea(r->area);
+```
+
 From `drv/nvme/main.c`:
 ```c
 static const struct drv_ops ops = {
@@ -192,6 +202,8 @@ int main(uint64_t token)
 - Signals 16 to 19 are the library's; line *n* of the lease is signal 32 + *n*.
 - A client that goes with messages unanswered keeps its connection, out of the loop, until the driver has answered them all: its heap holds buffers the device may be using.
 - With `DRVF_CRASH` in hwdb's answer it faults on purpose before Bind: the kill test's give-up case.
+- A `stop` runs in the loop, between requests: one stuck in a long request is killed at the deadline.
+- Only virtio-mmio has a `stop` so far. The others exit when asked, and their DMA is quarantined until hwdb's stop method has run, as before.
 - `DRVF_AGAIN` in `d->info.hm_Flags` says a process of this unit ran before: the device is as the last one left it, after hwdb's stop method. display keeps the screen it finds then, rather than clearing it.
 
 **SEE ALSO**

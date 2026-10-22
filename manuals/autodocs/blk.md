@@ -1,6 +1,6 @@
 # blk: the block class's client library
 
-*Checked against V5.*
+*Checked against V5; the deadlines, V6.*
 
 The calls a program uses to read and write a block device, in alphabetical order. The header is `planar/blk.h`; the code is `lib/blk/blk.c`, linked into the programs that need it (hwdb, `dos`, `blk*` conformance programs: `mk/user.mk`). None is a kernel call, but each one that talks to the driver sends messages, which trap when the driver is asleep. The protocol is in [Devices ch. 2](../devices/02-block.md).
 
@@ -82,7 +82,7 @@ Waits for the next reply to a message `blk_submit` sent, and returns it. Its res
 The message, or `nullptr` once the driver has gone: everything out has failed. Release them, and reopen.
 
 **BUGS**
-None known.
+No deadline: `blk_done` waits as long as the driver takes. Its only caller, blkbench, measures the driver. A deadline for the asynchronous calls is the caller's to keep until one needs it.
 
 **SEE ALSO**
 [blk_submit](#blkblk_submit), [blk_release](#blkblk_release)
@@ -104,7 +104,7 @@ int64_t blk_open_now(struct blk *b, const char *port, int64_t sigbit, uint64_t h
 **FUNCTION**
 Connects to `port`, with `heap` bytes of connection heap and signal bit `sigbit`, and asks the driver what the device is (`BLK_INFO`). The view is the whole device.
 
-`blk_open` waits up to `BLK_GONE_MS` (3 s) for the port, which a restarting driver republishes, and through a death while it asks. `blk_open_now` gives `ERR_NOTFOUND` at once if no driver has the port (`dos` uses it to find what's there).
+`blk_open` waits up to `BLK_GONE_MS` (3 s) for the port, which a restarting driver republishes, and through a death while it asks. It waits in `OpenPort` (V6 step 7): it connects as soon as the port is made, without polling. `blk_open_now` gives `ERR_NOTFOUND` at once if no driver has the port (`dos` uses it to find what's there).
 
 **INPUTS**
 - `port` -- the class port, "nvme.0".
@@ -201,6 +201,8 @@ Reads or writes `count` blocks from `block` of the view, waiting for the result.
 - `ERR_RIGHTS` -- `blk_write` to a read-only device.
 - `BLK_EIO` -- the device failed it.
 - `ERR_FULL` -- all 32 messages are out (asynchronous ones).
+- `ERR_TIMEOUT` -- the driver hadn't answered in `BLK_IO_MS` (5 s) (V6 step 7). hwdb has been told it's unresponsive (`ReportUnresponsive`), and restarts it; the next call reconnects. Its message stays the driver's until then.
+- `ERR_BUSY` -- the driver is still holding a request that timed out. Nothing was sent.
 
 **EXAMPLE**
 The kill test's client, from `servers/hwdb/killtest.c`, reads through deaths with a bounced buffer:

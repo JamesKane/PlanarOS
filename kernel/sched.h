@@ -42,6 +42,8 @@ constexpr unsigned SIGB_KILL = 3;           /* wakes a killed task from Wait */
 constexpr uint64_t SIGF_KILL = 1ULL << SIGB_KILL;
 constexpr unsigned SIGB_WAKE = 4;           /* WakeAddr's (kernel/futex.c) */
 constexpr uint64_t SIGF_WAKE = 1ULL << SIGB_WAKE;
+constexpr unsigned SIGB_PORT = 5;           /* a port's name came (kernel/port.c) */
+constexpr uint64_t SIGF_PORT = 1ULL << SIGB_PORT;
 
 enum task_state : uint8_t {
     TASK_READY,
@@ -155,6 +157,15 @@ void task_yield(void);
 
 /* Block until time_now() reaches 'deadline'. */
 void task_sleep_until(uint64_t deadline);
+
+/*
+ * task_wait_kick(), giving up at 'deadline_ns', on CurrentTime's clock
+ * as a user's deadline is (V6 step 7): the signals in 'mask' that came,
+ * or 0 if none did by then. DEADLINE_NONE never gives up, nor does any
+ * deadline without a timer to end it; a deadline already past only
+ * takes what's there.
+ */
+uint64_t task_wait_until(uint64_t mask, uint64_t deadline_ns, struct cpu *kick);
 
 /* Pick and switch to the best ready task on this CPU. */
 void schedule(void);

@@ -25,7 +25,7 @@ constexpr unsigned KLOG_PER_S = 20;
 static atomic_uint_fast64_t klog_drops;
 
 /* Signals a user task may not wait for, send or change: the kernel's. */
-constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL | SIGF_WAKE;
+constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL | SIGF_WAKE | SIGF_PORT;
 
 bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
 {
@@ -190,6 +190,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return (int64_t)task_set_signal(a[0], a[1] & ~SIGF_KERNEL);
     case SYS_WAIT:
         return (int64_t)task_wait(a[0] & ~SIGF_KERNEL);
+    case SYS_WAIT_UNTIL:
+        return (int64_t)task_wait_until(a[0] & ~SIGF_KERNEL, a[1], nullptr);
     case SYS_SIGNAL:
         return sys_signal(self, (Handle)a[0], a[1]);
     case SYS_FIND_TASK:
@@ -223,13 +225,13 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
     case SYS_DELETE_PORT:
         return port_delete_call((uint32_t)a[0]);
     case SYS_OPEN_PORT:
-        return port_open_call(a[0], (int64_t)a[1], a[2], a[3], a[4]);
+        return port_open_call(a[0], (int64_t)a[1], a[2], a[3], a[4], a[5]);
     case SYS_ACCEPT_CONN:
         return port_accept_call((uint32_t)a[0], (int64_t)a[1], a[2]);
     case SYS_SIGNAL_CONN:
         return conn_signal_call((uint32_t)a[0]);
     case SYS_SIGNAL_WAIT_CONN:
-        return (int64_t)conn_signal_wait_call((uint32_t)a[0], a[1] & ~SIGF_KERNEL);
+        return (int64_t)conn_signal_wait_call((uint32_t)a[0], a[1] & ~SIGF_KERNEL, a[2]);
     case SYS_CLOSE_CONN:
         return conn_close_call((uint32_t)a[0]);
     case SYS_CREATE_PROCESS:
@@ -297,6 +299,10 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_call_call((uint32_t)a[0], a[1]);
     case SYS_ALLOC_MSI:
         return lease_msi_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2], a[3]);
+    case SYS_GRANT_ROOT:
+        return lease_root_grant_call((uint32_t)a[0], (uint32_t)a[1]);
+    case SYS_COLD_REBOOT:
+        return lease_cold_reboot_call((uint32_t)a[0]);
     default:
         return ERR_NOSYS;
     }

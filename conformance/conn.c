@@ -105,11 +105,10 @@ static int client(Handle stranger)
 
     role = "conn client";
     CHECK(sig > 0);
-    CHECK(OpenPort("conn", sig, 3, 0, &a) == ERR_BADARG);    /* not a power of two */
-    CHECK(OpenPort("nobody", sig, 0, 0, &a) == ERR_NOTFOUND);
-    /* The server may not have made its port yet. */
-    while ((r = OpenPort("conn", sig, 16, 8192, &a)) == ERR_NOTFOUND)
-        ;
+    CHECK(OpenPort("conn", sig, 3, 0, &a, 0) == ERR_BADARG);    /* not a power of two */
+    CHECK(OpenPort("nobody", sig, 0, 0, &a, 0) == ERR_NOTFOUND);
+    /* The server may not have made its port yet: wait for it. */
+    r = OpenPort("conn", sig, 16, 8192, &a, DEADLINE_NONE);
     CHECK(r > 0 && a);
     conn = (Handle)r;
     CHECK(a->ca_Magic == CONN_MAGIC && a->ca_Slots == 16);
@@ -147,7 +146,7 @@ static int client(Handle stranger)
             lent = AllocArea(4096, 0, &lent_at);
             CHECK(lent > 0 && ShareArea((Handle)lent, server, AREAR_READ | AREAR_WRITE) == 0);
             heap_word(a)[2] = (uint64_t)lent_at;
-            CHECK(OpenPort("conn2", sig, 0, 0, &a2) > 0);
+            CHECK(OpenPort("conn2", sig, 0, 0, &a2, 0) > 0);
             CHECK(a2->ca_Closed == 0);
         }
     }
@@ -157,7 +156,7 @@ static int client(Handle stranger)
         Wait(1ULL << sig);
     CHECK(a->ca_Closed == CONNF_SERVER_GONE);
     CHECK(SignalConn(conn) == ERR_PORT_DIED);
-    CHECK(SignalWaitConn(conn, 1ULL << sig) == 0);
+    CHECK(SignalWaitConn(conn, 1ULL << sig, DEADLINE_NONE) == 0);
     CHECK(QueryArea(a, &info) == 0 && info.ai_Sharers == 1);
     CHECK(QueryArea(lent_at, &info) == 0 && info.ai_Sharers == 1);    /* released */
     CHECK(FreeArea((Handle)lent) == 0);
@@ -177,7 +176,7 @@ static int client(Handle stranger)
     /* The server's exit dropped "conn2", unaccepted. Exit with it open. */
     while (!(a2->ca_Closed & CONNF_SERVER_GONE))
         Wait(1ULL << sig);
-    CHECK(OpenPort("conn2", sig, 0, 0, &a) == ERR_NOTFOUND);
+    CHECK(OpenPort("conn2", sig, 0, 0, &a, 0) == ERR_NOTFOUND);
     return 0;
 }
 

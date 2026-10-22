@@ -95,8 +95,8 @@ int main(uint64_t n)
     struct MsgPort mp;
     int64_t sig = AllocSignal(-1), err;
 
-    while ((err = ConnectPort(&mp, "echo", sig, SLOTS, 8192)) == ERR_NOTFOUND)
-        ;       /* the server isn't up yet */
+    /* The server may not be up yet: wait for its port. */
+    err = ConnectPortUntil(&mp, "echo", sig, SLOTS, 8192, CurrentTime() + 10000000000ULL);
     if (err < 0) {
         KLog("client: can't connect to echo");
         return -1;

@@ -41,6 +41,9 @@ struct MsgPort {
     bool mp_Broken;
     bool mp_Owed;                   /* ReplyMsgLater held back a signal */
     uint8_t mp_StashHead, mp_StashCount;
+    /* A message DoMsgUntil gave up on: still the server's, until its
+     * reply comes (dropped then) or the port goes. */
+    struct Message *mp_Lost;
     /* Replies DoMsg set aside, oldest first: in this end's own memory,
      * never linked through messages the peer can write (review H5). */
     struct Message *mp_Stash[MSGPORT_STASH];
@@ -49,6 +52,10 @@ struct MsgPort {
 /* The client's end: a connection to port 'name'. 0 or an error. */
 int64_t ConnectPort(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
                     uint64_t heap);
+/* The same, waiting until 'deadline' for the port to be made (OpenPort's
+ * wait, V6 step 7): ERR_TIMEOUT if it isn't by then. */
+int64_t ConnectPortUntil(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
+                         uint64_t heap, uint64_t deadline);
 
 /* The server's end: the oldest connection waiting on 'port'. 0,
  * ERR_NOTFOUND if none waits, or an error (ERR_BADARG for an arena that
@@ -105,5 +112,21 @@ bool PortGone(const struct MsgPort *mp);
  * mn_Error says so too). Other replies arriving first wait for GetMsg,
  * up to MSGPORT_STASH of them; ERR_FULL if there are more. */
 int64_t DoMsg(struct MsgPort *mp, struct Message *m);
+
+/*
+ * DoMsg with a deadline (V6 step 7): ERR_TIMEOUT if the reply hasn't come
+ * by then. The message is still the server's: it's in mp_Lost until the
+ * reply comes, which is then dropped, wherever it's taken. Until then
+ * every DoMsgUntil on the port is ERR_BUSY, unless it has gone.
+ */
+int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline);
+
+/*
+ * Tell the supervisor, hwdb, that the server at port 'portName' missed a
+ * deadline (lib/exec/report.c): it restarts it, once a second at most.
+ * 0, or why it couldn't be told. It waits a second at most for hwdb, on
+ * signal 63.
+ */
+int64_t ReportUnresponsive(const char *portName);
 
 #endif /* PLANAR_MSG_H */

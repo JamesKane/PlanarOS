@@ -1,6 +1,6 @@
 # 11. Driver model: lessons from other systems
 
-**Status: mostly built (V4, V5); the rest proposed.** Built: hwdb as the driver manager, graph ordering, matching as data with ties refused, decline and the next driver, quirks, lease-tied DMA and quarantine, a stop method per driver, power before the lease (D3), `pci` as a source, and the kill test. Not built: a graceful `STOP` (D1, in V6), the generic stop table (bus master off and FLR through `pci`, reset and clock gate through `power`), runtime PM, a USB hub or an aux bus as node sources, one task per hardware queue, the IOMMU, TDR, `AbortIO`, the serial and net classes, and match tables in ELF notes (VQ25) ([roadmap](08-roadmap.md#replanned-after-v5)).
+**Status: mostly built (V4, V5); the rest proposed.** Built: hwdb as the driver manager, graph ordering, matching as data with ties refused, decline and the next driver, quirks, lease-tied DMA and quarantine, a stop method per driver, power before the lease (D3), `pci` as a source, the kill test, and the graceful `STOP` with reverse-graph-order shutdown (D1, V6 step 7). Not built: the generic stop table (bus master off and FLR through `pci`, reset and clock gate through `power`), runtime PM, a USB hub or an aux bus as node sources, one task per hardware queue, the IOMMU, TDR, `AbortIO`, the serial and net classes, and match tables in ELF notes (VQ25) ([roadmap](08-roadmap.md#replanned-after-v5)).
 
 The evidence comes from the AbyssBSD driver-model survey and design, written in October 2026 (`~/Desktop/DRIVER-MODEL-SURVEY.md` and `DRIVER-MODEL.md`). They cover FreeBSD, NetBSD and OpenBSD, illumos, Linux and Rust for Linux, IOKit and DriverKit, WDM and WDF, Fuchsia, the Rust research kernels, seL4's sDDF, Genode, QNX and MINIX 3. References in the form *S§n* are to sections of the survey.
 
@@ -87,6 +87,8 @@ Some of the survey's hardest problems are solved by the architecture we already 
 This is crash-only design. The forced path has to be correct, because drivers crash. Making it the only path means every unbind tests it, and there's no second teardown path to get wrong (S§13.2 classes 1 and 2).
 
 `STOP` in step 5 also gives AbyssBSD's warm-reset protection for free: at reboot or kexec, every device is stopped before firmware takes over.
+
+**As built (V6 step 7).** drv.library leaves an `HWDB_STOP` with hwdb once the driver has started, and hwdb's answer is the `STOP`, with its deadline (`DRV_STOP_MS`, 1 s): hwdb never sends a driver anything it didn't ask for, so D6 holds. The library calls the driver's `stop` for each device (the `Stop(reason)` of §11.7, without the reason), which quiesces it and frees its DMA Areas, then exits 0. hwdb doesn't kill a driver that exits in time: the exit is the process's own, and the kernel's exit path runs the same as for a kill, so there's still one teardown. One that hasn't exited by the deadline is killed. A driver without a `stop` exits at once, its DMA quarantined as at a death. Only virtio-mmio has a `stop` so far. Shutdown asks in reverse graph order, a unit once no running unit depends on it through a reference or a parent. Outstanding requests aren't failed first: a `stop` runs between requests, and the clients see the port go.
 
 ## 11.5 Ordering and power
 

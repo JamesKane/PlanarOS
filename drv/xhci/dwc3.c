@@ -58,7 +58,11 @@ static bool vote(struct xhc *c)
     m->pm_Tag = 1;
     for (unsigned i = 0; name[i]; i++)
         m->pm_Name[i] = name[i];
-    if (DoMsg(&power, &m->pm_Msg) != 0 || m->pm_Msg.mn_Error != 0) {
+    int64_t e = DoMsgUntil(&power, &m->pm_Msg, CurrentTime() + POWER_DEADLINE_MS * 1000000);
+
+    if (e == ERR_TIMEOUT)
+        ReportUnresponsive("power");
+    if (e != 0 || m->pm_Msg.mn_Error != 0) {
         xlog(c, "power refused USB's set");
         return false;
     }

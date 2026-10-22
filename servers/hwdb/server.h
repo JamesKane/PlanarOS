@@ -28,6 +28,7 @@ constexpr uint64_t MS = 1000000;
 /* The argument's bits, from the kernel. */
 constexpr uint64_t HWDB_TEST = 1u << 0;     /* run the kill test, then exit */
 constexpr uint64_t HWDB_END = 1u << 1;      /* not the test: end when the Shell does */
+constexpr uint64_t HWDB_FAULT = 1u << 2;    /* fault at once: init's test (servers/init) */
 
 enum unit_state : uint8_t {
     U_WAITING,          /* not all its devices ready */
@@ -48,6 +49,11 @@ struct unit {
     bool powered;               /* turned_on holds what its first vote since power started
                                  * turned on */
     uint32_t turned_on;
+    bool stopping;              /* asked to stop (its HWDB_STOP answered), by stop_due */
+    bool stopped;               /* it did: exited 0 in time */
+    struct HwdbMsg *stop_msg;   /* its HWDB_STOP, held: in its connection's memory */
+    uint64_t stop_due;
+    uint64_t reported;          /* when a client last said it missed a deadline */
     uint8_t ready;              /* its devices ready */
     uint8_t nfails;             /* failures in fail_at */
     uint32_t flags;             /* DRVF_*, for its next start */
@@ -73,6 +79,11 @@ struct hwdb {
     bool test, end, stopping, finished;
     unsigned errors;            /* teardown checks that failed */
     uint64_t quarantined;       /* DMA pages dead drivers left, all told */
+    Handle dos;                 /* the dos server, the kill test's or the system's */
+    unsigned stops, stops_clean, stops_late;    /* units asked to stop; that did; killed */
+    unsigned unresponsive;      /* servers restarted on a client's report */
+    uint64_t stopped_pages;     /* DMA pages quarantined from units that stopped as asked */
+    unsigned stop_deps;         /* while stopping: dependencies whose consumer ended first */
 };
 
 extern struct hwdb hwdb;
@@ -83,6 +94,12 @@ bool hwdb_busy(void);           /* a unit is starting, due to, or ending; or acp
 void unit_launch(struct unit *u);   /* grant its leases and start it: power is done */
 void unit_fail(struct unit *u, const char *why);    /* its devices fail; not restarted */
 void unit_kill(struct unit *u); /* an unbind: restarted at once unless stopping */
+/* Ask it to stop (V6 step 7): killed if it can't be asked, or hasn't by
+ * DRV_STOP_MS. Restarted at once, as a kill is, unless hwdb is stopping. */
+void unit_stop(struct unit *u);
+/* hwdb stops: dos ended, then every unit asked to stop, in reverse graph
+ * order. hwdb.finished once none is left. */
+void hwdb_stop_all(void);
 void unit_retry(struct unit *u);    /* start one given up on, afresh */
 void say(const char *text);
 void hwdb_report(void);      /* the lines worth the console */

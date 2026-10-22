@@ -16,6 +16,13 @@
  *   that doubles, and given up on at FAILS within WINDOW_MS (VQ23). Its
  *   devices fail, so their consumers stay waiting.
  *
+ * - A unit asked to stop (V6 step 7, §11 D1) is answered the HWDB_STOP
+ *   it left here: it turns its devices off, gives back its DMA and exits
+ *   by the deadline, or is killed then. When hwdb stops, every unit is
+ *   asked in reverse graph order: one no live unit depends on.
+ * - A client that says a server missed its deadline (HWDB_UNRESPONSIVE)
+ *   has it restarted, once a second at most.
+ *
  * hwdb never waits for a driver (§11.6 D6): one task, one loop, every
  * message answered as it comes.
  */
@@ -325,6 +332,8 @@ void unit_launch(struct unit *u)
     }
     u->proc = (Handle)p;
     u->accepted = 0;
+    u->stopping = u->stopped = false;
+    u->stop_msg = nullptr;
     u->state = U_STARTING;
     u->started = hwdb.now;
     u->due = hwdb.now + START_MS * MS;
@@ -354,6 +363,133 @@ void unit_kill(struct unit *u)
         u->dma = li.li_DmaPages;
     u->killing = true;
     KillProcess(u->proc);
+}
+
+static struct MsgPort *conn_of(const struct unit *u)
+{
+    return server_conn((uint32_t)(u - hwdb.units));
+}
+
+static bool depends(const struct unit *v, const struct unit *u);
+
+void unit_stop(struct unit *u)
+{
+    struct MsgPort *mp = conn_of(u);
+
+    if (!u->proc || u->stopping || u->killing)
+        return;
+    if (u->state != U_RUNNING || !u->stop_msg || !mp) {
+        unit_kill(u);               /* not started yet, or can't be asked */
+        return;
+    }
+    hwdb.stops++;
+    /* Stopping, in reverse graph order: nothing that depends on it may
+     * still be running. */
+    if (hwdb.stopping)
+        for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
+            const struct unit *v = &hwdb.units[i];
+
+            if (v == u || !depends(v, u))
+                continue;
+            if (v->proc)
+                check_failed(u, "it was asked to stop before a unit that depends on it");
+            else
+                hwdb.stop_deps++;
+        }
+    u->stopping = true;
+    u->stop_due = hwdb.now + DRV_STOP_MS * MS;
+    u->stop_msg->hm_Deadline = u->stop_due;
+    u->stop_msg->hm_Msg.mn_Error = 0;
+    ReplyMsg(mp, &u->stop_msg->hm_Msg);
+    u->stop_msg = nullptr;
+}
+
+/* Does unit 'v' depend on unit 'u': a reference of one of its nodes, or
+ * a parent, in u's lease? */
+static bool depends(const struct unit *v, const struct unit *u)
+{
+    const struct hw_lease *ls = lease_of(v);
+    uint16_t want = (uint16_t)(u - hwdb.units);
+
+    for (unsigned i = 0; i < ls->nnodes; i++) {
+        const struct hw_node *n = &hwdb.g.nodes[ls->nodes[i]];
+
+        for (unsigned k = 0; k < n->nrefs; k++) {
+            hw_id s = n->refs[k].supplier;
+
+            if (s != HW_NONE && hwdb.g.nodes[s].alias != HW_NONE)
+                s = hwdb.g.nodes[s].alias;
+            if (!n->refs[k].dropped && s != HW_NONE && hwdb.g.nodes[s].lease == want)
+                return true;
+        }
+        for (hw_id p = n->parent; p != HW_NONE && p != 0; p = hwdb.g.nodes[p].parent)
+            if (hwdb.g.nodes[p].lease == want)
+                return true;
+    }
+    return false;
+}
+
+void hwdb_stop_all(void)
+{
+    hwdb.stopping = true;
+}
+
+/* While stopping: each unit that no live unit depends on is asked. */
+static void stop_step(void)
+{
+    if (!hwdb.stopping)
+        return;
+    for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
+        struct unit *u = &hwdb.units[i];
+        bool needed = false;
+
+        if (!u->proc || u->stopping || u->killing)
+            continue;
+        for (uint32_t j = 0; j < hwdb.g.nleases && !needed; j++)
+            needed = j != i && hwdb.units[j].proc && depends(&hwdb.units[j], u);
+        if (!needed)
+            unit_stop(u);
+    }
+}
+
+/* A server that missed a deadline: restarted, once a second at most. */
+static void restart_unresponsive(struct unit *u, const char *why)
+{
+    if (!u->proc || u->state != U_RUNNING || u->killing || u->stopping ||
+        (u->reported && hwdb.now - u->reported < 1000 * MS))
+        return;
+    u->reported = hwdb.now;
+    hwdb.unresponsive++;
+    say_unit(u, why);
+    unit_kill(u);
+}
+
+static void unresponsive(const struct HwdbMsg *m)
+{
+    static uint64_t dos_reported;
+    char name[sizeof m->hm_PortName];
+
+    for (unsigned i = 0; i < sizeof name; i++)
+        name[i] = m->hm_PortName[i];    /* the client's memory: copied once */
+    name[sizeof name - 1] = '\0';
+    if (hw_streq(name, "dos")) {
+        if (hwdb.dos && (!dos_reported || hwdb.now - dos_reported >= 1000 * MS)) {
+            dos_reported = hwdb.now;
+            hwdb.unresponsive++;
+            say("hwdb: dos missed a client's deadline: restarting it");
+            KillProcess(hwdb.dos);
+        }
+        return;
+    }
+    for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
+        struct unit *u = &hwdb.units[i];
+
+        for (unsigned d = 0; d < lease_of(u)->nnodes; d++)
+            if (name[0] && hw_streq(u->ports[d], name)) {
+                restart_unresponsive(u, "missed a client's deadline: restarting it");
+                return;
+            }
+    }
 }
 
 void unit_retry(struct unit *u)
@@ -535,9 +671,13 @@ static void died(struct unit *u, const struct ProcessInfo *pi)
     const struct hw_lease *ls = lease_of(u);
     uint64_t quarantined = 0;
     struct LeaseInfo li;
-    bool deliberate = u->killing && !u->late;
+    bool deliberate = (u->killing || u->stopping) && !u->late;
 
     u->deaths++;
+    if (u->stopping && !u->killing && pi->pi_State == PROCS_EXITED && pi->pi_ExitCode == 0) {
+        u->stopped = true;
+        hwdb.stops_clean++;
+    }
     /* What the kernel did: lines masked and unbound, DMA quarantined. */
     for (unsigned r = 0; r < ls->nranges; r++) {
         if (QueryLease(u->lease[r], &li) != 0 || li.li_State != LEASES_STOPPING)
@@ -549,6 +689,8 @@ static void died(struct unit *u, const struct ProcessInfo *pi)
     if (u->killing && u->dma != UINT64_MAX && quarantined != u->dma)
         check_failed(u, "its DMA Areas weren't all quarantined");
     hwdb.quarantined += quarantined;
+    if (u->stopped)
+        hwdb.stopped_pages += quarantined;  /* none, if its stop gave its DMA back */
     close_conn((uint32_t)(u - hwdb.units));
     CloseHandle(u->proc);
     u->proc = 0;
@@ -616,7 +758,8 @@ static void died(struct unit *u, const struct ProcessInfo *pi)
                 say_unit(u, u->late ? "didn't start in time: restarting" : "died: restarting");
         }
     }
-    u->killing = u->late = false;
+    u->killing = u->late = u->stopping = false;
+    u->stop_msg = nullptr;
 }
 
 static void reap(void)
@@ -632,14 +775,18 @@ static void reap(void)
 
 /* --- The protocol. --- */
 
-static struct unit *unit_of(uint32_t token)
+static struct unit *unit_in(uint32_t token, enum unit_state state)
 {
     uint32_t i = token & 0xfff;
 
-    if (i >= hwdb.g.nleases || hwdb.units[i].gen != token >> 12 ||
-        hwdb.units[i].state != U_STARTING)
+    if (i >= hwdb.g.nleases || hwdb.units[i].gen != token >> 12 || hwdb.units[i].state != state)
         return nullptr;
     return &hwdb.units[i];
+}
+
+static struct unit *unit_of(uint32_t token)
+{
+    return unit_in(token, U_STARTING);
 }
 
 /* The key the driver took the node by: its first the driver's table has. */
@@ -763,7 +910,19 @@ static void serve(unsigned c)
         uint32_t idx = u ? (uint32_t)(u - hwdb.units) : UINT32_MAX;
 
         m->hm_Msg.mn_Error = 0;
-        if (u && op == HWDB_BIND && conn_unit[c] == UINT32_MAX) {
+        if (op == HWDB_STOP) {
+            struct unit *r = unit_in(token, U_RUNNING);
+
+            if (r && conn_unit[c] == (uint32_t)(r - hwdb.units) && !r->stop_msg) {
+                r->stop_msg = m;    /* answered when it's to stop */
+                if (hwdb.stopping)
+                    unit_stop(r);
+                continue;
+            }
+            m->hm_Msg.mn_Error = (int32_t)ERR_BADARG;
+        } else if (op == HWDB_UNRESPONSIVE) {
+            unresponsive(m);
+        } else if (u && op == HWDB_BIND && conn_unit[c] == UINT32_MAX) {
             conn_unit[c] = idx;
             bind_reply(u, m);
         } else if (u && op == HWDB_STARTED && conn_unit[c] == idx) {
@@ -976,7 +1135,7 @@ static void system_step(void)
     if (sys_dos && QueryProcess(sys_dos, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
         say("hwdb: dos ended: restarting it");
         CloseHandle(sys_dos);
-        sys_dos = 0;
+        sys_dos = hwdb.dos = 0;
     }
     if (!sys_dos) {
         if ((p = CreateProcess("dos", 0, SIG_DEAD, 0)) < 0) {
@@ -984,7 +1143,7 @@ static void system_step(void)
             sys_due = hwdb.now + 1000 * MS;
             return;
         }
-        sys_dos = (Handle)p;
+        sys_dos = hwdb.dos = (Handle)p;
     }
     if (sys_shell && QueryProcess(sys_shell, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
         CloseHandle(sys_shell);
@@ -992,10 +1151,8 @@ static void system_step(void)
         if (hwdb.end) {             /* EndShell, on a board that goes back to its other system */
             say("hwdb: the Shell ended: stopping");
             CloseHandle(sys_dos);
-            sys_dos = 0;
-            hwdb.stopping = true;
-            for (uint32_t i = 0; i < hwdb.g.nleases; i++)
-                unit_kill(&hwdb.units[i]);
+            sys_dos = hwdb.dos = 0;
+            hwdb_stop_all();
             return;
         }
         sys_due = hwdb.now + 100 * MS;  /* a new Shell after one ends */
@@ -1032,8 +1189,11 @@ static uint64_t next_deadline(void)
     for (uint32_t i = 0; i < hwdb.g.nleases; i++) {
         const struct unit *u = &hwdb.units[i];
 
-        if ((u->state == U_DUE || u->state == U_STARTING) && (!next || u->due < next))
+        if ((u->state == U_DUE || u->state == U_STARTING || (u->state == U_POWERING && u->asked)) &&
+            (!next || u->due < next))
             next = u->due;
+        if (u->stopping && (!next || u->stop_due < next))
+            next = u->stop_due;
     }
     return next;
 }
@@ -1048,6 +1208,17 @@ static void timers(void)
         } else if (u->state == U_STARTING && hwdb.now >= u->due && !u->late) {
             u->late = true;
             KillProcess(u->proc);
+        } else if (u->state == U_POWERING && u->asked && hwdb.now >= u->due) {
+            struct unit *p = power_unit();
+
+            u->due = hwdb.now + POWER_DEADLINE_MS * MS;     /* asked again after power restarts */
+            if (p)
+                restart_unresponsive(p, "didn't answer a vote in time: restarting it");
+        }
+        if (u->stopping && !u->killing && hwdb.now >= u->stop_due) {
+            hwdb.stops_late++;
+            say_unit(u, "didn't stop in time: killed");
+            unit_kill(u);
         }
     }
 }
@@ -1056,6 +1227,8 @@ int main(uint64_t arg, uint64_t root)
 {
     int64_t port;
 
+    if (arg & HWDB_FAULT)
+        __builtin_trap();           /* for init's test: a death to see */
     hwdb.root = (Handle)root;
     hwdb.test = arg & HWDB_TEST;
     hwdb.end = arg & HWDB_END;
@@ -1104,6 +1277,7 @@ int main(uint64_t arg, uint64_t root)
         reap();
         acpid_reap();
         timers();
+        stop_step();
     }
     acpid_stop();
     for (uint32_t i = 0; i < hwdb.g.nleases; i++)

@@ -27,8 +27,14 @@
  * 3. Has one unit fault in Bind on every start, and checks it's given up
  *    on after FAILS failures, the restarts spaced by the backoff; then
  *    starts it afresh.
+ * 3a. Asks the units serving rng and rtc clients to stop (V6 step 7):
+ *    each must exit 0 in time with no DMA left to quarantine, its lease
+ *    idle once revoked, and be started again; its client recovers as
+ *    from a death. Then has a client (conformance/reporter.c) say one
+ *    unit's port missed a deadline: hwdb must restart that unit.
  * 4. Stops the clients, which must each have recovered from every death
- *    they saw; then kills every unit for good and closes the leases.
+ *    they saw; then stops every unit for good, in reverse graph order,
+ *    and closes the leases.
  *
  * Then hwdb exits: 0 if every check passed. The kernel checks nothing it
  * made outlived it (kernel/selftest.c, V4.3).
@@ -49,8 +55,8 @@ constexpr uint64_t Y2020 = 1577836800;
 constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
-enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_GIVEUP, T_RETRY, T_DRAIN, T_POWER,
-                       T_DISPLAY, T_INPUT, T_GPU, T_LOAD, T_STOP, T_END };
+enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_STOPS, T_REPORT, T_GIVEUP,
+                       T_RETRY, T_DRAIN, T_POWER, T_DISPLAY, T_INPUT, T_GPU, T_LOAD, T_STOP, T_END };
 
 enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
 
@@ -224,14 +230,12 @@ static void client(uint64_t arg)
         int64_t e;
 
         if (!open) {
-            e = ConnectPort(&mp, c->port, SIG_CLIENT, 4, 4096);
-            if (e == ERR_NOTFOUND) {
-                if (CurrentTime() - since > 3000 * MS) {
-                    c->bad++;           /* gone for longer than any restart takes */
-                    c->last_bad = ERR_NOTFOUND;
-                    since = CurrentTime();
-                }
-                nap(1);
+            /* Waiting for the port as long as any restart takes. */
+            e = ConnectPortUntil(&mp, c->port, SIG_CLIENT, 4, 4096, since + 3000 * MS);
+            if (e == ERR_TIMEOUT) {
+                c->bad++;               /* gone for longer than any restart takes */
+                c->last_bad = ERR_NOTFOUND;
+                since = CurrentTime();
                 continue;
             }
             if (e != 0 || !(m = AllocMsg(&mp, sizeof *m))) {
@@ -413,7 +417,7 @@ static void dos_step(void)
             start_clients();
             return;
         }
-        dos = (Handle)p;
+        dos = hwdb.dos = (Handle)p;
         phase_at = hwdb.now;
         return;
     }
@@ -494,7 +498,8 @@ static void kill_rounds(void)
     if (round > 0 && own_handles() > handles + 2 * nclients)
         fail("hwdb's handles grew across a restart");
     if (round == rounds) {
-        phase = T_GIVEUP;
+        phase = T_STOPS;
+        phase_at = 0;
         return;
     }
     u = live[round % nlive];
@@ -513,6 +518,128 @@ static void kill_rounds(void)
     } else {
         wake = hwdb.now + (2 + rnd() % 8) * MS;
     }
+}
+
+/* --- Stopping, and a client's report (V6 step 7). --- */
+
+static struct unit *stopped[CLIENTS];
+static unsigned nstopped, stopped_deaths[CLIENTS], stops_before, unresponsive_before;
+static struct unit *reported;
+static unsigned reported_deaths;
+static Handle reporter;
+
+static bool stop_victim(const struct unit *u)
+{
+    const char *d = unit_driver(u);
+
+    return hw_streq(d, "virtio-mmio") || hw_streq(d, "rtc-pl031") || hw_streq(d, "rtc-goldfish");
+}
+
+static void stops(void)
+{
+    if (phase_at == 0) {
+        phase_at = hwdb.now;
+        stops_before = hwdb.stops_clean;
+        nstopped = 0;
+        for (unsigned i = 0; i < nlive && nstopped < CLIENTS; i++)
+            if (stop_victim(live[i]) && live[i]->state == U_RUNNING) {
+                stopped_deaths[nstopped] = live[i]->deaths;
+                stopped[nstopped++] = live[i];
+                unit_stop(live[i]);
+            }
+        hwdb.stopped_pages = 0;
+        return;
+    }
+    for (unsigned i = 0; i < nstopped; i++)
+        if (stopped[i]->deaths == stopped_deaths[i] || stopped[i]->state != U_RUNNING) {
+            if (hwdb.now - phase_at < 3000 * MS)
+                return;
+            fail("a unit asked to stop didn't stop and start again");
+            break;
+        }
+    if (hwdb.stops_clean - stops_before != nstopped)
+        fail("a unit asked to stop didn't exit 0 in time");
+    if (hwdb.stopped_pages != 0)
+        fail("a unit that stopped left DMA to quarantine");
+    if (nstopped)
+        say_num("V6.7 stop ok: drivers asked to stop alone: ", nstopped,
+                "; each exited 0 in time, its DMA given back and its lease idle, and was "
+                "started again; their clients reconnected");
+    else
+        say("V6.7 stop: no rng or rtc driver here to stop alone: only the end's stops");
+    phase = T_REPORT;
+    phase_at = 0;
+}
+
+/* A port's name, up to 8 bytes, as reporter's argument. */
+static uint64_t name_arg(const char *s)
+{
+    uint64_t v = 0;
+
+    for (unsigned i = 0; i < 8 && s[i]; i++)
+        v |= (uint64_t)(uint8_t)s[i] << 8 * i;
+    return v;
+}
+
+static void report_step(void)
+{
+    struct ProcessInfo pi;
+
+    if (phase_at == 0) {
+        reported = nullptr;
+        for (unsigned i = 0; i < nclients && !reported; i++)
+            if (clients[i].kind != K_BLOCK && clients[i].unit->state == U_RUNNING &&
+                clients[i].port[8] == '\0' && clients[i].port[0])
+                reported = clients[i].unit;
+        if (!reported) {
+            say("V6.7 report: no unit with a client to report: not checked");
+            phase = T_GIVEUP;
+            return;
+        }
+        for (unsigned i = 0; i < nclients; i++)
+            if (clients[i].unit == reported) {
+                int64_t p = CreateProcess("reporter", name_arg(clients[i].port), SIG_DEAD, 0);
+
+                if (p < 0) {
+                    fail("reporter couldn't be started");
+                    phase = T_GIVEUP;
+                    return;
+                }
+                reporter = (Handle)p;
+                break;
+            }
+        reported_deaths = reported->deaths;
+        unresponsive_before = hwdb.unresponsive;
+        phase_at = hwdb.now;
+        return;
+    }
+    if (reporter && QueryProcess(reporter, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+        if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+            fail("reporter couldn't report");
+        CloseHandle(reporter);
+        reporter = 0;
+    }
+    if (reporter || reported->deaths == reported_deaths || reported->state != U_RUNNING) {
+        if (hwdb.now - phase_at < 3000 * MS)
+            return;
+        fail("the unit reported unresponsive wasn't restarted");
+    } else if (hwdb.unresponsive != unresponsive_before + 1) {
+        fail("a report restarted more or less than its unit");
+    } else {
+        struct hw_line l = { 0 };
+
+        hw_put(&l, "V6.7 report ok: a client said ");
+        hw_put(&l, unit_driver(reported));
+        hw_put(&l, " missed its deadline, and hwdb restarted it");
+        say(l.text);
+    }
+    if (reporter) {
+        KillProcess(reporter);
+        CloseHandle(reporter);
+        reporter = 0;
+    }
+    phase = T_GIVEUP;
+    phase_at = 0;
 }
 
 static void give_up(void)
@@ -693,21 +820,37 @@ static void drain(void)
 
 static void stop_all(void)
 {
+    static unsigned asked, clean;
     bool any = false;
 
     if (phase == T_STOP) {
+        asked = hwdb.stops;
+        clean = hwdb.stops_clean;
         if (dos)
             CloseHandle(dos);       /* which ends it, before its devices */
-        dos = 0;
-        hwdb.stopping = true;
-        for (uint32_t i = 0; i < hwdb.g.nleases; i++)
-            unit_kill(&hwdb.units[i]);
+        dos = hwdb.dos = 0;
+        hwdb_stop_all();
         phase = T_END;
     }
     for (uint32_t i = 0; i < hwdb.g.nleases; i++)
         any |= hwdb.units[i].proc != 0;
-    if (!any)
+    if (!any) {
+        struct hw_line l = { 0 };
+
+        hw_put(&l, "V6.7 stop all ok: ");
+        hw_put_dec(&l, hwdb.stops - asked);
+        hw_put(&l, " drivers asked to stop in reverse graph order (");
+        hw_put_dec(&l, hwdb.stop_deps);
+        hw_put(&l, " dependencies, each consumer gone first), ");
+        hw_put_dec(&l, hwdb.stops_clean - clean);
+        hw_put(&l, " exited in time, ");
+        hw_put_dec(&l, hwdb.stops_late);
+        hw_put(&l, " killed late");
+        if (hwdb.stops_late)
+            fail("a driver didn't stop in time");
+        say(l.text);
         hwdb.finished = true;
+    }
 }
 
 static void step(void);
@@ -740,6 +883,12 @@ static void step(void)
         break;
     case T_ROUNDS:
         kill_rounds();
+        break;
+    case T_STOPS:
+        stops();
+        break;
+    case T_REPORT:
+        report_step();
         break;
     case T_GIVEUP:
     case T_RETRY:
@@ -786,6 +935,8 @@ uint64_t test_deadline(void)
     case T_BENCH:
     case T_DOS:
     case T_SHELL:
+    case T_STOPS:
+    case T_REPORT:
     case T_RETRY:
     case T_DRAIN:
     case T_POWER:

@@ -163,8 +163,8 @@ static int app(Handle stranger)
 
     role = "doorbell app";
     CHECK(sig > 0);
-    while ((r = OpenPort("doorbell", sig, 0, 0, &a)) == ERR_NOTFOUND)
-        sleep_ms(1);
+    /* Its server may be starting: wait for the port. */
+    r = OpenPort("doorbell", sig, 0, 0, &a, CurrentTime() + 5000000000ULL);
     CHECK(r > 0);
     w = words(a);
     w[W_TASK] = FindTask(nullptr);

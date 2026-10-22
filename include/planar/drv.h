@@ -10,10 +10,12 @@
  * hwdb which devices it took and what it published (HWDB_STARTED); a
  * driver that took none exits, and hwdb counts them declined.
  *
- * hwdb never waits for a driver (§11.6 D6): it answers these two
- * messages and otherwise only watches the process. There is no STOP
- * message yet: hwdb unbinds by killing (§11.4), and the kill path is the
- * one that has to be right.
+ * hwdb never waits for a driver (§11.6 D6): it answers these messages
+ * and otherwise only watches the process. Once started, the library
+ * leaves an HWDB_STOP with hwdb, which answers it to ask the driver to
+ * stop (V6 step 7, §11 D1): by hm_Deadline the driver turns its devices
+ * off, gives back its DMA and exits 0. One that doesn't is killed then,
+ * and the kill path, which has to be right anyway, does the rest.
  */
 #ifndef PLANAR_DRV_H
 #define PLANAR_DRV_H
@@ -35,7 +37,12 @@ enum : uint32_t {
     HWDB_STARTED = 2,       /* hm_Token, hm_Accepted, hm_Ports in */
     HWDB_PCI_HOST = 3,      /* pci's: hm_Host.ph_Device in; the rest of hm_Host out */
     HWDB_PCI_FUNCTION = 4,  /* pci's: hm_Function in, a function it found */
+    HWDB_UNRESPONSIVE = 5,  /* anyone's: hm_PortName's server missed a deadline */
+    HWDB_STOP = 6,          /* a started driver's: answered when it's to stop, by hm_Deadline */
 };
+
+constexpr uint64_t DRV_STOP_MS = 1000;      /* a driver's time to stop, once asked */
+constexpr uint64_t DRV_HWDB_MS = 5000;      /* hwdb's answers, which come at once */
 
 /* hm_Flags, from hwdb: what the kill test asks of this start. */
 constexpr uint32_t DRVF_CRASH = 1u << 0;    /* fault in Bind (the give-up test) */
@@ -124,6 +131,8 @@ struct HwdbMsg {
         };
         struct PciHost hm_Host;
         struct PciFunction hm_Function;
+        uint64_t hm_Deadline;       /* HWDB_STOP's answer: CurrentTime's clock */
+        char hm_PortName[32];       /* HWDB_UNRESPONSIVE */
     };
 };
 
@@ -191,6 +200,13 @@ struct drv_ops {
     /* Bind every line a device has (dd_NLines), not only its first: a
      * device with a line per source (the G720's job, MMU and GPU). */
     bool every_line;
+    /* hwdb asked it to stop (V6 step 7): for each device taken, turn it
+     * off so it touches no more memory, and FreeArea its DMA Areas, by
+     * DRV_STOP_MS. The process then exits 0, and hwdb finds its leases
+     * idle, nothing quarantined. Without one it only exits: the kernel
+     * quarantines its DMA, as when it's killed, and hwdb's stop method
+     * stops the device. */
+    void (*stop)(struct drv *d, struct drv_dev *dev);
 };
 
 struct drv {

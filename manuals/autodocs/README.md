@@ -44,7 +44,8 @@
 | CloseHandle | [exec](exec.md#execclosehandle) | kernel |
 | CloseLibrary | [exec](exec.md#execcloselibrary) | library, through `IExec` |
 | ClosePort | [msg](msg.md#execcloseport) | library |
-| ConnectPort | [msg](msg.md#execconnectport) | library |
+| ColdReboot | [lease](lease.md#leasecoldreboot) | kernel |
+| ConnectPort, ConnectPortUntil | [msg](msg.md#execconnectport) | library |
 | CreateDir, DeletePath | [dos](dos.md#doscreatedir) | library |
 | CreateLease | [lease](lease.md#leasecreatelease) | kernel |
 | CopyMem | [exec](exec.md#execcopymem) | library |
@@ -58,6 +59,7 @@
 | DeletePool | [exec](exec.md#execdeletepool) | library |
 | DeletePort | [exec](exec.md#execdeleteport) | kernel |
 | DoMsg | [msg](msg.md#execdomsg) | library |
+| DoMsgUntil | [msg](msg.md#execdomsguntil) | library |
 | DropInterface | [exec](exec.md#execdropinterface) | library, through `IExec` |
 | drv_dma_clean, drv_dma_flush | [drv](drv.md#drvdrv_dma_clean) | library |
 | drv_hwdb_msg, drv_hwdb | [drv](drv.md#drvdrv_hwdb) | library |
@@ -85,6 +87,7 @@
 | GrantConsole | [lease](lease.md#leasegrantconsole) | kernel |
 | GrantFirmware | [lease](lease.md#leasegrantfirmware) | kernel |
 | GrantLease | [lease](lease.md#leasegrantlease) | kernel |
+| GrantRoot | [lease](lease.md#leasegrantroot) | kernel |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
@@ -92,7 +95,7 @@
 | NextTagItem | [utility](utility.md#utilitynexttagitem) | library |
 | NextVolume | [dos](dos.md#dosnextvolume) | library |
 | OpenCon, WriteCon, PutStr, CloseCon | [dos](dos.md#dosopencon) | library |
-| OpenDos, CloseDos | [dos](dos.md#dosopendos) | library |
+| OpenDos, OpenDosUntil, CloseDos | [dos](dos.md#dosopendos) | library |
 | OpenFile, CloseFile | [dos](dos.md#dosopenfile) | library |
 | OpenLibrary | [exec](exec.md#execopenlibrary) | library, through `IExec` |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
@@ -110,6 +113,7 @@
 | ReadFile, WriteFile | [dos](dos.md#dosreadfile) | library |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |
+| ReportUnresponsive | [msg](msg.md#execreportunresponsive) | library, in `libexec.a` |
 | RevokeLease | [lease](lease.md#leaserevokelease) | kernel |
 | RunCommand | [dos](dos.md#dosruncommand) | library |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
@@ -137,6 +141,7 @@
 | Wait | [exec](exec.md#execwait) | kernel |
 | WaitPort | [msg](msg.md#execwaitport) | library |
 | WaitPorts | [msg](msg.md#execwaitports) | library |
+| WaitUntil | [exec](exec.md#execwaituntil) | kernel |
 
 ## Known problems found while writing these
 

@@ -71,7 +71,14 @@ struct Dos {
     bool ds_Open;
 };
 
+/* Every call to the server has a deadline (V6 step 7): ERR_TIMEOUT past
+ * it, when hwdb is told dos is unresponsive, and ERR_BUSY after until
+ * dos answers the one it missed. */
+constexpr uint64_t DOS_DEADLINE_MS = 10000;
+
 int64_t OpenDos(struct Dos *dos, int64_t sigBit);       /* connect to "dos" */
+/* The same, waiting for dos until 'deadline' (ERR_TIMEOUT): at boot. */
+int64_t OpenDosUntil(struct Dos *dos, int64_t sigBit, uint64_t deadline);
 void CloseDos(struct Dos *dos);
 
 /* Files: a number, or an error. */
@@ -159,8 +166,12 @@ void FreeArgs(struct RDArgs *rdArgs);
  * "con.0", which draws it and logs it, and so to the serial console. Where
  * there's no framebuffer, a line at a time to the kernel's log. If the
  * console goes (display restarting) it's reconnected once; after that,
- * the log. Printf formats as RawDoFmt does, 64 bytes a message.
+ * the log. Printf formats as RawDoFmt does, 64 bytes a message. A
+ * message the display hasn't answered in CON_DEADLINE_MS is reported to
+ * hwdb, and the text goes on as if the console had gone.
  */
+constexpr uint64_t CON_DEADLINE_MS = 1000;
+
 struct Con {
     struct MsgPort cn_Port;
     void *cn_Msg;                   /* a DrvRequest */

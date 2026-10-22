@@ -1296,9 +1296,10 @@ static void test_class_costs(void)
 }
 
 /*
- * BOOTARGS=shell: no task tests, but the system (step 7): hwdb in its
- * normal mode, which starts the drivers, dos and the Shell, and keeps
- * them going. This task waits on it.
+ * BOOTARGS=shell: no task tests, but the system (step 7): init, which
+ * starts hwdb in its normal mode (V6 step 7), which starts the drivers,
+ * dos and the Shell, and keeps them going. This task waits on init,
+ * which resets the board itself if hwdb dies.
  */
 static void run_system(void)
 {
@@ -1309,13 +1310,13 @@ static void run_system(void)
     kprintf("planar: starting the system\n");
     /* With "reboot", the Shell's EndShell ends the system and the board
      * starts again (hwdb's HWDB_END). */
-    if (!(p = process_create_root("hwdb", 5, bootargs_has("reboot") ? 2 : 0, task_self(), DEAD))) {
-        kprintf("planar: hwdb couldn't be started\n");
+    if (!(p = process_create_root("init", 5, bootargs_has("reboot") ? 2 : 0, task_self(), DEAD))) {
+        kprintf("planar: init couldn't be started\n");
         return;
     }
     while (!atomic_load(&p->dead))
         task_wait(DEAD);
-    kprintf("planar: hwdb ended (exit %lld, fault %d)\n", (long long)p->exit_code, p->fault);
+    kprintf("planar: init ended (exit %lld, fault %d)\n", (long long)p->exit_code, p->fault);
     if (bootargs_has("reboot")) {
         task_sleep_until(time_now() + time_us(200000));
         kprintf("planar: rebooting\n");
@@ -1407,6 +1408,8 @@ void selftest_tasks(void *)
     kprintf("V6.5 done\n");
     selftest_dos_args();
     kprintf("V6.6 done\n");
+    selftest_supervision();
+    kprintf("V6.7 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2730,7 +2733,8 @@ void selftest_hwdb(void)
         return;
     }
     task_set_signal(0, SIGF_DEAD);
-    if (!(p = process_create_root("hwdb", 5, 1, task_self(), SIGF_DEAD)))
+    /* init, which starts hwdb and ends with its exit (V6 step 7). */
+    if (!(p = process_create_root("init", 5, 1, task_self(), SIGF_DEAD)))
         fail("V4.3 hwdb", "process_create failed");
     /* The boards take most of 15 s for the kill test alone, and the GPU's
      * load test (V5 step 7) 30 s more. */
@@ -2741,7 +2745,7 @@ void selftest_hwdb(void)
         fail("V4.3 hwdb", "hwdb failed");
     }
     if (p->fault != FAULT_NONE || p->exit_code != 0) {
-        kprintf("hwdb: exit %lld, fault %d\n", (long long)p->exit_code, p->fault);
+        kprintf("hwdb: exit %lld, fault %d (init's)\n", (long long)p->exit_code, p->fault);
         fail("V4.3 hwdb", "hwdb failed");
     }
     process_free(p);
@@ -2911,6 +2915,41 @@ void selftest_libraries(void)
             "processes, the tables read-only\n", library_count(),
             (unsigned long long)library_pages(),
             library_vector() ? "by the vector unit" : "by words: no vector unit");
+}
+
+/*
+ * V6 step 7: supervision. OpenPort's wait, WaitUntil and DoMsgUntil
+ * (conformance/deadline.c); then init catching hwdb's death: started with
+ * INIT_DEATH, init starts hwdb to fault at once, logs the meditation and,
+ * in test mode, exits 0 rather than reset. STOP and a client's report of
+ * an unresponsive server are hwdb's kill test's (V6.7 stop, report).
+ */
+void selftest_supervision(void)
+{
+    static const char *const tests[] = { "deadline" };
+    constexpr uint64_t INIT_DEATH = 1u << 8;     /* servers/init/main.c */
+    struct process *p;
+
+    if (!user_images[0].name) {
+        kprintf("V6.7 supervision skipped: no user programs\n");
+        return;
+    }
+    run_each("V6.7 supervision", tests, 1);
+    task_set_signal(0, SIGF_DEAD);
+    if (!(p = process_create_root("init", 5, INIT_DEATH, task_self(), SIGF_DEAD)))
+        fail("V6.7 supervision", "init couldn't be started");
+    for (uint64_t end = time_now() + time_us(10000000); !atomic_load(&p->dead) && time_now() < end;)
+        wait_test_dead();
+    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+        kprintf("init: exit %lld, fault %d\n", (long long)p->exit_code, p->fault);
+        fail("V6.7 supervision", "init didn't see hwdb's death");
+    }
+    process_free(p);
+    if (!processes_down_to(0, 1000000) || lease_count() || lease_quarantined())
+        fail("V6.7 supervision", "a process or lease outlived init");
+    kprintf("V6.7 supervision ok: OpenPort waits for a name and wakes when it's made, "
+            "WaitUntil and DoMsgUntil keep their deadlines, a late answer is dropped; init "
+            "saw hwdb die and logged its meditation\n");
 }
 
 /*

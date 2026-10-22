@@ -1,6 +1,6 @@
 # Drivers: hwdb, leases, drv.library, supervision
 
-*Checked against V5.*
+*Checked against V5; `STOP`, deadlines and init, V6.*
 
 ## What it's for
 
@@ -8,7 +8,7 @@ A driver is a user-mode process that owns one or more devices for as long as it 
 
 ## Concepts
 
-**hwdb** is the first server. The kernel starts it with the **device root**, the handle that may create leases ([lease](../autodocs/lease.md)). hwdb:
+**hwdb** is the first server. The kernel starts **init** (`servers/init`) with the **device root**, the handle that may create leases ([lease](../autodocs/lease.md)); init starts hwdb and gives it the root (`GrantRoot`, V6 step 7). hwdb:
 - reads the firmware's description (`MapFirmware`): the device tree, or ACPI's tables and, through `acpid`, the namespace;
 - builds one graph of devices, applies the board's quirks (`servers/hwdb/quirks.c`), and matches each device against the drivers' tables (`servers/hwdb/drivers.c`): by `compatible`, `_HID`/`_CID`, or a PCI function's keys;
 - starts each driver once every device it needs is bound: its bus, interrupt controller, clocks and the like. The order comes from the graph's references.
@@ -24,7 +24,7 @@ A **class port** is how programs reach a device: a port named for the class and 
 1. hwdb creates the process held, with a token as its argument, grants it its leases, and starts it.
 2. The driver connects to "hwdb" and asks for its devices with the token (`HWDB_BIND`). The answer, `struct HwdbMsg`, lists its leases (`hm_Range`) and each device (`hm_Device`): registers, the index of its interrupt line in the first lease, its unit, the key it matched, and for a PCI function its MSI-X table and vectors ([chapter 4](04-pci.md)).
 3. It binds each device or declines it, publishes the class ports of those it took, and says so (`HWDB_STARTED`).
-4. It serves clients until it dies or hwdb goes.
+4. It leaves an `HWDB_STOP` with hwdb, and serves clients until hwdb answers it (it's to stop), it dies, or hwdb goes.
 
 `drv.library` does steps 2 to 4. A driver gives `drv_main` its callbacks:
 
@@ -36,6 +36,7 @@ A **class port** is how programs reach a device: a port named for the class and 
 | `request` | A client's `struct DrvRequest`: up to 64 bytes in `dr_Data`, `DRV_READ` or `DRV_WRITE`; answered when it returns |
 | `message` | A class's own messages, in place of `request`: answered with `drv_reply`, now or later |
 | `poll` | Each time round the loop, for a device without interrupts; true keeps the loop from sleeping |
+| `stop` | hwdb asked it to stop: turn the device off and `FreeArea` its DMA, then the library exits 0 |
 
 ## Using it
 
@@ -69,13 +70,37 @@ hwdb sees every death. The teardown is the kernel's and hwdb's, never the dead d
 2. hwdb runs the unit's **stop method**, which makes the device stop touching memory: virtio's status register to 0, NVMe's `CC.EN` to 0, SDHCI's Software Reset For All, a GPU's soft reset, every display plane off but the console's ([chapter 5](05-drivers.md)). A unit with no stop method is safe only if it kept no DMA; one that did stays quarantined and isn't restarted.
 3. hwdb calls `RevokeLease`, which frees the quarantine and the held memory, and starts the driver again.
 
+## When a driver is asked to stop
+
+hwdb asks rather than kills when it can (V6 step 7, §11 D1). It answers the driver's `HWDB_STOP` with a deadline, `DRV_STOP_MS` (1 s) on. drv.library calls the driver's `stop` for each device it took, then exits 0. A `stop` makes the device touch no more memory and frees its DMA Areas, so the kernel has nothing to quarantine, and hwdb revokes the leases idle. A driver without a `stop` only exits: its DMA is quarantined as at a death, and the stop method does the rest. One still running at the deadline is killed. virtio-mmio is the one driver with a `stop` so far:
+
+```c
+static void stop(struct drv *d, struct drv_dev *dev)
+{
+    struct rng *r = &rngs[dev - d->dev];
+
+    wr(dev, STATUS, 0);             /* a reset: the device touches no memory */
+    while (rd(dev, STATUS) != 0)
+        ;
+    if (r->area)
+        FreeArea(r->area);
+    r->area = 0;
+}
+```
+
+When hwdb stops, at the kill test's end or the Shell's `EndShell` on a board that starts over, it asks every driver in reverse graph order: a unit is asked once no running unit depends on it, through a reference or a parent, so a consumer goes before what it consumes.
+
 **Power before the lease** ([chapter 8](08-power.md)). A driver whose device needs power has it voted on by hwdb before its lease is granted, so a driver never touches a device that's off. hwdb, not the driver, holds the vote, and lets it go only after the stop method has run: a stop method must touch a powered device, and on the CIX an access to an unpowered GPU wedges the board.
 
 **Supervision** (`servers/hwdb/server.c`): a death hwdb asked for is restarted at once. Any other is restarted after 10 ms, then twice as long each time, and given up on at 5 failures within 10 s. A driver that hasn't said it started within 2 s has failed.
 
-Clients see a death as `ERR_PORT_DIED` on their connection. A class's library reconnects once the port is back ([chapter 2](02-block.md#restarts)).
+Clients see a death as `ERR_PORT_DIED` on their connection. A class's library reconnects once the port is back, waiting for it in `OpenPort` ([chapter 2](02-block.md#restarts)).
 
-**The kill test** (hwdb's test mode, `servers/hwdb/killtest.c`) kills every driver with a client, a dozen times each, some while binding, most under I/O, and checks each teardown and that every client recovered. Then V5's phases, one class each: `power` killed and every driver voted for again (`power.c`); a display client killed, and display killed under its planes (`display.c`); `xhci` and `input` killed under an input client (`input.c`); a GPU client killed with jobs in flight, and the GPU server killed under one (`gpu.c`). Last, the load phase: one GPU client runs jobs without a pause while display, input, power, another GPU client and the GPU server are killed around it (`gpu.c`, `T_LOAD`).
+**Deadlines.** Every call a class library makes to its server has one: a block device 5 s, power's votes 2 s (hwdb's too), the console 1 s, dos 10 s. A server that misses one is reported to hwdb by its client (`ReportUnresponsive`), and hwdb restarts it, once a second at most, as a death it asked for.
+
+**hwdb's own death.** init waits on hwdb. If it ends any way but as asked, init logs a meditation (how it ended, the fault's address and PC) and resets the board (`ColdReboot`: its watchdog or PMIC, else PSCI or SBI). There's no restarting hwdb in place: a new one would have to adopt a dead one's leases (v6-plan decision 7).
+
+**The kill test** (hwdb's test mode, `servers/hwdb/killtest.c`) kills every driver with a client, a dozen times each, some while binding, most under I/O, and checks each teardown and that every client recovered. Then V5's phases, one class each: `power` killed and every driver voted for again (`power.c`); a display client killed, and display killed under its planes (`display.c`); `xhci` and `input` killed under an input client (`input.c`); a GPU client killed with jobs in flight, and the GPU server killed under one (`gpu.c`). Last, the load phase: one GPU client runs jobs without a pause while display, input, power, another GPU client and the GPU server are killed around it (`gpu.c`, `T_LOAD`). V6's: the rng and rtc drivers asked to stop alone, each exiting in time with its DMA given back and its lease idle (`V6.7 stop`); a client's report of an unresponsive driver, which hwdb restarts (`V6.7 report`); and at the end every driver asked to stop in reverse graph order (`V6.7 stop all`).
 
 ## Rules
 
@@ -85,6 +110,7 @@ Clients see a death as `ERR_PORT_DIED` on their connection. A class's library re
 - Hand a device only memory that's yours (a DMA Area) or a client's buffer in its connection's heap: check it with `drv_in_heap`.
 - Read a client's message once, into your own memory, then check it. The client can change it while you look.
 - Never `DoMsg` a client, and never wait on hwdb after start. Calls go down the graph; notices come up (§11.6).
+- Give a `stop` to a driver with DMA: it's the only way its lease ends idle.
 
 ## Differences from Exec
 
@@ -93,4 +119,4 @@ Clients see a death as `ERR_PORT_DIED` on their connection. A class's library re
 
 ## Functions used
 
-[drv_main](../autodocs/drv.md#drvdrv_main), [drv_publish](../autodocs/drv.md#drvdrv_publish), [drv_reply](../autodocs/drv.md#drvdrv_reply), [drv_in_heap](../autodocs/drv.md#drvdrv_in_heap), [drv_lease](../autodocs/drv.md#drvdrv_lease), [AllocDmaArea](../autodocs/lease.md#leaseallocdmaarea), [BindIrq](../autodocs/lease.md#leasebindirq), [RevokeLease](../autodocs/lease.md#leaserevokelease)
+[drv_main](../autodocs/drv.md#drvdrv_main), [ReportUnresponsive](../autodocs/msg.md#execreportunresponsive), [GrantRoot](../autodocs/lease.md#leasegrantroot), [ColdReboot](../autodocs/lease.md#leasecoldreboot), [drv_publish](../autodocs/drv.md#drvdrv_publish), [drv_reply](../autodocs/drv.md#drvdrv_reply), [drv_in_heap](../autodocs/drv.md#drvdrv_in_heap), [drv_lease](../autodocs/drv.md#drvdrv_lease), [AllocDmaArea](../autodocs/lease.md#leaseallocdmaarea), [BindIrq](../autodocs/lease.md#leasebindirq), [RevokeLease](../autodocs/lease.md#leaserevokelease)

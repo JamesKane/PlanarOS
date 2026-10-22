@@ -1,6 +1,8 @@
 /*
  * kernel/sched.c -- tasks and the SMP scheduler
  */
+#include <planar/syscalls.h>
+
 #include "arch.h"
 #include "cpu.h"
 #include "kprintf.h"
@@ -756,6 +758,28 @@ void task_sleep_until(uint64_t deadline)
     ktimer_start(&self->sleep, deadline);
     task_wait(SIGF_SLEEP);
     ktimer_stop(&self->sleep);  /* woken early (killed): don't leave it armed */
+}
+
+uint64_t task_wait_until(uint64_t mask, uint64_t deadline_ns, struct cpu *kick)
+{
+    struct task *self = task_self();
+    uint64_t got;
+
+    if (deadline_ns == DEADLINE_NONE)
+        return task_wait_kick(mask, kick);
+    task_set_signal(0, SIGF_SLEEP);
+    if (!time_have_timers())
+        return task_wait_kick(mask, kick);  /* nothing would end it: no deadline */
+    if (time_ns(time_now()) >= deadline_ns) {
+        task_signal(self, SIGF_SLEEP);      /* past: what's there, at once */
+    } else {
+        self->sleep = (struct ktimer){ .fn = sleep_fire, .data = self };
+        ktimer_start(&self->sleep, time_from_ns(deadline_ns));
+    }
+    got = task_wait_kick(mask | SIGF_SLEEP, kick);
+    ktimer_stop(&self->sleep);
+    task_set_signal(0, SIGF_SLEEP);
+    return got & mask;
 }
 
 uint64_t sched_switches(void)

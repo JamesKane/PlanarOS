@@ -27,6 +27,8 @@
 
 constexpr unsigned BLK_MSGS = 32;           /* messages one connection may have out */
 constexpr uint64_t BLK_GONE_MS = 3000;      /* how long a restart may take */
+constexpr uint64_t BLK_IO_MS = 5000;        /* a request's deadline: then ERR_TIMEOUT, and
+                                             * hwdb is told the driver is unresponsive */
 
 struct blk {
     struct MsgPort mp;

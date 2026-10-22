@@ -50,6 +50,7 @@ static_assert(__builtin_offsetof(struct ring, buf) == 512, "the buffer after the
 
 struct rng {
     struct ring *q;
+    Handle area;                        /* q's DMA Area */
     uint16_t next;                      /* our avail_idx, and the used_idx we've seen */
 };
 
@@ -98,8 +99,11 @@ static int bind(struct drv *d, struct drv_dev *dev)
     if (!(rd(dev, STATUS) & FEATURES_OK))
         return -10;
 
-    if (AllocDmaArea(drv_lease(d), 4096, 0, &at) < 0)
+    int64_t area = AllocDmaArea(drv_lease(d), 4096, 0, &at);
+
+    if (area < 0)
         return -11;
+    r->area = (Handle)area;
     r->q = at;
     r->next = 0;
     wr(dev, QUEUE_SEL, 0);
@@ -158,8 +162,22 @@ static void request(struct drv *d, struct drv_dev *dev, struct DrvRequest *req)
     req->dr_Msg.mn_Error = 0;
 }
 
+/* Asked to stop: a reset, after which the device touches no memory
+ * (virtio 1.2 §4.2.2.1), then its queue's Area back. */
+static void stop(struct drv *d, struct drv_dev *dev)
+{
+    struct rng *r = &rngs[dev - d->dev];
+
+    wr(dev, STATUS, 0);
+    while (rd(dev, STATUS) != 0)
+        ;
+    if (r->area)
+        FreeArea(r->area);
+    r->area = 0;
+}
+
 static const struct drv_ops ops = {
-    .name = "virtio-mmio", .bind = bind, .start = start, .request = request,
+    .name = "virtio-mmio", .bind = bind, .start = start, .request = request, .stop = stop,
 };
 
 int main(uint64_t token)

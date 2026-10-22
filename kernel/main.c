@@ -176,6 +176,8 @@
         kprintf("V6.5 done\n");
         kprintf("V6.6 dos skipped: no tasks\n");
         kprintf("V6.6 done\n");
+        kprintf("V6.7 supervision skipped: no tasks\n");
+        kprintf("V6.7 done\n");
         arch_halt();
     }
     sched_idle();

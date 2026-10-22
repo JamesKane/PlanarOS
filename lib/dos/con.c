@@ -49,11 +49,15 @@ void WriteCon(struct Con *c, const char *text, uint32_t len)
             r->dr_Op = DRV_WRITE;
             r->dr_Len = n;
             memcpy(r->dr_Data, text, n);
-            if (DoMsg(&c->cn_Port, &r->dr_Msg) == 0 && r->dr_Msg.mn_Error == 0) {
+            int64_t e = DoMsgUntil(&c->cn_Port, &r->dr_Msg, CurrentTime() + CON_DEADLINE_MS * 1000000);
+
+            if (e == 0 && r->dr_Msg.mn_Error == 0) {
                 text += n;
                 len -= n;
                 continue;
             }
+            if (e == ERR_TIMEOUT)
+                ReportUnresponsive("con.0");
             /* The console went (display restarting): once more on a new
              * connection, else to the log from here. */
             ClosePort(&c->cn_Port);

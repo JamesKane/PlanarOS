@@ -17,8 +17,8 @@ int main(void)
     struct MsgPort mp;
     uint64_t i = 0, bad = 0;
 
-    while ((err = ConnectPort(&mp, "echo", sig, 0, 0)) == ERR_NOTFOUND)
-        ;
+    /* The server may not be up yet: wait for its port. */
+    err = ConnectPortUntil(&mp, "echo", sig, 0, 0, CurrentTime() + 10000000000ULL);
     if (err < 0 || !(m = AllocMsg(&mp, sizeof *m)))
         return -1;
     m->em_Msg.mn_Length = sizeof *m;

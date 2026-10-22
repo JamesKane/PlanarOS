@@ -22,8 +22,8 @@ int main(uint64_t table)
     struct CycleSum each = { 0 };
     uint64_t c0, bad = 0;
 
-    while ((err = ConnectPort(&mp, "echo", sig, 0, 0)) == ERR_NOTFOUND)
-        ;
+    /* The server may not be up yet: wait for its port. */
+    err = ConnectPortUntil(&mp, "echo", sig, 0, 0, CurrentTime() + 10000000000ULL);
     if (err < 0 || !(m = AllocMsg(&mp, sizeof *m)))
         return -1;
     m->em_Msg.mn_Length = sizeof *m;

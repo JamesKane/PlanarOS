@@ -21,10 +21,10 @@ struct task;
 int64_t port_create_call(uint64_t name, int64_t sigbit);
 int64_t port_delete_call(uint32_t port);
 int64_t port_open_call(uint64_t name, int64_t sigbit, uint64_t slots, uint64_t heap,
-                       uint64_t arena_out);
+                       uint64_t arena_out, uint64_t deadline);
 int64_t port_accept_call(uint32_t port, int64_t sigbit, uint64_t arena_out);
 int64_t conn_signal_call(uint32_t conn);
-uint64_t conn_signal_wait_call(uint32_t conn, uint64_t mask);
+uint64_t conn_signal_wait_call(uint32_t conn, uint64_t mask, uint64_t deadline);
 int64_t conn_close_call(uint32_t conn);
 
 /* 't' is leaving its process: close its ports and connection ends. */

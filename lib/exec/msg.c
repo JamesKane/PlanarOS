@@ -50,8 +50,14 @@ static int64_t attach(struct MsgPort *mp, Handle conn, struct ConnArena *a, int6
 int64_t ConnectPort(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
                     uint64_t heap)
 {
+    return ConnectPortUntil(mp, name, sigbit, slots, heap, 0);
+}
+
+int64_t ConnectPortUntil(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
+                         uint64_t heap, uint64_t deadline)
+{
     struct ConnArena *a;
-    int64_t h = OpenPort(name, sigbit, slots, heap, &a), err;
+    int64_t h = OpenPort(name, sigbit, slots, heap, &a, deadline), err;
 
     if (h < 0)
         return h;
@@ -137,7 +143,8 @@ static bool pending(struct MsgPort *mp)
 }
 
 /* Take the next message from the ring, or nullptr; 'size' bytes of it
- * must lie in the heap. */
+ * must lie in the heap. The reply to a message DoMsgUntil gave up on is
+ * dropped here, wherever it comes: the message is the caller's again. */
 static struct Message *take(struct MsgPort *mp, uint64_t size)
 {
     struct ConnRing *r = mp->mp_In;
@@ -145,6 +152,7 @@ static struct Message *take(struct MsgPort *mp, uint64_t size)
     uint32_t head = atomic_load_explicit(&r->cr_Head, memory_order_acquire);
     uint64_t m;
 
+again:
     if (mp->mp_Broken || head == tail)
         return nullptr;
     if (head - tail > mp->mp_Slots) {
@@ -157,6 +165,10 @@ static struct Message *take(struct MsgPort *mp, uint64_t size)
     if (!in_heap(mp, m, size)) {
         mp->mp_Broken = true;
         return nullptr;
+    }
+    if ((struct Message *)m == mp->mp_Lost) {
+        mp->mp_Lost = nullptr;
+        goto again;
     }
     return (struct Message *)m;
 }
@@ -228,7 +240,7 @@ uint64_t WaitPorts(struct MsgPort *ports, unsigned n, uint64_t mask)
     }
     if (last) {
         last->mp_Owed = false;
-        return SignalWaitConn(last->mp_Conn, mask);
+        return SignalWaitConn(last->mp_Conn, mask, DEADLINE_NONE);
     }
     return Wait(mask);
 }
@@ -278,20 +290,42 @@ static void stash(struct MsgPort *mp, struct Message *m)
 
 int64_t DoMsg(struct MsgPort *mp, struct Message *m)
 {
-    bool asleep;
-    struct Message *r;
-    int64_t err = put(mp, m, &asleep);
+    return DoMsgUntil(mp, m, DEADLINE_NONE);
+}
 
-    if (err)
+/* Replies there are, to the stash; true once 'm''s is among them, when
+ * it's taken off. */
+static bool collect(struct MsgPort *mp, struct Message *m)
+{
+    struct Message *r;
+
+    while (mp->mp_StashCount < MSGPORT_STASH && (r = take(mp, sizeof *r))) {
+        if (r == m)
+            return true;
+        stash(mp, r);
+    }
+    return false;
+}
+
+int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline)
+{
+    bool asleep;
+    int64_t err;
+
+    /* One given up on and not yet answered: the server is behind, and
+     * gets nothing more until it answers (or goes). */
+    if (mp->mp_Lost) {
+        collect(mp, nullptr);
+        if (mp->mp_Lost)
+            return PortGone(mp) ? ERR_PORT_DIED : ERR_BUSY;
+    }
+    if ((err = put(mp, m, &asleep)))
         return err;
     for (;;) {
         /* Room first: a reply taken must never be dropped. With none,
          * this one's reply is still to come: the caller GetMsgs for it. */
-        while (mp->mp_StashCount < MSGPORT_STASH && (r = take(mp, sizeof *r))) {
-            if (r == m)
-                goto replied;
-            stash(mp, r);
-        }
+        if (collect(mp, m))
+            goto replied;
         if (mp->mp_StashCount == MSGPORT_STASH && pending(mp)) {
             /* put() cleared cr_Waiting: the wake is ours to send. */
             if (asleep)
@@ -300,6 +334,13 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m)
         }
         if (PortGone(mp))
             break;
+        if (deadline != DEADLINE_NONE && CurrentTime() >= deadline) {
+            /* Still the server's: its reply is dropped when it comes. */
+            if (asleep)
+                SignalConn(mp->mp_Conn);
+            mp->mp_Lost = m;
+            return ERR_TIMEOUT;
+        }
         atomic_store_explicit(&mp->mp_In->cr_Waiting, 1, memory_order_relaxed);
         atomic_thread_fence(memory_order_seq_cst);
         if (pending(mp) || PortGone(mp)) {
@@ -307,11 +348,11 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m)
         } else if (asleep) {
             /* Wake the server and sleep in one call: the kernel hands
              * this CPU straight to it. */
-            SignalWaitConn(mp->mp_Conn, mp->mp_SigMask);
+            SignalWaitConn(mp->mp_Conn, mp->mp_SigMask, deadline);
             asleep = false;
             continue;
         } else {
-            Wait(mp->mp_SigMask);
+            WaitUntil(mp->mp_SigMask, deadline);
             continue;
         }
         if (asleep) {
@@ -320,11 +361,8 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m)
         }
     }
     /* The server went; it may have answered on its way. */
-    while (mp->mp_StashCount < MSGPORT_STASH && (r = take(mp, sizeof *r))) {
-        if (r == m)
-            goto replied;
-        stash(mp, r);
-    }
+    if (collect(mp, m))
+        goto replied;
     m->mn_Error = ERR_PORT_DIED;
     return ERR_PORT_DIED;
 replied:

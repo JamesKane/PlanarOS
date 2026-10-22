@@ -1,6 +1,6 @@
 # 4. Exec: ports, connections and messages
 
-*Checked against V5.*
+*Checked against V5; waits and deadlines, V6.*
 
 Programs talk by sending **messages**: structures in shared memory, passed by address and replied to in place, as on the Amiga. What Planar adds is protection. Two programs can exchange messages only over a **connection**, and a connection's memory is mapped into those two programs and no others.
 
@@ -104,6 +104,33 @@ Points to notice:
 - `WaitPorts` returns 0 if something arrived while it was getting ready to sleep. The loop simply looks again.
 - The server can hold at most 32 connection ends (chapter 1, *Limits*), so it could never serve more than 32 clients at once. Echo stops at 8.
 
+## Waiting for a server, and giving up on one
+
+Two things a client can't control: when a server's port exists, and whether the server answers. Both have a call that waits until a deadline (V6 step 7). A deadline is a time on `CurrentTime`'s clock; `DEADLINE_NONE` (`planar/syscalls.h`) never comes.
+
+**A port not there yet.** A server that's starting, or that hwdb is restarting after a death, hasn't made its port. `ConnectPortUntil` waits for it:
+
+```c
+/* conformance/client.c: the server may not be up yet. */
+err = ConnectPortUntil(&mp, "echo", sig, SLOTS, 8192, CurrentTime() + 10000000000ULL);
+```
+
+The kernel wakes the waiter when `CreatePort` makes the name, so there's no polling and no delay (`OpenPort`'s `deadline`). `ConnectPort` is the same with no wait: `ERR_NOTFOUND` at once.
+
+**A server that doesn't answer.** `DoMsgUntil` is `DoMsg` that gives up at a deadline with `ERR_TIMEOUT`. The message is still the server's then, which may be writing to it: it's held in `mp->mp_Lost` until the reply comes, and that reply is dropped when it does. Until then the port is `ERR_BUSY`: a server that missed one deadline gets no more work from this client. A client that times out a server tells hwdb (`ReportUnresponsive`), which restarts it; its next call then sees `ERR_PORT_DIED` and reconnects.
+
+```c
+/* lib/blk/blk.c */
+int64_t e = DoMsgUntil(&b->mp, &m->bm_Msg, CurrentTime() + BLK_IO_MS * MS);
+
+if (e == ERR_TIMEOUT)
+    ReportUnresponsive(b->port);
+```
+
+Each class says its deadline: dos 10 s, a block device 5 s, power 2 s, the console 1 s. Under QEMU a `DoMsgUntil` round trip costs about 24 µs, against `DoMsg`'s 18 µs: the kernel arms its timer for each wait.
+
+`WaitUntil(mask, deadline)` is `Wait` with a deadline, for a loop of one's own; it leaves the task's `ArmTimer` alarm alone.
+
 ## How it works
 
 You don't need this to use messages, but it explains the costs. The layout is in `planar/ipc.h`.
@@ -129,7 +156,8 @@ When the server is asleep, `DoMsg` wakes it and hands it the CPU. A round trip w
 - **`DoMsg` sets aside at most 32 other replies.** Replies to earlier `PutMsg`s that arrive while `DoMsg` waits are kept for `GetMsg`, up to `MSGPORT_STASH`. Beyond that `DoMsg` returns `ERR_FULL` with its own message sent but unanswered. Collect replies before calling `DoMsg` with many messages in flight.
 - **A port queues at most 32 connections.** Past that, `ConnectPort` fails with `ERR_FULL` until the server accepts some. A process holds at most 32 connection ends, client and server together; past that, `ERR_LIMIT`.
 - **A connection belongs to the task that opened or accepted it.** It closes when that task ends, so don't hand a `MsgPort` to another task in the same process and then end the first one.
-- **A server can come back.** A driver that dies is restarted by hwdb and creates its port again. Its clients see `PortGone`, close, and connect again by name, as `lib/blk` does.
+- **A server can come back.** A driver that dies is restarted by hwdb and creates its port again. Its clients see `PortGone`, close, and connect again by name with `ConnectPortUntil`, as `lib/blk` does.
+- **Don't reuse a message that timed out.** After `ERR_TIMEOUT` it's the server's until `mp_Lost` is `nullptr` again.
 - **A process can't connect to its own port.** That fails with `ERR_BADARG`.
 - **Anything off a ring is checked.** A connection whose peer has written nonsense into the rings, or sent a message that fails the check, is broken: it acts as if the peer had gone (`PortGone` is true). The message that failed is lost.
 
@@ -155,6 +183,7 @@ Library ([msg autodocs](../autodocs/msg.md)):
 [ClosePort](../autodocs/msg.md#execcloseport),
 [ConnectPort](../autodocs/msg.md#execconnectport),
 [DoMsg](../autodocs/msg.md#execdomsg),
+[DoMsgUntil](../autodocs/msg.md#execdomsguntil),
 [FlushPort](../autodocs/msg.md#execflushport),
 [GetMsg](../autodocs/msg.md#execgetmsg),
 [GetMsgSized](../autodocs/msg.md#execgetmsgsized),
@@ -162,6 +191,7 @@ Library ([msg autodocs](../autodocs/msg.md)):
 [PutMsg](../autodocs/msg.md#execputmsg),
 [ReplyMsg](../autodocs/msg.md#execreplymsg),
 [ReplyMsgLater](../autodocs/msg.md#execreplymsglater),
+[ReportUnresponsive](../autodocs/msg.md#execreportunresponsive),
 [WaitPort](../autodocs/msg.md#execwaitport),
 [WaitPorts](../autodocs/msg.md#execwaitports).
 
@@ -172,4 +202,5 @@ Kernel calls underneath ([exec autodocs](../autodocs/exec.md)):
 [AcceptConn](../autodocs/exec.md#execacceptconn),
 [SignalConn](../autodocs/exec.md#execsignalconn),
 [SignalWaitConn](../autodocs/exec.md#execsignalwaitconn),
-[CloseConn](../autodocs/exec.md#execcloseconn).
+[CloseConn](../autodocs/exec.md#execcloseconn),
+[WaitUntil](../autodocs/exec.md#execwaituntil).

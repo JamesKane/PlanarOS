@@ -61,6 +61,9 @@
 #define SYS_SET_LEASE_CALL  51
 #define SYS_CALL_LEASE      52
 #define SYS_RELEASE_AREA    53
+#define SYS_WAIT_UNTIL      54
+#define SYS_GRANT_ROOT      55
+#define SYS_COLD_REBOOT     56
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)
@@ -75,5 +78,10 @@
 #define ERR_LIMIT           (-11)       /* a per-process limit (handles, tasks, connections) */
 #define ERR_BUSY            (-12)       /* in use: a lease granted or stopping */
 #define ERR_TIMEOUT         (-13)       /* a deadline passed first */
+
+/* A deadline that never comes: OpenPort's, WaitUntil's, SignalWaitConn's,
+ * DoMsgUntil's (V6 step 7). A deadline is on CurrentTime's clock; one
+ * already past, 0 among them, means not to wait. */
+#define DEADLINE_NONE       0xffffffffffffffffULL
 
 #endif /* PLANAR_SYSCALLS_H */

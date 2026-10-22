@@ -56,9 +56,10 @@ static int64_t ask(uint32_t op)
     return m->dm_Msg.mn_Error;
 }
 
-static int64_t connect(void)
+/* Connected, waiting for its port until 'until' (0: not at all). */
+static int64_t connect(uint64_t until)
 {
-    int64_t e = ConnectPort(&mp, "display.0", SIG_DISPLAY, 4, 2 * sizeof *m);
+    int64_t e = ConnectPortUntil(&mp, "display.0", SIG_DISPLAY, 4, 2 * sizeof *m, until);
 
     if (e != 0)
         return e;
@@ -284,11 +285,8 @@ static int outlive(void)
     draw(&a, 0x808080, false);
     /* It comes back, with none of them. */
     until = CurrentTime() + 10000 * MS;
-    while (connect() != 0) {
+    while (connect(until) != 0)         /* its port, as soon as it's back */
         CHECK(CurrentTime() < until);
-        ArmTimer(CurrentTime() + 50 * MS, SIG_TIMER);
-        Wait(1ULL << SIG_TIMER);
-    }
     CHECK(m->dm_Buffers == 0);
     CHECK(sync_page->ds_Disp == 0);
     draw(&a, 0x202020, false);
@@ -298,6 +296,6 @@ static int outlive(void)
 
 int main(uint64_t arg)
 {
-    CHECK(connect() == 0);
+    CHECK(connect(0) == 0);
     return arg == 0 ? flips() : outlive();
 }

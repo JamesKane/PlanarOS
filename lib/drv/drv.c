@@ -122,7 +122,7 @@ struct HwdbMsg *drv_hwdb_msg(struct drv *d, uint32_t op)
 
 int64_t drv_hwdb(struct drv *d, struct HwdbMsg *m)
 {
-    int64_t e = DoMsg(&d->hwdb, &m->hm_Msg);
+    int64_t e = DoMsgUntil(&d->hwdb, &m->hm_Msg, CurrentTime() + DRV_HWDB_MS * MS);
 
     return e ? e : m->hm_Msg.mn_Error;
 }
@@ -260,6 +260,16 @@ static void serve(struct drv *d, unsigned pos)
     }
 }
 
+/* hwdb asked (§11 D1): each device turned off and its DMA given back,
+ * by the driver's stop, then out. Clients see the ports go. */
+[[noreturn]] static void stop(struct drv *d)
+{
+    for (unsigned i = 0; i < d->ndev; i++)
+        if (d->dev[i].accepted && d->ops->stop)
+            d->ops->stop(d, &d->dev[i]);
+    ExitProcess(0);
+}
+
 [[noreturn]] void drv_main(uint64_t token, const struct drv_ops *ops)
 {
     struct drv *d = &the;
@@ -276,7 +286,8 @@ static void serve(struct drv *d, unsigned pos)
     m->hm_Msg.mn_Length = sizeof *m;
     m->hm_Op = HWDB_BIND;
     m->hm_Token = (uint32_t)token;
-    if (DoMsg(&d->hwdb, &m->hm_Msg) != 0 || m->hm_Msg.mn_Error != 0 || !take_info(d, m))
+    if (DoMsgUntil(&d->hwdb, &m->hm_Msg, CurrentTime() + DRV_HWDB_MS * MS) != 0 ||
+        m->hm_Msg.mn_Error != 0 || !take_info(d, m))
         ExitProcess(-2);
 
     /* The registers: each range is mapped where it is. */
@@ -325,10 +336,18 @@ static void serve(struct drv *d, unsigned pos)
             m->hm_Accepted |= 1u << i;
         memcpy(m->hm_Ports[i], d->dev[i].port_name[0], sizeof m->hm_Ports[i]);
     }
-    if (DoMsg(&d->hwdb, &m->hm_Msg) != 0)
+    if (DoMsgUntil(&d->hwdb, &m->hm_Msg, CurrentTime() + DRV_HWDB_MS * MS) != 0)
         ExitProcess(-6);
     if (!taken)
         ExitProcess(0);
+
+    /* Left with hwdb, which answers it when this is to stop. */
+    memset(m, 0, sizeof *m);
+    m->hm_Msg.mn_Length = sizeof *m;
+    m->hm_Op = HWDB_STOP;
+    m->hm_Token = (uint32_t)token;
+    if (PutMsg(&d->hwdb, &m->hm_Msg) != 0)
+        ExitProcess(-7);
 
     for (;;) {
         uint64_t want = lines | 1ULL << SIG_ACCEPT | 1ULL << SIG_CLIENT | 1ULL << SIG_HWDB, got;
@@ -340,6 +359,8 @@ static void serve(struct drv *d, unsigned pos)
             for (unsigned i = 0; i < nlive; i++)
                 FlushPort(&live[i]);
             got = want;
+        } else if (!ArmPort(&d->hwdb)) {
+            got = want;             /* hwdb's answer came, or hwdb went: look */
         } else {
             if (until)
                 ArmTimer(until, SIG_TIMER);
@@ -349,6 +370,9 @@ static void serve(struct drv *d, unsigned pos)
         }
         if (PortGone(&d->hwdb))
             ExitProcess(0);
+        for (struct Message *r; (r = GetMsgSized(&d->hwdb, sizeof *m));)
+            if (r == &m->hm_Msg)
+                stop(d);
         if (got & 1ULL << SIG_ACCEPT)
             for (unsigned i = 0; i < d->ndev * DRV_PORTS; i++)
                 while (d->dev[i / DRV_PORTS].port[i % DRV_PORTS]) {

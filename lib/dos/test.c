@@ -127,7 +127,9 @@ static unsigned fuzz(unsigned *cases)
 
 static struct {
     bool up;                        /* ConnectPort finds "con.0" */
+    bool slow;                      /* DoMsgUntil's deadline passes instead */
     int fail_after;                 /* DoMsg's that work before it goes; -1: never */
+    unsigned reports;               /* ReportUnresponsive's */
     unsigned msgs, connects;
     char got[1024];                 /* what the messages carried */
     unsigned n;
@@ -135,6 +137,19 @@ static struct {
     unsigned logs;
     struct DrvRequest req;
 } fake;
+
+uint64_t CurrentTime(void)
+{
+    return 1;
+}
+
+int64_t ReportUnresponsive(const char *portName)
+{
+    if (strcmp(portName, "con.0") != 0)
+        abort();
+    fake.reports++;
+    return 0;
+}
 
 int64_t ConnectPort(struct MsgPort *mp, const char *name, int64_t sigbit, uint32_t slots,
                     uint64_t heap)
@@ -157,11 +172,15 @@ void *AllocMsg(struct MsgPort *mp, uint64_t size)
     return size <= sizeof fake.req ? &fake.req : nullptr;
 }
 
-int64_t DoMsg(struct MsgPort *mp, struct Message *m)
+int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline)
 {
     struct DrvRequest *r = (struct DrvRequest *)m;
 
     (void)mp;
+    if (deadline <= 1)
+        abort();                    /* a deadline in the future, always */
+    if (fake.slow)
+        return ERR_TIMEOUT;
     if (fake.fail_after == 0)
         return ERR_PORT_DIED;
     if (fake.fail_after > 0)
@@ -237,6 +256,15 @@ static unsigned console(unsigned *cases)
     PutStr(&c, "three");
     CloseCon(&c);
     CC(fake.connects == 2 && fake.logs == 2 && strcmp(fake.log[1], "three") == 0);
+
+    /* A console that misses its deadline: reported, and the log after. */
+    fake_reset(true, -1);
+    fake.slow = true;
+    OpenCon(&c, 16);
+    PutStr(&c, "late\n");
+    CC(fake.reports == 2 && fake.connects == 2 && !c.cn_Open);     /* once more, then the log */
+    CC(fake.logs == 1 && strcmp(fake.log[0], "late") == 0);
+    CloseCon(&c);
 
     /* None: the log, a line at a time, and a long one cut. */
     fake_reset(false, -1);

@@ -1,10 +1,10 @@
 # lease: device leases
 
-*Checked against V5.*
+*Checked against V5; `GrantRoot` and `ColdReboot`, V6.*
 
 The calls a driver and its supervisor use, in alphabetical order, with the serial console's input and MSIs, which the device root also governs. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
-A **lease** is one device's registers, whole pages of MMIO, and up to 32 (`LEASE_IRQS`) interrupt lines. Only the holder of the **device root** may create one. The device root is a handle the kernel gives the first server, hwdb, as `main`'s second argument (`process_create_root` in `kernel/process.c`). The kernel's self-test gives it to `conformance/leaser.c`, which plays hwdb, and then to hwdb itself (`servers/hwdb/`). A lease is never made over RAM or reserved memory (but a framebuffer, or memory the firmware shares with a driver: `CreateLease`), over the registers the kernel drives itself, over lines the kernel uses, or over another lease.
+A **lease** is one device's registers, whole pages of MMIO, and up to 32 (`LEASE_IRQS`) interrupt lines. Only the holder of the **device root** may create one. The device root is a handle the kernel gives the root process as `main`'s second argument (`process_create_root` in `kernel/process.c`): `init` since V6 step 7, which gives it to hwdb with `GrantRoot` and keeps its own, for `ColdReboot`. The kernel's self-test gives it to `conformance/leaser.c`, which plays hwdb, and then to hwdb itself (`servers/hwdb/`). A lease is never made over RAM or reserved memory (but a framebuffer, or memory the firmware shares with a driver: `CreateLease`), over the registers the kernel drives itself, over lines the kernel uses, or over another lease.
 
 The process that creates a lease owns it. It grants the lease to one process at a time, one it created: the driver. The driver maps the registers at their physical address, binds lines to signals, and allocates the device's DMA memory against the lease. The driver doesn't own the lease's handle. It names the lease by the owner's handle value, which the owner passes it, in `CreateProcess`'s `arg` in the tests.
 
@@ -273,6 +273,40 @@ None known.
 
 ---
 
+## lease/ColdReboot
+
+**NAME**
+ColdReboot -- reset the board
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t ColdReboot(Handle root);
+```
+
+**FUNCTION**
+Resets the board the way the kernel does: by its own means where it has them (a watchdog, a PMIC: `plat_reboot`), else the firmware's (PSCI's `SYSTEM_RESET`, SBI's system reset: `arch_reboot`). init calls it when hwdb dies (V6 step 7, VQ29), after its meditation.
+
+A kernel call. Exec's `ColdReboot` took no argument; this one needs the device root, so only init can.
+
+**INPUTS**
+- `root` -- the device root handle, owned by the calling process.
+
+**RESULT**
+Doesn't return if the board resets. Otherwise:
+- `ERR_BADHANDLE` -- `root` isn't a device root the calling process owns.
+
+**NOTES**
+The kernel logs "planar: ColdReboot" first.
+
+**BUGS**
+**Built, untested** on purpose: a test that resets the board ends the test. init's death test (`V6.7 supervision`) stops short of it.
+
+**SEE ALSO**
+[GrantRoot](#leasegrantroot)
+
+---
+
 ## lease/CreateLease
 
 **NAME**
@@ -446,6 +480,43 @@ None known.
 
 **SEE ALSO**
 [CreateLease](#leasecreatelease), [RevokeLease](#leaserevokelease), [CreateProcess](exec.md#execcreateprocess), [StartProcess](exec.md#execstartprocess)
+
+---
+
+## lease/GrantRoot
+
+**NAME**
+GrantRoot -- give a process the device root
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t GrantRoot(Handle root, Handle process);
+```
+
+**FUNCTION**
+Gives `process`, which the caller made with `PROCF_HELD` and hasn't started, a device root handle of its own: its first task starts with it as `main`'s second argument, as the kernel's root process does. The caller keeps its own. init gives hwdb the root this way (V6 step 7).
+
+A kernel call.
+
+**INPUTS**
+- `root` -- the device root handle, owned by the calling process.
+- `process` -- a held process handle the calling process owns.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `root` isn't a device root the calling process owns, or `process` isn't a process handle it owns.
+- `ERR_EXISTS` -- the process has been started.
+- `ERR_LIMIT` -- the process's handle table is full.
+
+**NOTES**
+Given twice before the start, the second handle replaces the first as the argument; the first stays the process's (`lease_root_grant_call` in `kernel/lease.c`).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[ColdReboot](#leasecoldreboot), [CreateProcess](exec.md#execcreateprocess)
 
 ---
 

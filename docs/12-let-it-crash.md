@@ -1,6 +1,6 @@
 # 12. Fault tolerance: let it crash
 
-**Status: partly built; the rest is V6's.** The kernel and IPC pieces in §12.2 are built (V1, V2), and futex waits end when a mapping goes, more widely than proposed (V5). hwdb restarts leaf drivers one for one with backoff, and restarts `dos`, `input`, `display` and `power`; votes are made again after `power` restarts (VQ30's leaning). Not built, and placed in V6 ([roadmap](08-roadmap.md#replanned-after-v5)): `init` as root over hwdb (VQ29), ports that survive a restart (VQ28; clients poll), and deadlines on calls to core servers. Not placed: `rest_for_one` restarts of a bus's subtree, acpid's restart, and a filesystem handler separate from `dos` with crash recovery (VQ14a).
+**Status: partly built; the rest is V6's.** The kernel and IPC pieces in §12.2 are built (V1, V2), and futex waits end when a mapping goes, more widely than proposed (V5). hwdb restarts leaf drivers one for one with backoff, and restarts `dos`, `input`, `display` and `power`; votes are made again after `power` restarts (VQ30's leaning). Built in V6 step 7: `init` as root over hwdb (VQ29), `OpenPort`'s wait for a port's name (VQ28's Option B), deadlines on calls to core servers, with a client's report restarting a server that misses one, and the graceful `STOP`. Not built: supervisor-held ports (VQ28's Option A). Not placed: `rest_for_one` restarts of a bus's subtree, acpid's restart, and a filesystem handler separate from `dos` with crash recovery (VQ14a).
 
 Erlang's "let it crash" rule says that a process should not write defensive code to recover from its own bugs or corrupt state. When an invariant breaks, the process dies at once, the runtime reclaims everything it owned and tells its peers, and a supervisor starts a fresh copy in a known state.
 
@@ -105,6 +105,8 @@ For a supervised server or driver, the port name should not vanish while the pro
 
 Option A matches how `inetd`, `launchd` and systemd socket activation make restarts invisible to connecting clients, while still delivering `ERR_PORT_DIED` on connections that were open when the old instance died.
 
+**Built (V6 step 7): Option B** (v6-plan decision 6). `OpenPort` takes a deadline: with a port of that name missing, the caller is listed under the port lock and sleeps until `CreatePort` makes the name, or the deadline passes (`ERR_TIMEOUT`). lib/exec's `ConnectPortUntil` and dos.library's `OpenDosUntil` wrap it, and lib/blk, the conformance clients and the kill test's clients wait with it instead of spinning. The window remains: a client still sees the connection die, and a new connection made just before a server dies dies with it. Option A waits for a client that can't tolerate that.
+
 ## 12.7 The supervision tree
 
 Erlang systems work because every process sits in a tree with a stated restart policy. Planar needs the same structure in user space (**VQ29**).
@@ -137,6 +139,7 @@ Erlang systems work because every process sits in a tree with a stated restart p
   3. `hwdb` spawns a fresh driver process for the node, with exponential backoff and a retry cap.
   4. Class libraries (`blk`, `serial`) reconnect and retry idempotent requests (§11.9).
 - **Built (V4 step 3):** steps 1 to 3 as written (`servers/hwdb/server.c`), with no class library yet: the kill test's clients reconnect by hand. The port name is gone until the new driver publishes it (Option B's gap, §12.6), so they retry on `ERR_NOTFOUND`.
+- **Built (V6 step 7):** step 4's reconnect waits in `OpenPort` for the name. Every call a class library makes has a deadline (`DoMsgUntil`: a block device 5 s, power 2 s, the console 1 s, dos 10 s); a client whose call times out tells hwdb (`ReportUnresponsive`), which restarts the server as a death it asked for, once a second at most.
 
 ### Bus drivers and providers (`rest_for_one` along the graph)
 
@@ -158,6 +161,7 @@ Erlang systems work because every process sits in a tree with a stated restart p
 - `hwdb` holds the device graph. Its inputs—the FDT or static ACPI tables, the board quirk tables, and the `.note.planar.match` sections—are read-only in the boot image (§9.4, §11.6).
 - If `hwdb` is kept stateless with respect to live kernel leases (because the kernel's handle table owns the active leases and processes, §11.2), a restarted `hwdb` could rebuild the static graph from the read-only boot Area and query the kernel for live leases.
 - For V4, however, `hwdb` and `init` can be treated like Erlang's kernel application: if `hwdb` crashes after exhausting its own assertions, the system logs a meditation and reboots cleanly via the watchdog (`plat/ky-x1/wdt.c`).
+- **Built (V6 step 7, decision 7):** `servers/init`. The kernel starts init as the root process; init starts hwdb held, gives it the device root (`GrantRoot`) and waits. hwdb ending as asked ends init with its code. Any other end is logged as a meditation (the fault, its address and PC, or the exit code) and the board is reset with `ColdReboot`: the board's watchdog or PMIC (`plat_reboot`), else PSCI or SBI. In test mode init reports rather than resets; the kernel's `V6.7 supervision` has hwdb fault at once and checks init saw it. The meditation lacks hwdb's last log lines, which wait for `KLog`'s ring (step 8).
 
 ## 12.8 Where "let it crash" stops
 

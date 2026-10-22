@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <planar/syscalls.h>
+
 typedef uint32_t Handle;
 
 /* Exec's break signals, among the system's 16. */
@@ -22,6 +24,9 @@ int64_t KLog(const char *text);
 [[noreturn]] void ExitProcess(int64_t code);
 uint64_t SetSignal(uint64_t bits, uint64_t mask);
 uint64_t Wait(uint64_t mask);
+/* Wait, giving up at 'deadline' (CurrentTime's clock; DEADLINE_NONE, in
+ * planar/syscalls.h, never): the signals that came, or 0 (V6 step 7). */
+uint64_t WaitUntil(uint64_t mask, uint64_t deadline);
 int64_t Signal(Handle task, uint64_t mask);
 Handle FindTask(const char *name);          /* nullptr: the calling task */
 int64_t CreateTask(void (*entry)(uint64_t arg), uint64_t arg);     /* handle, or error */
@@ -276,9 +281,9 @@ struct Interface {
 };
 
 /*
- * exec.library's "main" interface, version 1: the kernel calls and
+ * exec.library's "main" interface, version 2: the kernel calls and
  * exec's library functions above, by their names. Its order is the ABI:
- * a new version only adds at the end. CopyMem, CopyMemQuick and SetMem
+ * a new version only adds at the end (2: WaitUntil). CopyMem, CopyMemQuick and SetMem
  * are the vector unit's where the CPU has one, chosen at boot.
  */
 struct ExecIFace {
@@ -337,6 +342,9 @@ struct ExecIFace {
 
     uint64_t (*RawDoFmt)(const char *formatString, va_list dataStream, PutChProc putChProc,
                          void *putChData);
+
+    /* Version 2 (V6 step 7). */
+    uint64_t (*WaitUntil)(uint64_t mask, uint64_t deadline);
 };
 
 /* exec.library's main interface, from the kernel at the start (crt0):

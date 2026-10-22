@@ -90,8 +90,8 @@ static int peer(void)
 
     role = "futex peer";
     CHECK(sig > 0);
-    while ((r = OpenPort("futex", sig, 0, 0, &a)) == ERR_NOTFOUND)
-        sleep_ms(1);
+    /* Its server may be starting: wait for the port. */
+    r = OpenPort("futex", sig, 0, 0, &a, CurrentTime() + 5000000000ULL);
     CHECK(r > 0);
     seq = seq_of(a);
     for (uint64_t i = 0; i < ROUNDS; i++) {

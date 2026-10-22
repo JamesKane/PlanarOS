@@ -38,6 +38,7 @@ The calls:
 
 - `CurrentTime()` is nanoseconds since boot.
 - `ArmTimer(deadline, sigbit)` is the calling task's **one alarm**: it sets `sigbit` once `CurrentTime()` reaches `deadline`. The deadline is absolute. Arming again replaces the alarm, and a deadline of 0 disarms it.
+- `WaitUntil(mask, deadline)` is `Wait` that gives up at `deadline` and returns 0 (V6 step 7). Its alarm is the kernel's own, so it doesn't disturb `ArmTimer`'s; a deadline already past is a poll.
 
 So a timeout is a signal like any other: wait for the alarm's bit along with the bits you're waiting for, and see which came.
 

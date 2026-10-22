@@ -1,12 +1,12 @@
 # dos: dos.library
 
-*Checked against V6.*
+*Checked against V6; the deadlines, step 7.*
 
 The file calls, the loader, command lines and paths, and the console, in alphabetical order. The names are the RKM's (V6 step 6, [docs §17.4.4](../../docs/17-c-runtime-and-libraries.md)). The header is `planar/dos.h`; the code is `lib/dos/`, the archive `libdos.a`, linked into the commands (`cmd/`), hwdb, the GPU drivers and `dos*` conformance programs (`mk/user.mk`). None is a kernel call. The file calls each send one message to the `dos` server and wait (a trap when the server's asleep). `ReadArgs`, `AddPart`, `FilePart` and `PathPart` work on strings only and never ask the server. The volume is [DOS](../dos/README.md).
 
 A path is `VOLUME:dir/file`, or under an assign: `SYS:`, the volume holding `EFI/planar`, and `C:`, `SYS:EFI/planar/C`. Case doesn't matter.
 
-Errors are the kernel's (`planar/syscalls.h`), as the server gives them: `ERR_NOTFOUND` (no such volume or file), `ERR_RIGHTS` (a read-only volume, or a file not opened for writing), `ERR_EXISTS` (it's there already, or a directory isn't empty), `ERR_BUSY` (removing an open file), `ERR_FULL` (no room), `ERR_BADARG`, `ERR_BADHANDLE` (a file number not the caller's), `ERR_LIMIT` (64 files open in the server), and `ERR_PORT_DIED` if the server went.
+Errors are the kernel's (`planar/syscalls.h`), as the server gives them: `ERR_NOTFOUND` (no such volume or file), `ERR_RIGHTS` (a read-only volume, or a file not opened for writing), `ERR_EXISTS` (it's there already, or a directory isn't empty), `ERR_BUSY` (removing an open file), `ERR_FULL` (no room), `ERR_BADARG`, `ERR_BADHANDLE` (a file number not the caller's), `ERR_LIMIT` (64 files open in the server), and `ERR_PORT_DIED` if the server went. Every call to the server has a deadline, `DOS_DEADLINE_MS` (10 s, V6 step 7): past it the call gives `ERR_TIMEOUT` and hwdb is told dos is unresponsive (`ReportUnresponsive`), which restarts it; until dos answers the call it missed, the next ones give `ERR_BUSY`.
 
 ---
 
@@ -185,7 +185,7 @@ void CloseCon(struct Con *con);
 **FUNCTION**
 A program's output, as the Amiga's `Output()`. `OpenCon` connects to the display's console, "con.0". `WriteCon` sends text there, 64 bytes a message (`DRV_WRITE`); the display draws it and logs each line, so it reaches the serial console too. `PutStr` writes a string. `CloseCon` closes it. `Printf` formats onto it.
 
-Without a console (no framebuffer, or the display gone), text goes to the kernel's log a line at a time, 159 bytes at most, and the rest of a line when `CloseCon` is called. If the console goes while it's being written (the display restarting), it's connected again once; after that, the log.
+Without a console (no framebuffer, or the display gone), text goes to the kernel's log a line at a time, 159 bytes at most, and the rest of a line when `CloseCon` is called. If the console goes while it's being written (the display restarting), it's connected again once; after that, the log. A message the display hasn't answered in `CON_DEADLINE_MS` (1 s, V6 step 7) is reported to hwdb (`ReportUnresponsive("con.0")`) and treated as the console going.
 
 **EXAMPLE**
 From `cmd/echo.c`:
@@ -212,20 +212,21 @@ A display that restarts twice loses the program to the log for good.
 ## dos/OpenDos
 
 **NAME**
-OpenDos, CloseDos -- connect to the dos server
+OpenDos, OpenDosUntil, CloseDos -- connect to the dos server
 
 **SYNOPSIS**
 ```c
 #include <planar/dos.h>
 int64_t OpenDos(struct Dos *dos, int64_t sigBit);
+int64_t OpenDosUntil(struct Dos *dos, int64_t sigBit, uint64_t deadline);
 void CloseDos(struct Dos *dos);
 ```
 
 **FUNCTION**
-Connects to "dos", with room for one message and a 64 KiB buffer (`DOS_MAX_IO`), and signal bit `sigBit`. Every file call names the connection.
+Connects to "dos", with room for one message and a 64 KiB buffer (`DOS_MAX_IO`), and signal bit `sigBit`. Every file call names the connection. `OpenDosUntil` waits for dos to make its port, which it does once it has mounted the volumes, until `deadline` (`ConnectPortUntil`, V6 step 7): the Shell and dostest wait this way at boot.
 
 **RESULT**
-0, or `ERR_NOTFOUND` if `dos` isn't running (yet: callers at boot try again), `ERR_NOMEM`, or what `ConnectPort` gives.
+0, or `ERR_NOTFOUND` if `dos` isn't running (`OpenDos`), `ERR_TIMEOUT` if it wasn't by `deadline` (`OpenDosUntil`), `ERR_NOMEM`, or what `ConnectPort` gives.
 
 **NOTES**
 The Amiga's `OpenLibrary("dos.library")` opened the library; this opens a connection to the server, and a program may have several.

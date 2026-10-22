@@ -15,17 +15,14 @@ constexpr uint32_t GPT_ENTRY_MIN = 128;
 
 /* --- Connecting. --- */
 
-static void sleep_ms(uint64_t ms)
+/* DoMsg with the class's deadline; a driver that misses it is reported. */
+static int64_t ask(struct blk *b, struct BlkMsg *m)
 {
-    uint64_t until = CurrentTime() + ms * MS;
-    int64_t bit = AllocSignal(-1);
+    int64_t e = DoMsgUntil(&b->mp, &m->bm_Msg, CurrentTime() + BLK_IO_MS * MS);
 
-    if (bit < 0)
-        return;
-    ArmTimer(until, bit);
-    Wait(1ULL << bit);
-    ArmTimer(0, 0);
-    FreeSignal(bit);
+    if (e == ERR_TIMEOUT)
+        ReportUnresponsive(b->port);
+    return e;
 }
 
 static int64_t info(struct blk *b)
@@ -37,7 +34,7 @@ static int64_t info(struct blk *b)
     m->bm_Msg.mn_Length = sizeof *m;
     m->bm_Version = BLK_VERSION;
     m->bm_Op = BLK_INFO;
-    if ((e = DoMsg(&b->mp, &m->bm_Msg)) != 0 || (e = m->bm_Msg.mn_Error) != 0)
+    if ((e = ask(b, m)) != 0 || (e = m->bm_Msg.mn_Error) != 0)
         return e;
     /* The driver's answer: checked before it's believed (§11.9). */
     if (m->bm_BlockSize < 512 || m->bm_BlockSize > 65536 ||
@@ -53,15 +50,18 @@ static int64_t info(struct blk *b)
 }
 
 /* A connection, its messages and its bounce buffer, and what the device
- * is. A driver restarting may not have published its port yet, or may
- * die again as this asks: both are waited out, for up to BLK_GONE_MS. */
+ * is. A driver restarting may not have published its port yet (OpenPort
+ * waits for it), or may die again as this asks: both are waited out,
+ * for up to BLK_GONE_MS. ERR_NOTFOUND if no port came by then. */
 static int64_t connect_for(struct blk *b, uint64_t wait_ms)
 {
-    uint64_t since = CurrentTime();
+    uint64_t until = wait_ms ? CurrentTime() + wait_ms * MS : 0;
     int64_t e;
 
     for (;;) {
-        e = ConnectPort(&b->mp, b->port, b->sigbit, 2 * BLK_MSGS, b->heap);
+        e = ConnectPortUntil(&b->mp, b->port, b->sigbit, 2 * BLK_MSGS, b->heap, until);
+        if (e == ERR_TIMEOUT)
+            e = ERR_NOTFOUND;
         if (e == 0) {
             b->open = true;
             b->gen++;
@@ -76,9 +76,8 @@ static int64_t connect_for(struct blk *b, uint64_t wait_ms)
             ClosePort(&b->mp);
             b->open = false;
         }
-        if ((e != ERR_NOTFOUND && e != ERR_PORT_DIED) || CurrentTime() - since >= wait_ms * MS)
-            return e;
-        sleep_ms(1);
+        if (e != ERR_PORT_DIED || CurrentTime() >= until)
+            return e;               /* (died as it was asked: once more) */
     }
     b->bounce = blk_alloc(b, (uint64_t)b->max_blocks * b->block_size);
     b->scratch = blk_alloc(b, b->block_size);
@@ -199,7 +198,9 @@ static int64_t once(struct blk *b, uint32_t op, uint64_t block, uint32_t count, 
     if (!m)
         return ERR_FULL;
     fill(b, m, op, block, count, buf);
-    e = DoMsg(&b->mp, &m->bm_Msg);
+    e = ask(b, m);
+    if (e == ERR_TIMEOUT)
+        return e;                   /* the driver's still: not ours to reuse */
     if (e == 0 && (e = m->bm_Msg.mn_Error) == 0)
         e = m->bm_Req[0].br_Error;
     blk_release(b, m);
