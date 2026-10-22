@@ -1,20 +1,25 @@
 /*
  * lib/intuition/intuition.c -- intuition.library: the client's side
- * (v7-plan step 3)
+ * (v7-plan steps 3 and 4)
  *
  * Over the messages of planar/intuition.h, on a connection the caller's
- * Intuition holds. OPEN, CLOSE and INFO wait for their answers, a second
+ * Intuition holds. OPEN, CLOSE, INFO and EVENTS wait for their answers, a second
  * at most. A present doesn't: it goes on one of INTUI_INFLIGHT messages
  * of its own, and its answer is taken later, when a message is wanted
  * again. A present intuition refused is said by the next PresentWindow
  * or WaitSafe. PresentWindow checks what intuition would refuse first,
  * so a refusal there is a client's bug or a window intuition closed.
  *
- * WaitSafe makes no kernel call when the back buffer is free already.
- * Nothing here keeps state of its own: it's all in the caller's
- * Intuition and Windows.
+ * WaitSafe makes no kernel call when the back buffer is free already,
+ * nor GetIntuiEvent, unless it reads the ring down from full or from
+ * INTUI_EVENTS_MOVES: intuition may have held events back for room
+ * there, and is told with SignalConn there is some.
+ * The connection's IntuiAck is a page of its own, shared with intuition
+ * read-only. Nothing here keeps state of its own: it's all in the
+ * caller's Intuition and Windows, and that page.
  */
 #include <planar/intuition.h>
+#include <planar/ipc.h>
 #include <planar/syscalls.h>
 
 constexpr int64_t SIG_INTUITION = 22;
@@ -38,6 +43,27 @@ static int64_t call(struct Intuition *in, uint32_t op)
     return e ? e : in->in_Call->im_Msg.mn_Error;
 }
 
+/* The page saying how far the caller has read, shared with intuition,
+ * and the page with the ring. */
+static int64_t events_up(struct Intuition *in)
+{
+    void *at;
+    int64_t h, e;
+
+    if ((h = AllocArea(4096, AREAF_CLEAR, &at)) < 0)
+        return h;
+    in->in_AckArea = (Handle)h;
+    in->in_Ack = at;
+    if ((e = ShareArea(in->in_AckArea, in->in_Server, AREAR_READ)) != 0)
+        return e;
+    clear(in->in_Call, sizeof *in->in_Call);
+    in->in_Call->im_Ack = (uint64_t)in->in_Ack;
+    if ((e = call(in, INTUI_EVENTS)) != 0)
+        return e;
+    in->in_Page = (const struct IntuiPage *)in->in_Call->im_Page;
+    return 0;
+}
+
 int64_t OpenIntuition(struct Intuition *in, uint64_t deadline)
 {
     int64_t e;
@@ -55,20 +81,27 @@ int64_t OpenIntuition(struct Intuition *in, uint64_t deadline)
         return ERR_NOMEM;
     }
     clear(in->in_Call, sizeof *in->in_Call);
-    if ((e = call(in, INTUI_INFO)) != 0) {
-        ClosePort(&in->in_Port);
-        return e;
+    if ((e = call(in, INTUI_INFO)) == 0) {
+        in->in_Server = (Handle)in->in_Call->im_Server;
+        in->in_Width = in->in_Call->im_Width;
+        in->in_Height = in->in_Call->im_Height;
+        e = events_up(in);
     }
-    in->in_Server = (Handle)in->in_Call->im_Server;
-    in->in_Width = in->in_Call->im_Width;
-    in->in_Height = in->in_Call->im_Height;
-    return 0;
+    if (e != 0)
+        CloseIntuition(in);
+    return e;
 }
 
-/* The windows go with the connection: intuition closes them. */
+/* The windows go with the connection: intuition closes them, and lets
+ * go of the IntuiAck's page, which lasts until it has. */
 void CloseIntuition(struct Intuition *in)
 {
     ClosePort(&in->in_Port);
+    if (in->in_AckArea)
+        FreeArea(in->in_AckArea);
+    in->in_AckArea = 0;
+    in->in_Ack = nullptr;
+    in->in_Page = nullptr;
 }
 
 static void describe(struct IntuiBuffer *ib, const struct BitMap *bm)
@@ -106,6 +139,8 @@ int64_t OpenWindowTagList(struct Intuition *in, struct Window *w, const struct T
     m->im_Top = (int32_t)GetTagData(WA_Top, 0, tags);
     m->im_Width = (uint32_t)GetTagData(WA_Width, bm->bm_Width, tags);
     m->im_Height = (uint32_t)GetTagData(WA_Height, bm->bm_Height, tags);
+    m->im_Flags = (uint32_t)GetTagData(WA_Flags, 0, tags);
+    m->im_IDCMP = (uint32_t)GetTagData(WA_IDCMP, 0, tags);
     m->im_Buffers = back ? 2 : 1;
     describe(&m->im_Buffer[0], bm);
     if (back)
@@ -122,8 +157,10 @@ int64_t OpenWindowTagList(struct Intuition *in, struct Window *w, const struct T
     *w = (struct Window){
         .w_Intuition = in, .w_Id = m->im_Window, .w_Buffers = m->im_Buffers,
         .w_LeftEdge = m->im_Left, .w_TopEdge = m->im_Top, .w_Width = m->im_Width,
-        .w_Height = m->im_Height, .w_BitMap = { bm, back },
+        .w_Height = m->im_Height, .w_BitMap = { bm, back }, .w_Flags = m->im_Flags,
         .w_Sync = (const struct IntuiSync *)m->im_Sync,
+        .w_BorderLeft = m->im_Flags & WFLG_BORDERLESS ? 0 : (int32_t)INTUI_BORDER,
+        .w_BorderTop = m->im_Flags & WFLG_BORDERLESS ? 0 : (int32_t)INTUI_TITLEBAR,
     };
     rastport(w);
     return 0;
@@ -235,4 +272,38 @@ int64_t WaitSafe(struct Window *w, uint64_t deadline)
     }
     reap(w->w_Intuition);
     return refused(w->w_Intuition);
+}
+
+bool GetIntuiEvent(struct Intuition *in, struct IntuiEvent *ev)
+{
+    const struct IntuiPage *p = in->in_Page;
+    uint64_t tail, head;
+
+    if (!p)
+        return false;
+    tail = in->in_Ack->ia_Tail;
+    head = __atomic_load_n(&p->ip_Head, __ATOMIC_ACQUIRE);
+    if (tail == head)
+        return false;
+    *ev = p->ip_Event[tail % INTUI_EVENTS_RING];
+    __atomic_store_n(&in->in_Ack->ia_Tail, tail + 1, __ATOMIC_RELEASE);
+    if (head - tail == INTUI_EVENTS_RING || head - tail == INTUI_EVENTS_MOVES)
+        SignalConn(in->in_Port.mp_Conn);    /* room again for what intuition held back */
+    return true;
+}
+
+int64_t WaitIntuiEvent(struct Intuition *in, uint64_t deadline)
+{
+    const struct IntuiPage *p = in->in_Page;
+    uint64_t v;
+
+    if (!p)
+        return ERR_BADARG;
+    while ((v = __atomic_load_n(&p->ip_Head, __ATOMIC_ACQUIRE)) == in->in_Ack->ia_Tail) {
+        if (PortGone(&in->in_Port))
+            return ERR_PORT_DIED;
+        if (WaitAddr(&p->ip_Head, v, deadline) == ERR_TIMEOUT)
+            return ERR_TIMEOUT;
+    }
+    return 0;
 }

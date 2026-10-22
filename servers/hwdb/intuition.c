@@ -1,11 +1,14 @@
 /*
- * servers/hwdb/intuition.c -- the window test (v7-plan step 3)
+ * servers/hwdb/intuition.c -- the window test (v7-plan steps 3 and 4)
  *
  * killtest.c's T_WINDOW, on a machine with a screen: intuition started
  * as it's wanted (decision 4: on demand, not at every boot), and
  * conformance/window.c as its client, which checks the windows on the
- * screen and says what they cost. Once it has ended 0, intuition is
- * killed, and display must free its buffers as for any client that dies.
+ * screen and says what they cost, then works them with the mouse and
+ * keys it asks for (on QEMU, the boot check sends them through QMP).
+ * It ends 0, or NO_INPUT if nobody moved the mouse: a board with nobody
+ * at it. Then intuition is killed, and display must free its buffers as
+ * for any client that dies.
  * hwdb watches them with DISPLAY_INFO on its own connection (display.c).
  * Step 5 makes intuition a server hwdb keeps, killed under its clients.
  */
@@ -15,11 +18,14 @@
 
 enum : uint8_t { W_START, W_RUN, W_STOP, W_FREED, W_DONE };
 
+constexpr int64_t NO_INPUT = 1000;     /* window.c's: its windows ok, and nobody at the mouse */
+
 static struct {
     uint8_t step;
     uint64_t at;
     Handle intuition, client;
     uint32_t before;                /* display's buffers before intuition */
+    bool input;                     /* window.c's input half ran */
 } wt;
 
 static void test_fail(const char *what)
@@ -68,6 +74,7 @@ bool window_test(void)
     case W_START:
         if (!display_unit()) {
             say("V7.3 windows: not exercised: no screen here");
+            say("V7.4 input: not exercised: no screen here");
             return true;
         }
         /* display's own count first: what intuition takes must come back. */
@@ -98,10 +105,11 @@ bool window_test(void)
         }
         CloseHandle(wt.client);
         wt.client = 0;
-        if (code != 0) {
+        if (code != 0 && code != NO_INPUT) {
             test_fail("window's checks failed");
             return true;
         }
+        wt.input = code == 0;
         KillProcess(wt.intuition);
         wt.at = hwdb.now;
         wt.step = W_STOP;
@@ -126,6 +134,12 @@ bool window_test(void)
         say("V7.3 windows ok: a client's two windows composed on plane 1 from its own bitmaps, "
             "no copy over IPC, read back as drawn; refusals; frames paced by is_Safe");
         say("V7.3 windows ok: intuition killed, its screen buffers freed by display");
+        if (wt.input)
+            say("V7.4 input ok: focus by a click, keys at the active window alone, IDCMP events, "
+                "a drag, the depth and close gadgets; a stopped client's window dragged, raised "
+                "and taken off");
+        else
+            say("V7.4 input: not exercised: nobody moved the mouse, or intuition had no input");
         wt.step = W_DONE;
         return true;
     default:

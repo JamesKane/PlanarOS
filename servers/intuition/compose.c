@@ -1,11 +1,12 @@
 /*
- * servers/intuition/compose.c -- composing the screen (v7-plan step 3)
+ * servers/intuition/compose.c -- composing the screen (v7-plan steps 3
+ * and 4)
  *
  * A rectangle to repaint is taken by the windows front to back: the
- * front window it meets gives the part they share, a blit from the
- * window's bitmap, and the up to four pieces of it beside that go on to
- * the windows behind. What no window covers is the backdrop. So each
- * pixel is written once, and the screen is never read.
+ * front window it meets gives the part they share, blits from the
+ * bitmaps of the window's parts, and the up to four pieces of it beside
+ * that go on to the windows behind. What no window covers is the
+ * backdrop. So each pixel is written once, and the screen is never read.
  */
 #include "compose.h"
 
@@ -129,6 +130,42 @@ void ic_remove(struct ic_screen *s, struct ic_window *w)
         }
 }
 
+void ic_raise(struct ic_screen *s, struct ic_window *w)
+{
+    for (unsigned i = 0; i < s->nz; i++)
+        if (s->z[i] == w) {
+            for (; i > 0; i--)
+                s->z[i] = s->z[i - 1];
+            s->z[0] = w;
+            damage_whole(s, w);
+            return;
+        }
+}
+
+void ic_lower(struct ic_screen *s, struct ic_window *w)
+{
+    for (unsigned i = 0; i < s->nz; i++)
+        if (s->z[i] == w) {
+            for (; i + 1 < s->nz; i++)
+                s->z[i] = s->z[i + 1];
+            s->z[s->nz - 1] = w;
+            damage_whole(s, w);
+            return;
+        }
+}
+
+struct ic_window *ic_at(const struct ic_screen *s, int32_t x, int32_t y)
+{
+    for (unsigned i = 0; i < s->nz; i++) {
+        struct ic_window *w = s->z[i];
+
+        if (w->nparts && x >= w->x && y >= w->y && x < (int64_t)w->x + w->w &&
+            y < (int64_t)w->y + w->h)
+            return w;
+    }
+    return nullptr;
+}
+
 void ic_move(struct ic_screen *s, struct ic_window *w, int32_t x, int32_t y)
 {
     damage_whole(s, w);
@@ -154,11 +191,20 @@ static void paint(struct ic_screen *s, struct RastPort *rp, struct GfxRect r, un
         const struct ic_window *w = s->z[z];
         struct GfxRect wr, i;
 
-        if (!w->bm || !window_rect(s, w, &wr) || !meets(r, wr))
+        if (!w->nparts || !window_rect(s, w, &wr) || !meets(r, wr))
             continue;
         i = common(r, wr);
-        s->gfx->BltBitMap(w->bm, i.MinX - w->x, i.MinY - w->y, rp, i.MinX, i.MinY,
-                          i.MaxX - i.MinX + 1, i.MaxY - i.MinY + 1, BLEND_SRC);
+        for (unsigned k = 0; k < w->nparts; k++) {
+            const struct ic_part *p = &w->part[k];
+            struct GfxRect pr = { w->x + p->r.MinX, w->y + p->r.MinY, w->x + p->r.MaxX,
+                                  w->y + p->r.MaxY }, c;
+
+            if (!meets(i, pr))
+                continue;
+            c = common(i, pr);
+            s->gfx->BltBitMap(p->bm, p->sx + c.MinX - pr.MinX, p->sy + c.MinY - pr.MinY, rp, c.MinX,
+                              c.MinY, c.MaxX - c.MinX + 1, c.MaxY - c.MinY + 1, BLEND_SRC);
+        }
         s->painted += pixels(i);
         if (r.MinY < i.MinY)
             paint(s, rp, (struct GfxRect){ r.MinX, r.MinY, r.MaxX, i.MinY - 1 }, z + 1);

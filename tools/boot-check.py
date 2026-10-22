@@ -26,7 +26,9 @@ A test that wants USB input asks for it on the console, and gets it
 through QMP's input-send-event: "inputtest: send keys shift-h i ret"
 types those keys (QEMU's qcodes, a "shift-" prefix held over the key),
 "inputtest: send mouse 10 -5 left" moves the mouse and clicks a button
-(conformance/inputtest.c).
+(conformance/inputtest.c), "... send move 10 -5" only moves it, and
+"... send drag 10 -5 left" moves it with the button held. The window
+test asks as "window: send ..." (conformance/window.c).
 """
 
 import argparse
@@ -39,7 +41,7 @@ import subprocess
 import sys
 import time
 
-SEND = re.compile(rb"inputtest: send (keys|mouse) ([^\r\n]*)")
+SEND = re.compile(rb"(?:inputtest|window): send (keys|mouse|move|drag) ([^\r\n]*)")
 
 
 class Qmp:
@@ -93,13 +95,29 @@ class Qmp:
             for k in reversed(held):
                 self._events([key(k, False)])
 
-    def mouse(self, words):
-        self._connect()
-        dx, dy, button = words.split()
+    def _move(self, dx, dy):
         self._events([{"type": "rel", "data": {"axis": "x", "value": int(dx)}},
                       {"type": "rel", "data": {"axis": "y", "value": int(dy)}}])
-        for down in (True, False):
-            self._events([{"type": "btn", "data": {"down": down, "button": button}}])
+
+    def _button(self, button, down):
+        self._events([{"type": "btn", "data": {"down": down, "button": button}}])
+
+    def send(self, verb, words):
+        """What a "send" line asks for: keys, or the mouse."""
+        if verb == "keys":
+            return self.keys(words)
+        self._connect()
+        w = words.split()
+        if verb == "move":
+            self._move(w[0], w[1])
+        elif verb == "drag":
+            self._button(w[2], True)
+            self._move(w[0], w[1])
+            self._button(w[2], False)
+        else:
+            self._move(w[0], w[1])
+            self._button(w[2], True)
+            self._button(w[2], False)
 
 
 def main() -> int:
@@ -147,8 +165,8 @@ def main() -> int:
                 done = transcript.rfind(b"\n") + 1
                 for m in SEND.finditer(transcript, asked, done):
                     try:
-                        (qmp.keys if m.group(1) == b"keys" else qmp.mouse)(m.group(2).decode())
-                    except (OSError, ValueError) as e:
+                        qmp.send(m.group(1).decode(), m.group(2).decode())
+                    except (OSError, ValueError, IndexError) as e:
                         print(f"\nboot-check: QMP: {e}")
                 asked = max(asked, done)
             if re.search(rb" FAIL\b|Guru Meditation", transcript):

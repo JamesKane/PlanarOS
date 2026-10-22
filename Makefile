@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V7.3 done
+EXPECT := V7.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -114,7 +114,7 @@ QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercis
 	--forbid 'typing not exercised'
 # A QEMU machine with a screen (RV64's ramfb, AArch64's through edk2)
 # must show it: display's and intuition's tests may not be skipped there.
-QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] screen|7\.[0-9] windows): not exercised'
+QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] (screen|windows|input)): not exercised'
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
@@ -306,16 +306,18 @@ gfx-test: $(GFX_TEST)
 	@$(GFX_TEST)
 
 # intuition's compositor (servers/intuition/compose.c) on the host with the
-# sanitizers, over made-up windows, against a naive compositor that
-# redraws everything: through lib/gfx's scalar entries, and NEON's too on
-# an Arm host.
+# sanitizers, over made-up windows with and without chrome, against a
+# naive compositor that redraws everything: through lib/gfx's scalar
+# entries, and NEON's too on an Arm host. Then the chrome (chrome.c) and
+# a client's events (events.c) alone.
 INTUITION_TEST := build/intuition/intuition-test
+INTUITION_HOST_SRCS := $(addprefix servers/intuition/,compose.c chrome.c events.c test.c)
 
-$(INTUITION_TEST): $(GFX_SRCS) $(GFX_NEON) servers/intuition/compose.c servers/intuition/compose.h \
-		servers/intuition/test.c lib/gfx/rows.h include/planar/gfx.h
+$(INTUITION_TEST): $(GFX_SRCS) $(GFX_NEON) $(INTUITION_HOST_SRCS) $(wildcard servers/intuition/*.h) \
+		lib/gfx/rows.h include/planar/gfx.h include/planar/intuition.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/intuition) $(if $(GFX_NEON),-DGFX_TEST_NEON) \
-	  $(GFX_SRCS) $(GFX_NEON) servers/intuition/compose.c servers/intuition/test.c -o $@
+	  $(GFX_SRCS) $(GFX_NEON) $(INTUITION_HOST_SRCS) -o $@
 
 intuition-test: $(INTUITION_TEST)
 	@$(INTUITION_TEST)

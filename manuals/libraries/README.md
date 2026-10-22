@@ -18,7 +18,7 @@
 | 10 | The hardware database (`hwdb`) | Built in V4: see [Devices ch. 1](../devices/01-drivers.md) ([docs §9](../../docs/09-hardware-description.md)) |
 | 11 | [C's library](11-clib.md) (`lib/clib`): `malloc`, the string functions, `strtol`, `qsort`, `snprintf`, `stdbit.h`, for code written for other systems | Written, V6 |
 | 12 | [gfx.library](12-gfx.md): bitmaps, rastports, `RectFill`, `BltBitMap`, bevels and text, on the CPU | Written, V7 |
-| 13 | [intuition](13-intuition.md): windows on the screen, from the program's own bitmaps, presented and composed | Written, V7 step 3 |
+| 13 | [intuition](13-intuition.md): windows on the screen, from the program's own bitmaps, presented and composed; their chrome, focus and events | Written, V7 steps 3 and 4 |
 
 The RKM's Exec chapter on interrupts has no counterpart here: a driver's interrupts are its lease's lines (`BindIrq`, `AckWaitIrq`), in [Devices ch. 1](../devices/01-drivers.md).
 

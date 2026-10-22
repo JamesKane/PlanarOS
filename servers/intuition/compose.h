@@ -1,6 +1,6 @@
 /*
  * servers/intuition/compose.h -- the screen as intuition composes it
- * (v7-plan step 3)
+ * (v7-plan steps 3 and 4)
  *
  * compose.c keeps the windows in depth order, front first, and what has
  * changed on the screen since the last frame. A frame is composed into
@@ -8,7 +8,9 @@
  * old: each frame repaints what changed for it and for the last. Every
  * pixel repainted is written once, from the front window over it or the
  * backdrop, and nothing is read from the screen (windows are opaque in
- * V7, decision 3). It's plain C over gfx.library's table: main.c gives
+ * V7, decision 3). A window is a rectangle made of parts, each from a
+ * bitmap: its inside from its client's buffer, and its chrome from
+ * intuition's own. It's plain C over gfx.library's table: main.c gives
  * it IGfx, and test.c lib/gfx's scalar entries on the host.
  */
 #ifndef SERVERS_INTUITION_COMPOSE_H
@@ -22,10 +24,19 @@ constexpr unsigned IC_WINDOWS = 32;         /* on the screen, every client's */
 constexpr unsigned IC_DAMAGE = 16;          /* rectangles a frame keeps, before merging */
 constexpr uint32_t IC_BACKDROP = 0xff182038;    /* bg.backdrop.base's first stop (§13.2) */
 
+constexpr unsigned IC_PARTS = 5;           /* a window's: the inside, the title bar and 3 sides */
+
+struct ic_part {
+    struct GfxRect r;               /* of the window, in its own coordinates */
+    const struct BitMap *bm;        /* r's pixels: bm's from (sx, sy) */
+    int32_t sx, sy;
+};
+
 struct ic_window {
     int32_t x, y;                   /* its top left on the screen */
     uint32_t w, h;
-    const struct BitMap *bm;        /* what it shows: its top left w by h */
+    unsigned nparts;                /* 0: nothing to show yet */
+    struct ic_part part[IC_PARTS];  /* apart, and covering all of it */
 };
 
 /* Rectangles on the screen, inclusive, clipped to it; disjoint once
@@ -59,6 +70,13 @@ void ic_damage_window(struct ic_screen *s, const struct ic_window *w, struct Gfx
  * the screen has IC_WINDOWS already. */
 bool ic_add(struct ic_screen *s, struct ic_window *w);
 void ic_remove(struct ic_screen *s, struct ic_window *w);
+
+/* 'w', on the screen, to the front or the back: its rectangle damaged. */
+void ic_raise(struct ic_screen *s, struct ic_window *w);
+void ic_lower(struct ic_screen *s, struct ic_window *w);
+
+/* The front window at (x, y) of the screen, or nullptr. */
+struct ic_window *ic_at(const struct ic_screen *s, int32_t x, int32_t y);
 
 /* 'w' moved to (x, y): where it was and where it is, damaged. */
 void ic_move(struct ic_screen *s, struct ic_window *w, int32_t x, int32_t y);

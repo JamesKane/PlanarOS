@@ -12,7 +12,7 @@
 | [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 | [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing (`planar/gfx.h`, `lib/gfx`) |
-| [intuition.md](intuition.md) | intuition.library: windows on the screen, presented (`planar/intuition.h`, `lib/intuition`) |
+| [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events (`planar/intuition.h`, `lib/intuition`) |
 
 ## All calls
 
@@ -90,6 +90,7 @@
 | FreeVec | [exec](exec.md#execfreevec) | library |
 | GetBitMapAttr | [gfx](gfx.md#gfxgetbitmapattr) | library, through `IGfx` |
 | GetInterface | [exec](exec.md#execgetinterface) | library, through `IExec` |
+| GetIntuiEvent | [intuition](intuition.md#intuitiongetintuievent) | library, through `IIntuition` |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
 | GetTagData | [utility](utility.md#utilitygettagdata) | library |
@@ -157,6 +158,7 @@
 | ToUpper, ToLower | [utility](utility.md#utilitytoupper) | library |
 | UnshareArea | [exec](exec.md#execunsharearea) | kernel |
 | Wait | [exec](exec.md#execwait) | kernel |
+| WaitIntuiEvent | [intuition](intuition.md#intuitionwaitintuievent) | library, through `IIntuition` |
 | WaitPort | [msg](msg.md#execwaitport) | library |
 | WaitPorts | [msg](msg.md#execwaitports) | library |
 | WaitSafe | [intuition](intuition.md#intuitionwaitsafe) | library, through `IIntuition` |

@@ -189,6 +189,8 @@
         kprintf("V7.2 done\n");
         kprintf("V7.3 windows skipped: no tasks\n");
         kprintf("V7.3 done\n");
+        kprintf("V7.4 input skipped: no tasks\n");
+        kprintf("V7.4 done\n");
         arch_halt();
     }
     sched_idle();

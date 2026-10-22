@@ -1,15 +1,16 @@
 /*
- * conformance/window.c -- intuition's windows, presented (v7-plan step 3)
+ * conformance/window.c -- intuition's windows, presented, and worked by
+ * the mouse and keys (v7-plan steps 3 and 4)
  *
  * Started by hwdb's window test (servers/hwdb/intuition.c) once it has
  * started intuition. Through intuition.library, with bitmaps from
  * gfx.library:
  *
- * 1. Two windows opened, overlapping: one double-buffered, one not. Each
- *    presented whole, then the first in part (its back buffer brought up
- *    to date first), and the screen read back (DISPLAY_READ, where
- *    display composes it) against the windows as this program drew them
- *    over the backdrop, and the pointer.
+ * 1. Two windows opened, borderless, overlapping: one double-buffered,
+ *    one not. Each presented whole, then the first in part (its back
+ *    buffer brought up to date first), and the screen read back
+ *    (DISPLAY_READ, where display composes it) against the windows as
+ *    this program drew them over the backdrop, and the pointer.
  * 2. The refusals: a window wider or taller than its buffer, a buffer
  *    that says it's bigger than its Area, a buffer not shared, damage
  *    outside the window, a frame not above the last, a buffer that isn't
@@ -22,9 +23,21 @@
  *    and the machine's kernel calls a frame. Then frames presented one at
  *    a time, from PresentWindow to is_DispTime.
  * 4. Both closed, and the backdrop read back where they were.
+ * 5. The mouse and keys, which it asks for ("window: send ..."), as
+ *    inputtest does: on QEMU the boot check sends them through QMP.
+ *    Two windows with chrome: focus moved by a click, each event where
+ *    it should be and the window clicked brought to the front; keys at
+ *    the active window alone; a window dragged by its title bar, sent
+ *    back and brought forward by its depth gadget, and closed by its
+ *    close gadget's IDCMP_CLOSEWINDOW. The chrome isn't read back, only
+ *    the windows' insides and the backdrop.
+ * 6. A client that has stopped (this program, started again with 1): its
+ *    window dragged and raised all the same, and taken off the screen a
+ *    second after its close gadget, which it never answers.
  *
- * Then the costs, intuition's own: composing, a megapixel. Exits 0, or
- * the failed check's number.
+ * Then the costs, intuition's own: composing, a megapixel. Exits 0;
+ * NO_INPUT if 1 to 4 passed and nobody moved the mouse (a board with
+ * nobody at it), or intuition has no input; or the failed check's number.
  */
 #include <stddef.h>
 
@@ -37,10 +50,16 @@
 
 void *memset(void *dst, int c, size_t n);
 
-constexpr int64_t SIG_DISPLAY = 20;
+constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FRAMES = 120, TIMED = 10;
 constexpr uint32_t BACKDROP = 0x182038;     /* intuition's (compose.h's IC_BACKDROP) */
+constexpr uint32_t CHROME = 0x00c0ffee;     /* the model's: a pixel of the chrome, not read; clear, so no pixel drawn */
+constexpr int NO_INPUT = 1000;
+
+/* The stopped client's window, which both ends know. */
+constexpr int32_t HUNG_X = 420, HUNG_Y = 80;
+constexpr uint32_t HUNG_W = 120, HUNG_H = 80, HUNG_COLOUR = 0x307050;
 
 static unsigned step;
 
@@ -103,7 +122,53 @@ static int64_t read_screen(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_
 
 static struct Intuition in;
 static struct Window wa, wb;
-static unsigned open_windows;       /* of wa and wb, front last: 2 both, 1 wa alone, 0 none */
+static int32_t ptr_x, ptr_y;        /* the pointer, as intuition last said */
+
+/* The windows on the screen, front first: this program's, or the
+ * stopped client's, a flat colour. */
+struct shown {
+    const struct Window *w;         /* or nullptr: the stopped one's, at hung_x, hung_y */
+};
+
+static struct shown order[4];
+static unsigned nshown;
+static int32_t hung_x = HUNG_X, hung_y = HUNG_Y;
+
+static void to_front(const struct Window *w)
+{
+    unsigned i = 0;
+
+    while (i < nshown && order[i].w != w)
+        i++;
+    if (i == nshown)
+        nshown++;
+    for (; i > 0; i--)
+        order[i] = order[i - 1];
+    order[0].w = w;
+}
+
+static void to_back(const struct Window *w)
+{
+    unsigned i = 0;
+
+    while (i < nshown && order[i].w != w)
+        i++;
+    for (; i + 1 < nshown; i++)
+        order[i] = order[i + 1];
+    order[nshown - 1].w = w;
+}
+
+static void taken_off(const struct Window *w)
+{
+    unsigned i = 0;
+
+    while (i < nshown && order[i].w != w)
+        i++;
+    if (i == nshown)
+        return;
+    for (nshown--; i < nshown; i++)
+        order[i] = order[i + 1];
+}
 
 static uint32_t shown_px(const struct Window *w, int32_t x, int32_t y)
 {
@@ -112,33 +177,52 @@ static uint32_t shown_px(const struct Window *w, int32_t x, int32_t y)
     return ((const uint32_t *)((const uint8_t *)bm->bm_BaseAddr + (uint64_t)y * bm->bm_BytesPerRow))[x];
 }
 
-static bool inside(const struct Window *w, int32_t x, int32_t y)
+/* (x, y) of the screen, from window 'w' of the model: false if it's not on it. */
+static bool from(const struct shown *s, int32_t x, int32_t y, uint32_t *px)
 {
-    return x >= w->w_LeftEdge && y >= w->w_TopEdge && x < w->w_LeftEdge + (int32_t)w->w_Width &&
-           y < w->w_TopEdge + (int32_t)w->w_Height;
+    const struct Window *w = s->w;
+    int32_t left = w ? w->w_Sync->is_LeftEdge : hung_x, top = w ? w->w_Sync->is_TopEdge : hung_y;
+    int32_t bl = w ? w->w_BorderLeft : (int32_t)INTUI_BORDER;
+    int32_t bt = w ? w->w_BorderTop : (int32_t)INTUI_TITLEBAR;
+    int32_t iw = w ? (int32_t)w->w_Width : (int32_t)HUNG_W, ih = w ? (int32_t)w->w_Height : (int32_t)HUNG_H;
+    int32_t br = bl ? (int32_t)INTUI_BORDER : 0;
+
+    if (x < left || y < top || x >= left + bl + iw + br || y >= top + bt + ih + br)
+        return false;
+    x -= left + bl;
+    y -= top + bt;
+    if (x < 0 || y < 0 || x >= iw || y >= ih)
+        *px = CHROME;
+    else
+        *px = w ? shown_px(w, x, y) : HUNG_COLOUR;
+    return true;
 }
 
 static uint32_t screen_px(int32_t x, int32_t y)
 {
-    int32_t px = (int32_t)in.in_Width / 2, py = (int32_t)in.in_Height / 2;  /* intuition's */
     uint32_t p;
 
-    if (x >= px && y >= py && (p = pointer_pixel((uint32_t)(x - px), (uint32_t)(y - py))) >> 24)
+    if (x >= ptr_x && y >= ptr_y && (p = pointer_pixel((uint32_t)(x - ptr_x), (uint32_t)(y - ptr_y))) >> 24)
         return p;
-    if (open_windows >= 2 && inside(&wb, x, y))
-        return shown_px(&wb, x - wb.w_LeftEdge, y - wb.w_TopEdge);
-    if (open_windows >= 1 && inside(&wa, x, y))
-        return shown_px(&wa, x - wa.w_LeftEdge, y - wa.w_TopEdge);
+    for (unsigned i = 0; i < nshown; i++)
+        if (from(&order[i], x, y, &p))
+            return p;
     return BACKDROP;
 }
 
-static uint32_t expect(int32_t x0, int32_t y0, uint32_t w, uint32_t h)
+/* The checksum DISPLAY_READ would give; false if the rectangle holds
+ * chrome, which the model doesn't know (a test's mistake). */
+static bool expect(int32_t x0, int32_t y0, uint32_t w, uint32_t h, uint32_t *sum)
 {
     uint32_t crc = ~0u;
 
     for (int32_t y = y0; y < y0 + (int32_t)h; y++)
         for (int32_t x = x0; x < x0 + (int32_t)w; x++) {
-            uint32_t px = screen_px(x, y) & 0xffffff;
+            uint32_t px = screen_px(x, y);
+
+            if (px == CHROME)
+                return false;
+            px &= 0xffffff;
 
             for (unsigned k = 0; k < 32; k += 8) {
                 crc ^= px >> k & 0xff;
@@ -146,7 +230,8 @@ static uint32_t expect(int32_t x0, int32_t y0, uint32_t w, uint32_t h)
                     crc = crc >> 1 ^ (0xedb88320u & -(crc & 1));
             }
         }
-    return ~crc;
+    *sum = ~crc;
+    return true;
 }
 
 /* The rectangle as the screen shows it, a second at most to get there:
@@ -154,14 +239,19 @@ static uint32_t expect(int32_t x0, int32_t y0, uint32_t w, uint32_t h)
 static bool screen_is(bool readable, int32_t x, int32_t y, uint32_t w, uint32_t h)
 {
     uint64_t until = CurrentTime() + 1000 * MS;
-    uint32_t want = expect(x, y, w, h), got;
+    uint32_t want, got;
 
+    if (!expect(x, y, w, h, &want))
+        return false;
     if (!readable)
         return true;
     do
         if (read_screen(x, y, w, h, &got) == 0 && got == want)
             return true;
     while (CurrentTime() < until);
+    KPrintF("window: the screen at (%ld, %ld), %lux%lu, the pointer at (%ld, %ld): %08lx, not %08lx",
+            (int64_t)x, (int64_t)y, (uint64_t)w, (uint64_t)h, (int64_t)ptr_x, (int64_t)ptr_y,
+            (uint64_t)got, (uint64_t)want);
     return false;
 }
 
@@ -226,15 +316,17 @@ static int two_windows(bool *readable, struct BitMap **bm)
           (bm[1] = IGfx->AllocBitMap(200, 120, PIXFMT_ARGB8888, 0, nullptr)) &&
           (bm[2] = IGfx->AllocBitMap(160, 100, PIXFMT_XRGB8888, 0, nullptr)));
     CHECK(OpenWindowTags(IIntuition, &in, &wa, { WA_Left, 64 }, { WA_Top, 48 }, { WA_Title, (uint64_t)"wa" },
-                         { WA_BitMap, (uint64_t)bm[0] }, { WA_BackBitMap, (uint64_t)bm[1] }) == 0);
+                         { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)bm[0] },
+                         { WA_BackBitMap, (uint64_t)bm[1] }) == 0);
     CHECK(OpenWindowTags(IIntuition, &in, &wb, { WA_Left, 180 }, { WA_Top, 100 },
-                         { WA_BitMap, (uint64_t)bm[2] }) == 0);
+                         { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)bm[2] }) == 0);
     CHECK(wa.w_Width == 200 && wa.w_Height == 120 && wa.w_Buffers == 2 && wb.w_Buffers == 1);
     picture(&wa.w_RPort, 200, 120, 0x5b88c2, "window a");
     picture(&wb.w_RPort, 160, 100, 0x4a5668, "window b");
     CHECK(IIntuition->PresentWindow(&wa, nullptr, 0) == 0);
     CHECK(IIntuition->PresentWindow(&wb, nullptr, 0) == 0);
-    open_windows = 2;
+    to_front(&wa);
+    to_front(&wb);
     CHECK(wa.w_Frame == 1 && wa.w_Back == 1 && wb.w_Back == 0);
     CHECK(on_screen(&wa, 1) && on_screen(&wb, 1));
     CHECK(IIntuition->WaitSafe(&wa, CurrentTime() + 1000 * MS) == 0);
@@ -242,7 +334,7 @@ static int two_windows(bool *readable, struct BitMap **bm)
     *readable = e == 0;
     CHECK(e == 0 || e == ERR_NOSYS);
     CHECK(screen_is(*readable, 32, 32, 416, 240));
-    CHECK(screen_is(*readable, (int32_t)in.in_Width / 2 - 8, (int32_t)in.in_Height / 2 - 8, 32, 32));
+    CHECK(screen_is(*readable, ptr_x - 8, ptr_y - 8, 32, 32));
 
     /* wa's back buffer brought up to date, a part changed and said to be. */
     IGfx->BltBitMap(wa.w_BitMap[0], 0, 0, &wa.w_RPort, 0, 0, 200, 120, BLEND_SRC);
@@ -328,7 +420,7 @@ static int refusals(struct BitMap *const *bm)
     /* A window wholly off the screen: its frames change nothing there,
      * and are safe and shown all the same. */
     CHECK(OpenWindowTags(IIntuition, &in, &w, { WA_Left, -1000 }, { WA_Top, 100 },
-                         { WA_BitMap, (uint64_t)bm[2] }) == 0);
+                         { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)bm[2] }) == 0);
     CHECK(IIntuition->PresentWindow(&w, nullptr, 0) == 0);
     CHECK(IIntuition->PresentWindow(&w, nullptr, 0) == 0);
     CHECK(IIntuition->WaitSafe(&w, CurrentTime() + 1000 * MS) == 0 && on_screen(&w, 2));
@@ -384,13 +476,366 @@ static int frames(bool readable)
     return 0;
 }
 
-int main(uint64_t)
+/* --- 5: the mouse and keys. --- */
+
+static void nap(uint64_t ms)
+{
+    static uint64_t never;              /* a word nobody wakes */
+
+    WaitAddr(&never, 0, CurrentTime() + ms * MS);
+}
+
+/* intuition's state now: the pointer kept in ptr_x, ptr_y. */
+static int64_t info(struct IntuiMsg *m)
+{
+    int64_t e;
+
+    memset(m, 0, sizeof *m);
+    if ((e = ask(&in, m, INTUI_INFO)) == 0) {
+        ptr_x = m->im_PointerX;
+        ptr_y = m->im_PointerY;
+    }
+    return e;
+}
+
+/* The pointer to (x, y), asked for 100 pixels at a time: false if it
+ * didn't move within 2 s of asking (nobody's there to move it). */
+static bool point_at(int32_t x, int32_t y)
+{
+    struct IntuiMsg *m = in.in_Call;
+
+    for (unsigned tries = 0; tries < 40; tries++) {
+        int32_t was_x = ptr_x, was_y = ptr_y, dx, dy;
+        uint64_t until = CurrentTime() + 2000 * MS;
+
+        if (info(m) != 0)
+            return false;
+        if (ptr_x == x && ptr_y == y)
+            return true;
+        dx = x - ptr_x;
+        dy = y - ptr_y;
+        dx = dx > 100 ? 100 : dx < -100 ? -100 : dx;
+        dy = dy > 100 ? 100 : dy < -100 ? -100 : dy;
+        KPrintF("window: send move %ld %ld", (int64_t)dx, (int64_t)dy);
+        was_x = ptr_x;
+        was_y = ptr_y;
+        while (info(m) == 0 && ptr_x == was_x && ptr_y == was_y)
+            if (CurrentTime() > until)
+                return false;
+            else
+                nap(5);
+    }
+    return false;
+}
+
+static void click(void)
+{
+    KPrintF("window: send mouse 0 0 left");
+}
+
+/* The next event that isn't a move, or a move if 'moves', within 'ms'. */
+static bool next_event_within(struct IntuiEvent *ev, bool moves, uint64_t ms)
+{
+    uint64_t until = CurrentTime() + ms * MS;
+
+    for (;;) {
+        while (IIntuition->GetIntuiEvent(&in, ev))
+            if (moves || ev->iev_Class != IDCMP_MOUSEMOVE)
+                return true;
+        if (IIntuition->WaitIntuiEvent(&in, until) != 0)
+            return false;
+    }
+}
+
+static bool next_event(struct IntuiEvent *ev, bool moves)
+{
+    return next_event_within(ev, moves, 2000);
+}
+
+static bool heard(const struct Window *w, uint32_t cls, uint16_t code)
+{
+    struct IntuiEvent ev;
+
+    if (!next_event(&ev, cls == IDCMP_MOUSEMOVE))
+        return false;
+    if (ev.iev_Window == w->w_Id && ev.iev_Class == cls && ev.iev_Code == code)
+        return true;
+    KPrintF("window: heard class %lx code %lx of window %lu, not class %lx code %lx of %lu",
+            (uint64_t)ev.iev_Class, (uint64_t)ev.iev_Code, (uint64_t)ev.iev_Window, (uint64_t)cls,
+            (uint64_t)code, (uint64_t)w->w_Id);
+    return false;
+}
+
+/* Clicked at (x, y), and heard as a press and a release there. */
+static bool clicked_in(const struct Window *w, int32_t x, int32_t y)
+{
+    struct IntuiEvent ev;
+
+    if (!point_at(x, y))
+        return false;
+    click();
+    for (unsigned i = 0; i < 2; i++) {
+        uint32_t code = i ? SELECTUP : SELECTDOWN;
+
+        do
+            if (!next_event(&ev, false))
+                return false;
+        while (ev.iev_Class == IDCMP_ACTIVEWINDOW || ev.iev_Class == IDCMP_INACTIVEWINDOW);
+        if (ev.iev_Window != w->w_Id || ev.iev_Class != IDCMP_MOUSEBUTTONS || ev.iev_Code != code ||
+            ev.iev_MouseX != x - w->w_Sync->is_LeftEdge - w->w_BorderLeft ||
+            ev.iev_MouseY != y - w->w_Sync->is_TopEdge - w->w_BorderTop)
+            return false;
+    }
+    return true;
+}
+
+/* The window intuition says is active, within a second. */
+static bool active_is(const struct Window *w)
+{
+    struct IntuiMsg *m = in.in_Call;
+    uint64_t until = CurrentTime() + 1000 * MS;
+
+    while (info(m) == 0 && m->im_Active != (w ? w->w_Id : 0))
+        if (CurrentTime() > until)
+            return false;
+        else
+            nap(5);
+    return true;
+}
+
+/* Keys typed, heard by w alone as these characters; and a key let go. */
+static bool typed(const struct Window *w, const char *keys, const char *chars)
+{
+    struct IntuiEvent ev;
+    bool up = false;
+
+    KPrintF("window: send keys %s", keys);
+    for (const char *c = chars; *c;) {
+        if (!next_event(&ev, false) || ev.iev_Window != w->w_Id)
+            return false;
+        if (ev.iev_Class == IDCMP_RAWKEY && ev.iev_Code & RAWKEY_UP)
+            up = true;
+        else if (ev.iev_Class == IDCMP_VANILLAKEY && ev.iev_Code != (uint16_t)*c++)
+            return false;
+        else if (ev.iev_Class != IDCMP_RAWKEY && ev.iev_Class != IDCMP_VANILLAKEY)
+            return false;
+    }
+    /* The keys going up, and nothing else, until they stop. */
+    while (next_event_within(&ev, false, up ? 300 : 2000))
+        if (ev.iev_Window != w->w_Id || ev.iev_Class != IDCMP_RAWKEY)
+            return false;
+        else
+            up |= (ev.iev_Code & RAWKEY_UP) != 0;
+    return up;
+}
+
+/* Dragged by (dx, dy) from (x, y): there within a second. */
+static bool dragged(const struct Window *w, int32_t x, int32_t y, int32_t dx, int32_t dy)
+{
+    int32_t left = w ? w->w_Sync->is_LeftEdge : hung_x, top = w ? w->w_Sync->is_TopEdge : hung_y;
+    struct IntuiMsg *m = in.in_Call;
+    uint64_t until;
+
+    if (!point_at(x, y))
+        return false;
+    KPrintF("window: send drag %ld %ld left", (int64_t)dx, (int64_t)dy);
+    until = CurrentTime() + 1000 * MS;
+    while (info(m) == 0 && (ptr_x != x + dx || ptr_y != y + dy))
+        if (CurrentTime() > until)
+            return false;
+        else
+            nap(5);
+    if (w) {
+        while (w->w_Sync->is_LeftEdge != left + dx || w->w_Sync->is_TopEdge != top + dy)
+            if (CurrentTime() > until)
+                return false;
+            else
+                nap(5);
+    } else {
+        hung_x += dx;
+        hung_y += dy;
+    }
+    to_front(w);
+    return true;
+}
+
+/* A gadget clicked: 'x' from the right of the window's chrome, 'y' down. */
+static bool gadget_click(const struct Window *w, int32_t from_right)
+{
+    int32_t left = w ? w->w_Sync->is_LeftEdge : hung_x, top = w ? w->w_Sync->is_TopEdge : hung_y;
+    int32_t width = (int32_t)(w ? w->w_Width : HUNG_W) + 2 * (int32_t)INTUI_BORDER;
+
+    if (!point_at(left + width - from_right, top + 12))
+        return false;
+    click();
+    return true;
+}
+
+constexpr int32_t CLOSE_GADGET = 15, DEPTH_GADGET = 39;    /* their middles, from the right */
+
+static struct BitMap *cbm, *dbm;
+static struct Window wc, wd;
+static int64_t hung = -1;
+
+static void ends(void)
+{
+    if (hung >= 0) {
+        KillProcess((Handle)hung);
+        CloseHandle((Handle)hung);
+    }
+    hung = -1;
+}
+
+static int input_half(bool readable)
+{
+    struct IntuiMsg *m = in.in_Call;
+    const uint32_t wanted = IDCMP_MOUSEBUTTONS | IDCMP_RAWKEY | IDCMP_VANILLAKEY | IDCMP_ACTIVEWINDOW |
+                            IDCMP_INACTIVEWINDOW | IDCMP_CLOSEWINDOW;
+    const uint32_t chrome = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET;
+    struct IntuiEvent ev;
+    unsigned windows;
+
+    CHECK(info(m) == 0);
+    if (!m->im_Input) {
+        KPrintF("window: input: not exercised: intuition holds no input ring");
+        return NO_INPUT;
+    }
+    CHECK((cbm = IGfx->AllocBitMap(200, 120, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (dbm = IGfx->AllocBitMap(160, 100, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &wc, { WA_Left, 80 }, { WA_Top, 60 }, { WA_Title, (uint64_t)"wc" },
+                         { WA_Flags, chrome }, { WA_IDCMP, wanted | IDCMP_MOUSEMOVE },
+                         { WA_BitMap, (uint64_t)cbm }) == 0);
+    CHECK(OpenWindowTags(IIntuition, &in, &wd, { WA_Left, 240 }, { WA_Top, 120 }, { WA_Title, (uint64_t)"wd" },
+                         { WA_Flags, chrome | WFLG_ACTIVATE }, { WA_IDCMP, wanted },
+                         { WA_BitMap, (uint64_t)dbm }) == 0);
+    CHECK(wc.w_BorderLeft == (int32_t)INTUI_BORDER && wc.w_BorderTop == (int32_t)INTUI_TITLEBAR);
+    picture(&wc.w_RPort, 200, 120, 0x5b88c2, "window c");
+    picture(&wd.w_RPort, 160, 100, 0x8a5a44, "window d");
+    CHECK(IIntuition->PresentWindow(&wc, nullptr, 0) == 0 && IIntuition->PresentWindow(&wd, nullptr, 0) == 0);
+    to_front(&wc);
+    to_front(&wd);
+    CHECK(on_screen(&wc, 1) && on_screen(&wd, 1));
+    CHECK(heard(&wd, IDCMP_ACTIVEWINDOW, 0) && active_is(&wd));
+    CHECK(screen_is(readable, 244, 146, 80, 60));       /* the insides' overlap: d's */
+
+    /* Focus moved by a click on c's inside, which comes to the front. */
+    if (!point_at(150, 120)) {
+        KPrintF("window: input: not exercised: nobody moved the pointer");
+        return NO_INPUT;
+    }
+    click();
+    CHECK(heard(&wd, IDCMP_INACTIVEWINDOW, 0) && heard(&wc, IDCMP_ACTIVEWINDOW, 0));
+    CHECK(next_event(&ev, false) && ev.iev_Window == wc.w_Id && ev.iev_Class == IDCMP_MOUSEBUTTONS &&
+          ev.iev_Code == SELECTDOWN && ev.iev_MouseX == 150 - 84 && ev.iev_MouseY == 120 - 86);
+    CHECK(heard(&wc, IDCMP_MOUSEBUTTONS, SELECTUP) && active_is(&wc));
+    to_front(&wc);
+    CHECK(screen_is(readable, 244, 146, 40, 60));       /* now c's */
+    KPrintF("window: send move 5 5");                   /* the active window hears it move */
+    do
+        CHECK(next_event(&ev, true) && ev.iev_Window == wc.w_Id && ev.iev_Class == IDCMP_MOUSEMOVE);
+    while (ev.iev_MouseX != 155 - 84 || ev.iev_MouseY != 125 - 86);
+
+    /* Keys at the active window alone, with the pointer over the other;
+     * then at the other once clicked. */
+    CHECK(point_at(380, 230));
+    CHECK(typed(&wc, "h shift-i", "hI"));
+    CHECK(clicked_in(&wd, 380, 230));
+    to_front(&wd);
+    CHECK(active_is(&wd));
+    CHECK(point_at(150, 120));
+    CHECK(typed(&wd, "x", "x"));
+
+    /* c dragged by its title bar, from where it was to where it is. */
+    CHECK(dragged(&wc, 120, 70, 40, 30));
+    CHECK(heard(&wd, IDCMP_INACTIVEWINDOW, 0) && heard(&wc, IDCMP_ACTIVEWINDOW, 0));
+    CHECK(screen_is(readable, 124, 116, 200, 120));     /* c's inside, where it went */
+    CHECK(screen_is(readable, 80, 60, 40, 140));        /* the backdrop, where it was */
+
+    /* c's depth gadget: to the back, then, from the back, to the front. */
+    CHECK(gadget_click(&wc, DEPTH_GADGET));
+    to_back(&wc);
+    CHECK(screen_is(readable, 250, 150, 60, 60));
+    CHECK(gadget_click(&wc, DEPTH_GADGET));
+    to_front(&wc);
+    CHECK(screen_is(readable, 250, 150, 60, 60));
+
+    /* c's close gadget, and c closed when asked. */
+    CHECK(gadget_click(&wc, CLOSE_GADGET));
+    CHECK(heard(&wc, IDCMP_CLOSEWINDOW, 0));
+    CHECK(IIntuition->CloseWindow(&wc) == 0);
+    taken_off(&wc);
+    CHECK(screen_is(readable, 250, 150, 60, 60));
+    KPrintF("window: input: focus by clicks, keys at the active window alone, a drag, the depth and "
+            "close gadgets: each heard as it should be, and the screen read back");
+
+    /* 6: a client that has stopped. */
+    CHECK(info(m) == 0);
+    windows = m->im_Windows;
+    CHECK((hung = CreateProcess("window", 1, SIG_HUNG, 0)) >= 0);
+    for (uint64_t until = CurrentTime() + 3000 * MS; info(m) == 0 && m->im_Windows == windows;)
+        if (CurrentTime() > until)
+            return failed("the stopped client's window never came");
+        else
+            nap(10);
+    nap(50);                            /* its frame on the screen */
+    to_front(nullptr);
+    CHECK(screen_is(readable, HUNG_X + 4, HUNG_Y + 26, HUNG_W, HUNG_H));
+    CHECK(dragged(nullptr, 440, 90, -60, 40));          /* c's close left none active */
+    CHECK(screen_is(readable, hung_x + 4, hung_y + 26, HUNG_W, HUNG_H));
+    CHECK(clicked_in(&wd, 300, 240));                   /* d to the front, over it */
+    to_front(&wd);
+    CHECK(screen_is(readable, 364, 146, 40, 80));       /* where their insides meet */
+    CHECK(gadget_click(nullptr, DEPTH_GADGET));         /* it, from the back to the front */
+    to_front(nullptr);
+    CHECK(screen_is(readable, 364, 146, 40, 80));
+    CHECK(gadget_click(nullptr, CLOSE_GADGET));         /* never answered */
+    for (uint64_t until = CurrentTime() + 3000 * MS; info(m) == 0 && m->im_Windows != windows;)
+        if (CurrentTime() > until)
+            return failed("the stopped client's window was never taken off");
+        else
+            nap(10);
+    taken_off(nullptr);
+    CHECK(screen_is(readable, 408, 146, 76, 80));       /* the backdrop, right of d */
+    ends();
+    CHECK(IIntuition->CloseWindow(&wd) == 0);
+    taken_off(&wd);
+    IGfx->FreeBitMap(cbm);
+    IGfx->FreeBitMap(dbm);
+    KPrintF("window: input: a stopped client's window dragged and raised, and taken off a second "
+            "after its close gadget");
+    return 0;
+}
+
+/* 6, the other end: a window, then nothing ever again. */
+static int stopped(void)
+{
+    struct BitMap *bm;
+    struct Window w;
+
+    if (open_lib() || IIntuition->OpenIntuition(&in, CurrentTime() + 1000 * MS) != 0 ||
+        !(bm = IGfx->AllocBitMap(HUNG_W, HUNG_H, PIXFMT_XRGB8888, 0, nullptr)) ||
+        OpenWindowTags(IIntuition, &in, &w, { WA_Left, HUNG_X }, { WA_Top, HUNG_Y },
+                       { WA_Title, (uint64_t)"stopped" },
+                       { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET },
+                       { WA_IDCMP, IDCMP_CLOSEWINDOW }, { WA_BitMap, (uint64_t)bm }) != 0)
+        return 1;
+    w.w_RPort.rp_FgPen = 0xff000000 | HUNG_COLOUR;
+    IGfx->RectFill(&w.w_RPort, 0, 0, HUNG_W - 1, HUNG_H - 1);
+    if (IIntuition->PresentWindow(&w, nullptr, 0) != 0)
+        return 2;
+    for (;;)
+        nap(1000000);
+}
+
+int main(uint64_t arg)
 {
     struct BitMap *bm[3];
     struct AreaInfo ai;
     bool readable;
-    int r;
+    int r, input;
 
+    if (arg == 1)
+        return stopped();
     if ((r = open_lib()))
         return r;
     if ((r = (int)IIntuition->OpenIntuition(&in, CurrentTime() + 5000 * MS)) != 0)
@@ -398,6 +843,7 @@ int main(uint64_t)
     CHECK(r == 0);
     CHECK(in.in_Width >= 640 && in.in_Height >= 480);
     CHECK(display_up() == 0);
+    CHECK(info(in.in_Call) == 0);
     if ((r = two_windows(&readable, bm)) || (r = refusals(bm)) || (r = frames(readable)))
         return r;
 
@@ -406,22 +852,26 @@ int main(uint64_t)
     for (unsigned i = 0; i < 3; i++)
         CHECK(QueryArea(bm[i]->bm_BaseAddr, &ai) == 0 && ai.ai_Sharers == 2);
     CHECK(IIntuition->CloseWindow(&wb) == 0);
-    open_windows = 1;
+    taken_off(&wb);
     CHECK(screen_is(readable, 32, 32, 416, 240));
     CHECK(IIntuition->CloseWindow(&wa) == 0);
     CHECK(IIntuition->CloseWindow(&wa) == ERR_BADARG);
-    open_windows = 0;
+    taken_off(&wa);
     CHECK(screen_is(readable, 32, 32, 416, 240));
     for (unsigned i = 0; i < 3; i++)
         CHECK(QueryArea(bm[i]->bm_BaseAddr, &ai) == 0 && ai.ai_Sharers == 1);
 
-    memset(in.in_Call, 0, sizeof *in.in_Call);
-    CHECK(ask(&in, in.in_Call, INTUI_INFO) == 0 && in.in_Call->im_Frames > 0);
+    input = input_half(readable);
+    ends();
+    if (input && input != NO_INPUT)
+        return input;
+
+    CHECK(info(in.in_Call) == 0 && in.in_Call->im_Frames > 0);
     KPrintF("window: intuition composed %lu frames, %lu us a megapixel; the screen %s",
             in.in_Call->im_Frames, in.in_Call->im_Nanos * 1000 / (in.in_Call->im_Pixels + 1),
             readable ? "read back as drawn at each step" : "not read back (display's controller)");
     IIntuition->CloseIntuition(&in);
     for (unsigned i = 0; i < 3; i++)
         IGfx->FreeBitMap(bm[i]);
-    return 0;
+    return input;
 }

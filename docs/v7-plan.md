@@ -1,6 +1,6 @@
 # V7 plan: Workbench I, windows
 
-**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 3 done.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
+**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 4 done.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
 
 **Goal (§8):** windows on the screen of both boards, composed on the CPU, with the pointer on its own plane. A client draws into its own memory with `gfx.library`, presents it without a copy across IPC, and is dragged, raised, closed and, when it dies, cleared away by `intuition`, which the client can't hang. Text is the 8×8 font until V8.
 
@@ -197,6 +197,29 @@ QEMU's `ramfb` is a framebuffer in guest memory that the guest describes through
   - `IDCMP_CLOSEWINDOW` on the close gadget.
 - **A client that stops answering** (a mode of `window.c`) is dragged and raised while it sleeps.
 - **`V7.4 input ok`.**
+
+**Done (2026-10-22).** intuition holds input's ring, moves the pointer, keeps focus, draws the chrome (`servers/intuition/chrome.c`) and drags and depth-arranges windows. A connection's events go on a ring in its page (`events.c`). intuition.library 7.4 adds `GetIntuiEvent` and `WaitIntuiEvent`, and the tags `WA_Flags` and `WA_IDCMP`: 7.2 KiB on RV64, and the shared region still 9 pages there and 13 on AArch64. `conformance/window.c`'s input half passes on the six QEMU boots with a screen, through the boot check's new `send move` and `send drag`. `make intuition-test` now composes windows with chrome among those without, tests what's where on the chrome and that nothing's drawn past its bitmaps, and runs 540,000 keys and buttons through `events.c` to a client reading slower than they come, at random: all came, in order. Built so, not quite as planned:
+- **The ring's room is said by the client.** intuition never writes a client's memory, and a client can't write intuition's page, so the client shares a page of its own, read-only, saying how far it has read (`IntuiAck`, by a new op, `INTUI_EVENTS`). intuition writes an event only when there's room. It keeps up to 64 more, folding moves into the latest. Moves fill no more than 47 of the ring's 94, so keys and buttons are lost only when a client is 111 of them behind. A client that reads the ring down from full, or from 47, tells intuition with `SignalConn`. Otherwise reading an event is no kernel call.
+- **One ring a connection**, not one a window: each event says its window. The RKM's `UserPort` and `ReplyMsg` have no counterpart.
+- **The chrome is two bitmaps of intuition's for each window**, composed as four of its parts around the inside. A window in `compose.c` became up to five parts, each from its own bitmap. Each pixel is still written once.
+- **`WA_Width` and `WA_Height` are the inside's**, with the chrome added around it. `WFLG_BORDERLESS` is step 3's window, all inside. The RKM's numbers for the tags, flags, IDCMP classes and button codes. A raw key going up is `RAWKEY_UP` (0x8000), as HID usages run past the RKM's 0x80.
+- **Moves go to the active window** whenever it asked for them, with no `WFLG_REPORTMOUSE`. A button pressed over the inside goes to its window, and its release to the same window.
+- **The pointer moving is a commit of plane 2 alone**, one a vblank at most, as a frame is.
+- **Decision 6, as it leaned:** a close gadget unanswered for a second takes the window off the screen, logged. Its slot stays for the client's `CloseWindow`, its `is_Safe` goes to its highest so `WaitSafe` returns, and its next present is refused.
+- **Where a window is** is in its sync words, `is_LeftEdge` and `is_TopEdge`.
+- **If another program holds input's ring**, intuition runs without the pointer and keys. It doesn't take the ring again after input's death yet: that's step 5's.
+- **A hole found, not closed:** intuition checks that a buffer is memory another process shared with it, not whose. So a client that knows the address of another's bitmap can show it. `QueryArea` would have to say an Area's owner. A client unsharing its `IntuiAck` ends intuition, as unsharing a bitmap does.
+- **Not tested on the boots:** `GetIntuiEvent`'s `SignalConn`, as `window.c` never falls 47 events behind. `events.c`'s side of it is the host test's.
+- **Mutation-tested.** In the server, each of these failed `window.c`:
+  - focus never moved;
+  - a press that didn't raise its window;
+  - the depth gadget always lowering;
+  - a drag not said in the sync words;
+  - an unanswered close gadget never acted on;
+  - mouse positions from the chrome's corner, not the inside's;
+  - keys sent to the window under the pointer, not the active one. This one survived at first, as the pointer was over the active window whenever keys were typed. Now it's over the other.
+
+  Moves let fill the whole ring failed `intuition-test`.
 
 ## 5. Supervision
 
