@@ -338,7 +338,9 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 - a fault's message: about 1 ms after the doorbell;
 - the failing scan for a run longer than any: 2.1 million steps, a word each of the holes between RAM's ranges.
 
-**Still to do:** the RV2's half: the `dos` stall, `gpu-rogue`'s `GPU_EVENT`, and its 10 runs.
+**The CIX's 10 runs** (2026-10-22, `9b9ba67`): the kill test passed 10 boots in a row, each 36 kills (3–9 while binding) of 3 drivers, the GPU's load test, the stop of all 17 drivers, and every test to `V6.8 done`. The transcripts are in [`boards/cix-p1/v6-kill-test`](boards/cix-p1/v6-kill-test). A first attempt stopped at run 5: `V3.4 placement` found the big core it wanted idle running the log's drainer, which now runs on the boot CPU.
+
+**Still to do:** the RV2's half: the `dos` stall (hwdb now says what `dos`'s tasks were doing when it's reported: `QueryTasks`), `gpu-rogue`'s `GPU_EVENT`, and its 10 runs.
 
 ## Sources
 
