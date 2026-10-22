@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: in progress (2026-10-22): steps 1 to 7 done; decisions 1 to 7 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are all taken.
+**Status: in progress (2026-10-22): steps 1 to 7 done, step 8 done but for the RV2; decisions 1 to 7 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are all taken.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -292,6 +292,8 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 
 ## 8. Debts, and the boards
 
+**In progress (2026-10-22): QEMU's and the CIX's half done; the RV2's to come** (`a9b82fc`, `7c20ed3`).
+
 - **§10.8's open findings:**
   - `time_to_us` overflowing (`kernel/ktime.c`);
   - AArch64 domain creation failing when 8-bit ASIDs run out (`arch/aarch64/mmu.c`: rollover);
@@ -306,6 +308,37 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 - **From V5:** a sync object woken only when someone sleeps on it (a flag in `struct GpuSync`), which saves the CIX's server an interrupt and six calls a job when the client spins; a GPU fault reaching the client as a message, not only `GPU_STATUS`.
 - **The RV2's `dos` stall** (v5-plan §7): the last `gpu-rogue` that the kill rounds start waits forever on a `dos` call, in 2 runs of 4. Step 7's deadline turns the hang into an error. The cause is still to find. First a mark of what `dos`'s server task is doing, kept with no extra task, since a watchdog task seemed to hide the stall.
 - **The exit's kill test:** 10 runs in a row on each board, with the transcripts kept.
+
+**Built:**
+- **§10.8:** every low finding fixed or closed with its reason, in its row of [§10.8](10-code-review.md#108-low). The plan's seven:
+  - `time_to_us` and `time_us` take seconds and the rest apart;
+  - past the last ASID, domains share one, which a CPU flushes when it loads a different domain with it (both ISAs: RV64 failed the same way);
+  - a kernel stack canary, `struct task`'s last word, checked at every switch. The stacks are in the direct map's blocks, so there's no guard page;
+  - `nTWE` and `DZE` set; `CNTKCTL` and `MDSCR_EL1` written whole; `VPIDR_EL2` and `VMPIDR_EL2` the CPU's own; the PSCI call's x1–x17;
+  - port names: naming a port is a right, `PROCF_NAMES`. The kernel's processes have it, a built-in program has it if its parent does, and a program loaded from a disk only if its parent gives it.
+- **The rest, rechecked:**
+  - fixed: RV64's SUM and `sscratch`; a kernel copy's fault retried on both ISAs; pmm's scan by runs; `task_set_affinity`'s refusal; ShareArea's I-cache sync; the counters; `AcceptPort` past a broken client; `ClosePort` from a sibling; memory nodes and wrapping ranges;
+  - closed with the reason: SGI 0, never enabled; the woken task's affinity, which only a selftest can change; the lent priority, now bounded by the server's next wait; the hosted build's purpose; ProtectArea's sync ordering;
+  - and `ktimer_stop`, found fixed already (`268591d`).
+- **`KLog`'s ring:** `kprintf` and `KLog` copy into 64 KiB that a kernel task, `klog`, drains. It writes only what the UART takes without waiting (`console_room`: the PL011's FIFO flag, the 16550's 16 bytes once empty), so interrupts are off for microseconds. It's woken by an IPI to its own CPU, so a `kprintf` under any lock is safe. Before it runs, when kernel text finds the ring full, and before a halt or a reboot (`klog_flush`), the caller drains the ring itself as before. A process's line that finds it full waits for room.
+- **`ReadLog`** (call 57): the root's holder reads the ring's tail. init's meditation ends with hwdb's last lines.
+- **From V5:**
+  - `GPU_WAIT`: the plan's flag in `struct GpuSync` couldn't save the interrupt, since the firmware can't read it. Instead the client says it will sleep, with the value it waits for, and `gpu-panthor` masks the group's `CSG_SYNC_UPDATE` in `ack_irq_mask` until then.
+  - `GPU_EVENT`: left with the server and answered when the queue faults. `gpu-rogue` has both, `GPU_WAIT` doing nothing there; its `GPU_EVENT` waits for the RV2.
+- **Found on the CIX:** hwdb's kill test failed "its DMA Areas weren't all quarantined": `gpu-panthor` boots its firmware after Bind, allocating as it goes, so the count taken before a kill can be short. It's now "at least what it held when counted".
+
+**Tests,** each failing without its fix (by a mutation run, except where QEMU can't show it: the I-cache, `sscratch`, SUM, the system registers, PSCI, the counters):
+- kernel: `V1.1 pmm` (one run longer than the largest: 1030 steps for 65,536 pages, against a step a page), `V1.1 timer` (a year both ways), `V1.3 stack` (a task recursing into its own struct, found at the switch), `V1.3 migrate`'s refusal, `V1.4 asids` (four domains, one ASID of their own, three sharing, each seeing only its own page at one address), `V2.4 klog` (a `KLog` while CPU 1 holds the console 50 ms returns in 38–61 µs under QEMU, 0 µs on the CIX);
+- programs: `userinsn`, `copyrace` (20,000 `QueryArea`s into an Area being remapped), `crowd` (`V6.8 debts`), `deadline`'s sibling close, dostest's `C:hello` refused `"dos"`, init's test reading hwdb's last line back;
+- the CIX: `gputest` fails if a spun-on job costs an interrupt, and its fault job must come back as `GPU_EVENT`'s answer.
+
+**Costs**, on the CIX:
+- a spun-on job: 8 µs, 0.0 interrupts and 0.1 kernel calls machine-wide, against V5's 11 µs, 1.0 and 6.0;
+- a job slept on, `GPU_WAIT` included: 21–23 µs;
+- a fault's message: about 1 ms after the doorbell;
+- the failing scan for a run longer than any: 2.1 million steps, a word each of the holes between RAM's ranges.
+
+**Still to do:** the RV2's half: the `dos` stall, `gpu-rogue`'s `GPU_EVENT`, and its 10 runs.
 
 ## Sources
 

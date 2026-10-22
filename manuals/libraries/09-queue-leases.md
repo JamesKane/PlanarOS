@@ -32,14 +32,14 @@ A queue lease needs no kernel call of its own. It's built from these:
 - **`AREAF_NC` Areas** for the ring and the sync object. Neither GPU sees what's still in the CPU's caches.
 - **`ShareArea` and `ReleaseArea`**: the app lends an Area to the server, and the server lets go of it when the queue ends.
 - **`ShareLease`**: one page of the server's registers, the doorbell, mapped into the app.
-- **`WaitAddr` and `WakeAddr`** (chapter 7): the app sleeps on its sync object, and the server wakes it when the firmware says it moved.
+- **`WaitAddr` and `WakeAddr`** (chapter 7): the app sleeps on its sync object, and the server wakes it when the firmware says it moved. The app says first that it will (`GPU_WAIT`), so an app that spins costs the server nothing (V6 step 8).
 - **`LimitLeaseDma`**: hwdb's limit on where the device can reach. The RV2's GPU sees only the first 2 GiB at their own addresses.
 
 ### Lifetimes
 
 - **The queue lasts as long as the app's connection.** When the connection goes, for whatever reason, the server stops the queue first (the group terminated, or the context cleaned up by the firmware), then takes the app's memory out of the GPU's view, then releases what the app lent. Nothing reads the app's memory once it's gone.
 - **When the server dies**, hwdb stops the device (a soft reset on both GPUs) before the server's memory, and what apps lent it, leaves quarantine. The doorbell pages go with the server's death. The app sees its connection go (`PortGone`), and its next job needs a new connection and a new queue.
-- **A fault** stops the app's queue alone, and the server keeps the last one for `GPU_STATUS`. The app's sync object doesn't move. In V5 the app finds out by asking or by a deadline; a message on the connection is later.
+- **A fault** stops the app's queue alone, and the server keeps the last one for `GPU_STATUS`. The app's sync object doesn't move. An app hears of it as a message by leaving `GPU_EVENT` with the server, which answers it when a fault comes (V6 step 8); otherwise by asking, after a deadline.
 
 ## Using it
 
@@ -56,7 +56,10 @@ if (doorbell)
     *doorbell = 1;
 else
     ask(GPU_KICK);
-/* 4. The sync object: spun on, or slept on. */
+/* 4. The sync object: spun on, or slept on once the server's told. */
+m->gm_Op = GPU_WAIT;
+m->gm_Seqno = want;
+DoMsg(&mp, &m->gm_Msg);
 while (sync->gs_Seqno != want)
     WaitAddr(&sync->gs_Seqno, want - 1, deadline);
 ```
@@ -86,7 +89,8 @@ A new server knows nothing of the old queue: the app lends its memory again and 
 - **Lend whole `AREAF_NC` Areas**, shared read-write with the server, and keep them until the queue ends. `GPU_UNMAP` is refused while there's a queue.
 - **Order the writes:** the commands, then `gq_Insert`, then the doorbell or kick, with a barrier between each. The device reads them without the CPU's caches, and the doorbell is a device write.
 - **Never get more than a ring ahead.** Keep `gq_Insert − gq_Extract` within the ring's size. The firmware moves `gq_Extract` when it gets round to it, not at each job, so leave room.
-- **Wait with a deadline.** A queue that faulted never moves its sync object. After a deadline, ask `GPU_STATUS`.
+- **Wait with a deadline,** or with `GPU_EVENT` in flight. A queue that faulted never moves its sync object. After a deadline, ask `GPU_STATUS`.
+- **Say `GPU_WAIT` before sleeping.** Without it, on the CSF, nothing wakes the sync object: the server isn't told of its updates.
 - **Don't ring a dead server's doorbell.** Its page is gone, and the write faults.
 - **One queue per connection.** A GPU has a few queues to give: 7 on each board. `gm_Free` from `GPU_OPEN` says how many are left.
 

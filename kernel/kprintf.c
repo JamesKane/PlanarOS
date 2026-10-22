@@ -168,7 +168,10 @@ void klog_start(void)
 
     if (atomic_load(&drainer) || !time_have_timers())
         return;
-    if ((t = task_create("klog", TASK_PRI_MAX, TASK_ANY_CPU, drain_task, nullptr))) {
+    /* On the boot CPU, where the selftests run themselves: anywhere else
+     * it can be the busy CPU a test wanted idle (V3.4 placement, once in
+     * five CIX boots). At the top priority, it's never kept waiting. */
+    if ((t = task_create("klog", TASK_PRI_MAX, 1, drain_task, nullptr))) {
         atomic_store_explicit(&drainer, t, memory_order_release);
         if (atomic_load(&head) != atomic_load(&shown) && !atomic_exchange(&wake_pending, true))
             arch_send_ipi(this_cpu());
