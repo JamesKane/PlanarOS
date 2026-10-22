@@ -13,7 +13,6 @@
 int main(void)
 {
     int64_t sig = AllocSignal(-1), err;
-    struct logbuf b = { 0 };
     struct EchoMsg *m;
     struct MsgPort mp;
     uint64_t i = 0, bad = 0;
@@ -27,11 +26,6 @@ int main(void)
     while (!(SetSignal(0, 0) & SIGBREAKF_CTRL_C))
         if (DoMsg(&mp, &m->em_Msg) != 0 || m->em_Value != ++i)
             bad++;
-    log_str(&b, "talker: ");
-    log_num(&b, i);
-    log_str(&b, " round trips under load, ");
-    log_num(&b, bad);
-    log_str(&b, " bad");
-    KLog(b.text);
+    KPrintF("talker: %lu round trips under load, %lu bad", (uint64_t)i, bad);
     return (int)bad;
 }

@@ -1341,7 +1341,7 @@ va_end(ap);
 - **Differs from Exec:** Exec's `%d` was 16 bits and `%ld` 32, and its arguments were packed as words; these are C's sizes, and `%ld` is 64 bits on both ISAs. Exec returned the next argument; this returns the length.
 - There's no floating point: `%f`, `%e`, `%g` and `%a` are written as they stand, as is any conversion it doesn't know.
 - `%s` of `nullptr` writes `(null)`. `%S` writes exactly `st_Len` bytes, NULs and all: no NUL is needed.
-- `SNPrintf`, over this, is utility.library's (step 3, [docs §17.4.3](../../docs/17-c-runtime-and-libraries.md)).
+- `SNPrintf`, over this, is utility.library's ([autodoc](utility.md#utilitysnprintf)). `struct Str` is in `planar/utility.h`.
 
 **BUGS**
 None known.

@@ -21,13 +21,7 @@ static unsigned step;
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "uncached: check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("uncached: check %lu failed: %s", (uint64_t)step, what);
     return (int)step;
 }
 

@@ -29,14 +29,7 @@ static const char *role = "futex";
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, role);
-    log_str(&b, ": check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("%s: check %lu failed: %s", role, (uint64_t)step, what);
     return (int)step;
 }
 
@@ -188,14 +181,8 @@ static int test(void)
     CHECK(CloseConn((Handle)r) == 0);
     CHECK(DeletePort(port) == 0);
 
-    struct logbuf b = { 0 };
-
-    log_str(&b, "futex: ");
-    log_num(&b, ROUNDS);
-    log_str(&b, " round trips across two processes, ");
-    log_num(&b, t / ROUNDS / 1000);
-    log_str(&b, " us each");
-    KLog(b.text);
+    KPrintF("futex: %lu round trips across two processes, %lu us each", (uint64_t)ROUNDS,
+            (uint64_t)(t / ROUNDS / 1000));
     return 0;
 }
 

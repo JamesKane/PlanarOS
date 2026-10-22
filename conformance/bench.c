@@ -13,16 +13,7 @@ constexpr unsigned CALLS = 10000;
 
 static void report(const char *what, const struct CycleSum *c)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "bench: ");
-    log_str(&b, what);
-    log_str(&b, ": ");
-    log_num(&b, CycleMean(c));
-    log_str(&b, " cycles (");
-    log_num(&b, c->dropped);
-    log_str(&b, " moved CPU)");
-    KLog(b.text);
+    KPrintF("bench: %s: %lu cycles (%lu moved CPU)", what, CycleMean(c), c->dropped);
 }
 
 int main(uint64_t table)

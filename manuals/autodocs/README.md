@@ -10,6 +10,7 @@
 | [drv.md](drv.md) | drv.library, a driver's main loop (`planar/drv.h`, `lib/drv`) |
 | [blk.md](blk.md) | The block class's client library (`planar/blk.h`, `lib/blk`) |
 | [dos.md](dos.md) | dos.library: files, the loader, the console (`planar/dos.h`, `lib/dos`) |
+| [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 
 ## All calls
 
@@ -37,6 +38,7 @@
 | blk_read, blk_write | [blk](blk.md#blkblk_read) | library |
 | blk_release | [blk](blk.md#blkblk_release) | library |
 | blk_submit | [blk](blk.md#blkblk_submit) | library |
+| CallHookPkt | [utility](utility.md#utilitycallhookpkt) | library |
 | CloseConn | [exec](exec.md#execcloseconn) | kernel |
 | CloseHandle | [exec](exec.md#execclosehandle) | kernel |
 | ClosePort | [msg](msg.md#execcloseport) | library |
@@ -73,6 +75,7 @@
 | drv_reply | [drv](drv.md#drvdrv_reply) | library |
 | ExitProcess | [exec](exec.md#execexitprocess) | kernel |
 | ExitTask | [exec](exec.md#execexittask) | kernel |
+| FindTagItem | [utility](utility.md#utilityfindtagitem) | library |
 | FindTask | [exec](exec.md#execfindtask) | kernel |
 | FlushPort | [msg](msg.md#execflushport) | library |
 | FreeArea | [exec](exec.md#execfreearea) | kernel |
@@ -81,6 +84,7 @@
 | FreeVec | [exec](exec.md#execfreevec) | library |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
+| GetTagData | [utility](utility.md#utilitygettagdata) | library |
 | GrantConsole | [lease](lease.md#leasegrantconsole) | kernel |
 | GrantFirmware | [lease](lease.md#leasegrantfirmware) | kernel |
 | GrantLease | [lease](lease.md#leasegrantlease) | kernel |
@@ -88,6 +92,7 @@
 | KLog | [exec](exec.md#execklog) | kernel |
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
 | MapLease | [lease](lease.md#leasemaplease) | kernel |
+| NextTagItem | [utility](utility.md#utilitynexttagitem) | library |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
 | PortGone | [msg](msg.md#execportgone) | library |
 | ProtectArea | [exec](exec.md#execprotectarea) | kernel |
@@ -107,7 +112,20 @@
 | Signal | [exec](exec.md#execsignal) | kernel |
 | SignalConn | [exec](exec.md#execsignalconn) | kernel |
 | SignalWaitConn | [exec](exec.md#execsignalwaitconn) | kernel |
+| SNPrintf, VSNPrintf | [utility](utility.md#utilitysnprintf) | library |
+| SpanReadU8, SpanReadU16LE … SpanReadU64BE | [utility](utility.md#utilityspanread) | library |
+| SpanSlice | [utility](utility.md#utilityspanslice) | library |
 | StartProcess | [exec](exec.md#execstartprocess) | kernel |
+| StrFromC | [utility](utility.md#utilitystrfromc) | library |
+| StrHasPrefix | [utility](utility.md#utilitystrhasprefix) | library |
+| Stricmp, Strnicmp | [utility](utility.md#utilitystricmp) | library |
+| StrSame, StrSameNoCase | [utility](utility.md#utilitystrsame) | library |
+| StrSlice | [utility](utility.md#utilitystrslice) | library |
+| StrSplit | [utility](utility.md#utilitystrsplit) | library |
+| StrToU64 | [utility](utility.md#utilitystrtou64) | library |
+| StrTrim | [utility](utility.md#utilitystrtrim) | library |
+| TagInArray | [utility](utility.md#utilitytaginarray) | library |
+| ToUpper, ToLower | [utility](utility.md#utilitytoupper) | library |
 | UnshareArea | [exec](exec.md#execunsharearea) | kernel |
 | Wait | [exec](exec.md#execwait) | kernel |
 | WaitPort | [msg](msg.md#execwaitport) | library |

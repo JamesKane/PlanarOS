@@ -41,14 +41,7 @@ static const char *role = "doorbell";
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, role);
-    log_str(&b, ": check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("%s: check %lu failed: %s", role, (uint64_t)step, what);
     return (int)step;
 }
 

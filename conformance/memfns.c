@@ -25,31 +25,22 @@ static void byte_copy(volatile uint8_t *d, const uint8_t *s, unsigned n)
 }
 
 /* Bytes a microsecond, in tenths. */
-static void log_rate(struct logbuf *b, uint64_t bytes, uint64_t ns)
+static void fmt_rate(char *out, size_t size, uint64_t bytes, uint64_t ns)
 {
     uint64_t t = ns ? bytes * 10000 / ns : 0;
 
-    log_num(b, t / 10);
-    log_str(b, ".");
-    log_num(b, t % 10);
+    SNPrintf(out, size, "%lu.%lu", t / 10, t % 10);
 }
 
 int main(void)
 {
     struct memcheck_fail f;
-    struct logbuf b = { 0 };
+    char copy_s[32], set_s[32], bytes_s[32];
     uint64_t cases = 0, t0, copy, set, bytes;
 
     if (memcheck(&f, &cases)) {
-        log_str(&b, "memfns: ");
-        log_str(&b, f.fn);
-        log_str(&b, " wrong at length ");
-        log_num(&b, f.len);
-        log_str(&b, ", source +");
-        log_num(&b, f.salign);
-        log_str(&b, ", destination +");
-        log_num(&b, f.dalign);
-        KLog(b.text);
+        KPrintF("memfns: %s wrong at length %lu, source +%lu, destination +%lu",
+                f.fn, (uint64_t)f.len, (uint64_t)f.salign, (uint64_t)f.dalign);
         return 1;
     }
 
@@ -69,14 +60,10 @@ int main(void)
     if (memcmp(big_dst, big_src, BIG) != 0)
         return 1;
 
-    log_str(&b, "memfns: ");
-    log_num(&b, cases);
-    log_str(&b, " cases right; 64 KiB copied at ");
-    log_rate(&b, (uint64_t)BIG * ROUNDS, copy);
-    log_str(&b, " bytes/us, set at ");
-    log_rate(&b, (uint64_t)BIG * ROUNDS, set);
-    log_str(&b, ", a byte loop ");
-    log_rate(&b, (uint64_t)BIG * ROUNDS, bytes);
-    KLog(b.text);
+    fmt_rate(copy_s, sizeof copy_s, (uint64_t)BIG * ROUNDS, copy);
+    fmt_rate(set_s, sizeof set_s, (uint64_t)BIG * ROUNDS, set);
+    fmt_rate(bytes_s, sizeof bytes_s, (uint64_t)BIG * ROUNDS, bytes);
+    KPrintF("memfns: %lu cases right; 64 KiB copied at %s bytes/us, set at %s, a byte loop %s",
+            cases, copy_s, set_s, bytes_s);
     return 0;
 }

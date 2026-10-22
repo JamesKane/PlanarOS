@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: in progress (2026-10-22): steps 1 and 2 done.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
+**Status: in progress (2026-10-22): steps 1 to 3 done.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -126,6 +126,37 @@ As §17.4.2 specifies:
 - **Tested by** `conformance/pool.c`: puddles filled and reused, allocations above the threshold, a fixed-buffer pool, `DeletePool` with allocations outstanding (the process's Area count back to where it was), `AllocVec` at every alignment, and `RawDoFmt` against known strings.
 
 ## 3. `utility.library`
+
+**Done (2026-10-22), on QEMU.** In `include/planar/utility.h` and `lib/utility/` (`tags.c`, `string.c`, `str.c`, `span.c`), built into `libutility.a`, which every link line has before `libexec.a`, since `SNPrintf` calls `RawDoFmt`.
+
+- **Tags and hooks** as Commodore's, with 64-bit data. `NextTagItem` leaves `*tagListPtr` `nullptr` at the end, so a finished walk stays finished; a `TAG_MORE` to `nullptr` ends the list. `CallHookPkt` calls `h_Entry` as a C function: no register stub.
+- **Case is ASCII's**, not ISO 8859-1's as Commodore's was, because Latin-1's mapping would change UTF-8's lead bytes. `Stricmp` compares the bytes as unsigned.
+- **`SNPrintf` and `VSNPrintf`** return what C's do: the whole length, so a result of the size or more says the text was cut. The buffer always ends with a NUL if its size isn't 0.
+- **`Str`** helpers return views, nothing copied. `StrSlice` clamps; `StrToU64` reads the whole `Str` or fails, refusing overflow by `ckd_mul` and `ckd_add`.
+- **`Span`'s readers** check `offset + n` with `ckd_add` before forming a pointer, and leave `*out` alone when they refuse. `SpanReadU8` is added to §17.4.3's list.
+- **`struct Str` and `STR()`** moved from `planar/exec.h`.
+- **`conformance/log.h`** is now debug.lib's `KPrintF`, over `VSNPrintf`, format-checked by the compiler. Its `log_str`/`log_num` are gone, and the 22 conformance programs that used them log through it. Every line keeps its text.
+
+**Tested by:**
+- `conformance/utilcheck.h`, 335 cases, run in the guest by `conformance/utility.c` and on the host with the sanitizers by `make utility-test`:
+  - a tag list through `TAG_IGNORE`, `TAG_SKIP` and `TAG_MORE`, with items after each that mustn't be seen;
+  - hooks, case for all 256 bytes, the comparisons' signs;
+  - `SNPrintf` fitting, cut, and with sizes 1 and 0;
+  - every `Str` helper's edges, and `StrToU64` at `UINT64_MAX` and one past it;
+  - every reader at the end, one past it, and at offsets that would wrap a 64-bit add.
+- `tools/span-fuzz` (`make span-fuzz`): libFuzzer with ASan and UBSan over the readers, `SpanSlice`, `StrToU64`, `StrSplit` and `StrTrim`, against a model whose bounds are 128-bit. Each input's bytes are an exact-size block, so a read one past is ASan's. A million inputs in `make test-all`, and 61 million in a minute's run with no failure. Mutation-tested: the check as a plain add, and one byte too far, each fail it within a second, and `utility-test` too.
+- `V6.3 utility ok`, on every QEMU boot.
+
+**Costs**, under QEMU:
+
+| | RV64 | AArch64 |
+|---|---|---|
+| `GetTagData` of the eighth tag | 50 ns | 55 ns |
+| `SNPrintf` of a short line | 1.2 µs | 0.75 µs |
+| `SpanReadU32BE` | 40 ns | 15 ns |
+| `lib/utility`, all four files (text) | 1.8 KiB | 2.4 KiB |
+
+**Not yet on the boards**, with steps 1 and 2.
 
 As §17.4.3 specifies, in `include/planar/utility.h` and `lib/utility/`:
 - **Tags:** `struct TagItem` with 64-bit data, `NextTagItem` (with `TAG_MORE`, `TAG_SKIP`, `TAG_IGNORE`), `FindTagItem`, `GetTagData`, `TagInArray`.

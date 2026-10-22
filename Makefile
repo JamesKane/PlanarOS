@@ -73,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V6.2 done
+EXPECT := V6.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -135,7 +135,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -186,6 +186,8 @@ test-all:
 	@$(MAKE) --no-print-directory display-test
 	@$(MAKE) --no-print-directory rt-test
 	@$(MAKE) --no-print-directory exec-test
+	@$(MAKE) --no-print-directory utility-test
+	@$(MAKE) --no-print-directory span-fuzz
 
 # lib/rt/string.c's word loops, which the ISAs' own replace, on the host
 # with the sanitizers, renamed so as not to be the host's.
@@ -212,6 +214,32 @@ $(EXEC_TEST): lib/exec/pool.c lib/exec/fmt.c lib/exec/test.c conformance/fmtchec
 
 exec-test: $(EXEC_TEST)
 	@$(EXEC_TEST)
+
+# utility.library on the host with the sanitizers, against
+# conformance/utilcheck.h; and its Span and Str calls under libFuzzer,
+# a million inputs from an empty corpus each run.
+comma := ,
+UTILITY_TEST := build/utility/utility-test
+SPAN_FUZZ := build/utility/span-fuzz
+UTILITY_SRCS := $(filter-out %/test.c,$(wildcard lib/utility/*.c))
+
+$(UTILITY_TEST): $(UTILITY_SRCS) lib/exec/fmt.c lib/utility/test.c conformance/utilcheck.h \
+		include/planar/utility.h include/planar/exec.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) $(UTILITY_SRCS) lib/exec/fmt.c \
+	  lib/utility/test.c -o $@
+
+utility-test: $(UTILITY_TEST)
+	@$(UTILITY_TEST)
+
+$(SPAN_FUZZ): $(UTILITY_SRCS) lib/exec/fmt.c tools/span-fuzz/fuzz.c include/planar/utility.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(subst -fsanitize=,-fsanitize=fuzzer$(comma),$(HWDB_CFLAGS:-Iservers/hwdb=)) \
+	  $(UTILITY_SRCS) lib/exec/fmt.c tools/span-fuzz/fuzz.c -o $@
+
+span-fuzz: $(SPAN_FUZZ)
+	@$(SPAN_FUZZ) -runs=1000000 -seed=1 > $(SPAN_FUZZ).log 2>&1 || { cat $(SPAN_FUZZ).log; exit 1; }
+	@echo "span-fuzz: ok: $$(tail -1 $(SPAN_FUZZ).log)"
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.

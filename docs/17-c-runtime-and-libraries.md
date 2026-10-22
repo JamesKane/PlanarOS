@@ -253,6 +253,7 @@ bool       StrToU64(struct Str s, unsigned base, uint64_t *out);
 
 /* Overflow-checked binary slicing and endian loads (built on <stdckdint.h>) */
 bool SpanSlice(struct Span s, uint64_t offset, uint64_t len, struct Span *out);
+bool SpanReadU8(struct Span s, uint64_t offset, uint8_t *out);     /* as built: added */
 bool SpanReadU16LE(struct Span s, uint64_t offset, uint16_t *out);
 bool SpanReadU32LE(struct Span s, uint64_t offset, uint32_t *out);
 bool SpanReadU64LE(struct Span s, uint64_t offset, uint64_t *out);
@@ -262,6 +263,14 @@ bool SpanReadU64BE(struct Span s, uint64_t offset, uint64_t *out);
 
 #endif /* PLANAR_UTILITY_H */
 ```
+
+As built (V6 step 3, `lib/utility`, in `libutility.a`):
+- **Case is ASCII's.** Commodore's `ToUpper` knew ISO 8859-1, whose mapping would change UTF-8's lead bytes; Planar's text is UTF-8.
+- **`VSNPrintf` returns what C's `vsnprintf` does:** the whole text's length, so a result of `bufferSize` or more says it was cut. It always ends the buffer with a NUL if `bufferSize` isn't 0.
+- **`NextTagItem`** sets `*tagListPtr` to `nullptr` at the end, as AROS's does, so a walk that's done stays done. A `TAG_MORE` to `nullptr` ends the list.
+- **`StrSlice` clamps** to its `Str`; `SpanSlice`, fed by a file's offsets, refuses. **`StrToU64`** reads all of its `Str` or fails, and base 0 takes `0x`, `0b` and `0o`. **`StrSplit`** splits at the first separator.
+- **`SpanReadU8`** is added. A refused read leaves `*out` as it was.
+- `struct Str` and `STR()` moved here from `planar/exec.h`, where step 2 had them for `RawDoFmt`'s `%S`.
 
 ---
 

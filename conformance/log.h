@@ -1,35 +1,25 @@
 /*
- * conformance/log.h -- KLog with numbers, without a C library
+ * conformance/log.h -- KLog, formatted
+ *
+ * debug.lib's KPrintF: RawDoFmt's conversions, through utility.library's
+ * SNPrintf into a line on the stack, cut at 160 bytes, then KLog.
  */
 #ifndef CONFORMANCE_LOG_H
 #define CONFORMANCE_LOG_H
 
 #include <planar/exec.h>
+#include <planar/utility.h>
 
-struct logbuf {
-    char text[160];
-    unsigned len;
-};
-
-static inline void log_str(struct logbuf *b, const char *s)
+[[gnu::format(printf, 1, 2)]]
+static inline void KPrintF(const char *fmt, ...)
 {
-    while (*s && b->len < sizeof b->text - 1)
-        b->text[b->len++] = *s++;
-    b->text[b->len] = '\0';
-}
+    char line[160];
+    va_list ap;
 
-static inline void log_num(struct logbuf *b, uint64_t v)
-{
-    char digits[24];
-    unsigned n = 0;
-
-    do {
-        digits[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v);
-    while (n && b->len < sizeof b->text - 1)
-        b->text[b->len++] = digits[--n];
-    b->text[b->len] = '\0';
+    va_start(ap, fmt);
+    VSNPrintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    KLog(line);
 }
 
 #endif /* CONFORMANCE_LOG_H */

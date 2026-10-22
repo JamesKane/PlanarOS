@@ -54,8 +54,6 @@ static void worker(uint64_t t)
 int main(uint64_t ticks)
 {
     uint64_t want = 0, got = 0, total = 0;
-    struct logbuf b = { 0 };
-
     if (fpregs_vec_bytes() > FPREGS_MAX_VEC_BYTES) {
         KLog("fpu: vector registers too long for this test");
         return 99;
@@ -71,13 +69,7 @@ int main(uint64_t ticks)
         got |= Wait(want);
     for (unsigned t = 0; t < TASKS; t++)
         total += bad[t];
-    log_str(&b, "fpu: ");
-    log_num(&b, TASKS * ROUNDS);
-    log_str(&b, " rounds, ");
-    log_num(&b, total);
-    log_str(&b, " bad, vector registers ");
-    log_num(&b, fpregs_vec_bytes() * 8);
-    log_str(&b, " bits");
-    KLog(b.text);
+    KPrintF("fpu: %lu rounds, %lu bad, vector registers %lu bits", (uint64_t)(TASKS * ROUNDS),
+            total, (uint64_t)(fpregs_vec_bytes() * 8));
     return (int)total;
 }

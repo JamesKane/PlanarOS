@@ -9,6 +9,7 @@
 #define CONFORMANCE_FMTCHECK_H
 
 #include <planar/exec.h>
+#include <planar/utility.h>
 
 struct fc_buf {
     char text[128];

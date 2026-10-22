@@ -22,13 +22,7 @@ static unsigned step;
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "areas: check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("areas: check %lu failed: %s", (uint64_t)step, what);
     return (int)step;
 }
 

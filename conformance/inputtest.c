@@ -35,13 +35,7 @@ static unsigned step;
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "inputtest: check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("inputtest: check %lu failed: %s", (uint64_t)step, what);
     return (int)step;
 }
 
@@ -122,11 +116,7 @@ static bool next(struct InputEvent *e, uint64_t until)
 
 static void send(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "inputtest: send ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("inputtest: send %s", what);
 }
 
 /* One round: 1 if it was typed and right, 0 if nothing came, or the

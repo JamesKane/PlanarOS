@@ -18,7 +18,6 @@ int main(uint64_t table)
 {
     struct MsgPort mp;
     struct EchoMsg *m;
-    struct logbuf b = { 0 };
     int64_t sig = AllocSignal(-1), err;
     struct CycleSum each = { 0 };
     uint64_t c0, bad = 0;
@@ -37,14 +36,8 @@ int main(uint64_t table)
         CycleAdd(&each, c0, ReadCycles());
         bad += m->em_Value != i + 1;
     }
-    log_str(&b, "pingpong: ");
-    log_num(&b, ROUNDS);
-    log_str(&b, " DoMsg round trips, ");
-    log_num(&b, CycleMean(&each));
-    log_str(&b, " cycles each (");
-    log_num(&b, each.dropped);
-    log_str(&b, " moved CPU)");
-    KLog(b.text);
+    KPrintF("pingpong: %lu DoMsg round trips, %lu cycles each (%lu moved CPU)", (uint64_t)ROUNDS,
+            CycleMean(&each), each.dropped);
     if (table)
         return bad ? -1 : (int)CycleMean(&each);
     return (int)bad;

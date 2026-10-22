@@ -1398,6 +1398,8 @@ void selftest_tasks(void *)
     kprintf("V6.1 done\n");
     selftest_exec_memory();
     kprintf("V6.2 done\n");
+    selftest_utility();
+    kprintf("V6.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2878,4 +2880,22 @@ void selftest_exec_memory(void)
     kprintf("V6.2 exec memory ok: pools' puddles filled and taken again, blocks above the "
             "threshold an Area each, a pool in a fixed buffer, DeletePool leaving no handle; "
             "AllocVec shared by two tasks; RawDoFmt as C formats\n");
+}
+
+/*
+ * V6 step 3: utility.library (conformance/utility.c): tag lists through
+ * TAG_MORE and TAG_SKIP, hooks, case and SNPrintf's cutting, Str's
+ * helpers, and the Span readers refusing every offset past the end.
+ */
+void selftest_utility(void)
+{
+    static const char *const tests[] = { "utility" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.3 utility skipped: no user programs\n");
+        return;
+    }
+    run_each("V6.3 utility", tests, 1);
+    kprintf("V6.3 utility ok: tag lists, hooks, ASCII case, SNPrintf cut to fit; Str sliced, "
+            "split and parsed; Span's endian readers refusing any offset past the end\n");
 }

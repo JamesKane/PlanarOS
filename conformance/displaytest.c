@@ -36,13 +36,7 @@ static unsigned step;
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "displaytest: check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("displaytest: check %lu failed: %s", (uint64_t)step, what);
     return (int)step;
 }
 
@@ -142,13 +136,9 @@ static uint64_t last_vblank(uint64_t *at)
     return v;
 }
 
-static void log_range(struct logbuf *l, const char *what, uint64_t lo, uint64_t hi)
+static void fmt_range(char *out, size_t size, const char *what, uint64_t lo, uint64_t hi)
 {
-    log_str(l, what);
-    log_num(l, lo / 1000);
-    log_str(l, "-");
-    log_num(l, hi / 1000);
-    log_str(l, " us");
+    SNPrintf(out, size, "%s%lu-%lu us", what, lo / 1000, hi / 1000);
 }
 
 /* PACED flips, each committed just after a vblank: when each latched. */
@@ -156,7 +146,7 @@ static int paced(const struct buf *a, const struct buf *b, const struct buf *c)
 {
     uint64_t commit_lo = UINT64_MAX, commit_hi = 0, vsync_lo = UINT64_MAX, vsync_hi = 0;
     uint64_t missed = 0;
-    struct logbuf l = { 0 };
+    char commit_s[64], vsync_s[64];
 
     for (unsigned i = 0; i < PACED; i++) {
         uint64_t v0, t0, v1, t1, t_commit, seq, until = CurrentTime() + 250 * MS;
@@ -182,15 +172,10 @@ static int paced(const struct buf *a, const struct buf *b, const struct buf *c)
             vsync_hi = t1 - t0;
         missed += v1 - v0 - 1;
     }
-    log_str(&l, "displaytest: ");
-    log_num(&l, PACED);
-    log_str(&l, " flips paced by the vblank: ");
-    log_range(&l, "commit to latch ", commit_lo, commit_hi);
-    log_range(&l, ", vblank to latch ", vsync_lo, vsync_hi);
-    log_str(&l, ", ");
-    log_num(&l, missed);
-    log_str(&l, " vblanks missed");
-    KLog(l.text);
+    fmt_range(commit_s, sizeof commit_s, "commit to latch ", commit_lo, commit_hi);
+    fmt_range(vsync_s, sizeof vsync_s, ", vblank to latch ", vsync_lo, vsync_hi);
+    KPrintF("displaytest: %lu flips paced by the vblank: %s%s, %lu vblanks missed",
+            (uint64_t)PACED, commit_s, vsync_s, missed);
     return 0;
 }
 
@@ -199,8 +184,8 @@ static int flips(void)
     int r;
 
     struct buf a, b, c, d;
-    uint64_t seq, worst = 0, total = 0, vb0;
-    struct logbuf l = { 0 };
+    uint64_t seq, worst = 0, total = 0, vb0, vblanks;
+    char mode[64] = "";
 
     /* What it is, and refusals. */
     CHECK(m->dm_Width > 0 && m->dm_Height > 0 && m->dm_Count >= 3 && m->dm_Count <= DISPLAY_PLANES);
@@ -254,27 +239,16 @@ static int flips(void)
     CHECK(ask(DISPLAY_FREE) == 0);
     CHECK(ask(DISPLAY_FREE) == ERR_NOTFOUND);
 
-    log_str(&l, "displaytest: ");
-    log_num(&l, FLIPS);
-    log_str(&l, " flips, each on the screen ");
-    log_num(&l, total / FLIPS / 1000);
-    log_str(&l, " us after its commit (worst ");
-    log_num(&l, worst / 1000);
-    log_str(&l, " us), over ");
-    log_num(&l, sync_page->ds_Vblank - vb0);
-    log_str(&l, " vblanks");
+    vblanks = sync_page->ds_Vblank - vb0;
     memset(m, 0, sizeof *m);
-    if (ask(DISPLAY_INFO) == 0 && m->dm_RefreshMilliHz) {
-        log_str(&l, " at ");
-        log_num(&l, m->dm_RefreshMilliHz / 1000);
-        log_str(&l, ".");
-        log_num(&l, m->dm_RefreshMilliHz / 100 % 10);
-        log_str(&l, " Hz, ");
-        log_num(&l, m->dm_Width);
-        log_str(&l, "x");
-        log_num(&l, m->dm_Height);
-    }
-    KLog(l.text);
+    if (ask(DISPLAY_INFO) == 0 && m->dm_RefreshMilliHz)
+        SNPrintf(mode, sizeof mode, " at %lu.%lu Hz, %lux%lu",
+                 (uint64_t)(m->dm_RefreshMilliHz / 1000),
+                 (uint64_t)(m->dm_RefreshMilliHz / 100 % 10),
+                 (uint64_t)m->dm_Width, (uint64_t)m->dm_Height);
+    KPrintF("displaytest: %lu flips, each on the screen %lu us after its commit (worst %lu us), "
+            "over %lu vblanks%s", (uint64_t)FLIPS, (uint64_t)(total / FLIPS / 1000),
+            (uint64_t)(worst / 1000), vblanks, mode);
     if ((r = paced(&a, &b, &c)) != 0)
         return r;
     /* A fourth buffer says we're done (hwdb counts them); shown until

@@ -19,13 +19,7 @@ static unsigned step;
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "timer: check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("timer: check %lu failed: %s", (uint64_t)step, what);
     return (int)step;
 }
 
@@ -92,10 +86,6 @@ int main(void)
     ArmTimer(CurrentTime() + 20 * MS, 26);
     Wait(1ULL << 26);
 
-    struct logbuf b = { 0 };
-    log_str(&b, "timer: a 2 ms alarm came ");
-    log_num(&b, late / 1000);
-    log_str(&b, " us late");
-    KLog(b.text);
+    KPrintF("timer: a 2 ms alarm came %lu us late", (uint64_t)(late / 1000));
     return 0;
 }

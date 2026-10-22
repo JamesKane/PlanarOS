@@ -18,19 +18,8 @@ constexpr uint32_t SLOTS = 64;
 
 static void report(const char *what, uint64_t count, const struct CycleSum *c, uint64_t bad)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, what);
-    log_str(&b, ": ");
-    log_num(&b, count);
-    log_str(&b, ", ");
-    log_num(&b, CycleMean(c));
-    log_str(&b, " cycles each (");
-    log_num(&b, c->dropped);
-    log_str(&b, " moved CPU), ");
-    log_num(&b, bad);
-    log_str(&b, " bad");
-    KLog(b.text);
+    KPrintF("%s: %lu, %lu cycles each (%lu moved CPU), %lu bad", what, count, CycleMean(c),
+            c->dropped, bad);
 }
 
 static uint64_t round_trips(struct MsgPort *mp)

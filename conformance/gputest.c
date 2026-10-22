@@ -45,13 +45,7 @@ static unsigned step;
 
 static int failed(const char *what)
 {
-    struct logbuf b = { 0 };
-
-    log_str(&b, "gputest: check ");
-    log_num(&b, step);
-    log_str(&b, " failed: ");
-    log_str(&b, what);
-    KLog(b.text);
+    KPrintF("gputest: check %lu failed: %s", (uint64_t)step, what);
     return (int)step;
 }
 
@@ -123,15 +117,9 @@ static int64_t lend(void *at, uint64_t size)
 /* An error, said: the server's answer, for the log. */
 static int64_t said(int64_t e, const char *what)
 {
-    struct logbuf b = { 0 };
-
     if (e == 0)
         return 0;
-    log_str(&b, "gputest: ");
-    log_str(&b, what);
-    log_str(&b, ": error -");
-    log_num(&b, (uint64_t)-e);
-    KLog(b.text);
+    KPrintF("gputest: %s: error -%lu", what, (uint64_t)-e);
     return e;
 }
 
@@ -235,21 +223,17 @@ static bool spin(uint64_t until)
     return true;
 }
 
-/* n / d, said with one decimal. */
-static void log_tenths(struct logbuf *lb, uint64_t n, uint64_t d)
+/* n / d in tenths, to be said with one decimal: t / 10, ".", t % 10. */
+static uint64_t tenths(uint64_t n, uint64_t d)
 {
-    uint64_t t = (n * 10 + d / 2) / d;
-
-    log_num(lb, t / 10);
-    log_str(lb, ".");
-    log_num(lb, t % 10);
+    return (n * 10 + d / 2) / d;
 }
 
 static int round_(void)
 {
     struct SystemInfo a, b;
     uint64_t t0, t1, total, until, waited = 0, worst = 0;
-    struct logbuf lb = { 0 };
+    uint64_t t4[4];
 
     if (queue() != 0)
         return (int)step;
@@ -262,22 +246,16 @@ static int round_(void)
     step++;
     if (!spin(t0 + 1000 * MS)) {
         ask(GPU_STATUS);
-        log_str(&lb, "gputest: the first job didn't run: extract ");
-        log_num(&lb, qout->gq_Extract);
-        log_str(&lb, ", fault ");
-        log_num(&lb, m->gm_Fault);
-        KLog(lb.text);
+        KPrintF("gputest: the first job didn't run: extract %lu, fault %lu",
+                (uint64_t)qout->gq_Extract, (uint64_t)m->gm_Fault);
         return (int)step;
     }
     QuerySystem(&b);
     t1 = CurrentTime();
     CHECK(sync->gs_Status == 0);
-    log_str(&lb, "gputest: the first job ran in ");
-    log_num(&lb, (t1 - t0) / 1000);
-    log_str(&lb, " us, with ");
-    log_num(&lb, b.si_Calls - a.si_Calls);
-    log_str(&lb, " kernel calls made meanwhile, machine-wide");
-    KLog(lb.text);
+    KPrintF("gputest: the first job ran in %lu us, with %lu kernel calls made meanwhile, "
+            "machine-wide",
+            (uint64_t)((t1 - t0) / 1000), (uint64_t)(b.si_Calls - a.si_Calls));
 
     /* JOBS more, each spun on, with what they cost machine-wide: one
      * deadline for them all, so the loop makes no calls of its own. */
@@ -290,17 +268,14 @@ static int round_(void)
     }
     QuerySystem(&b);
     total = CurrentTime() - t0;
-    lb = (struct logbuf){ 0 };
-    log_str(&lb, "gputest: each job cost, machine-wide, ");
-    log_tenths(&lb, b.si_Calls - a.si_Calls, JOBS);
-    log_str(&lb, " kernel calls, ");
-    log_tenths(&lb, b.si_Switches - a.si_Switches, JOBS);
-    log_str(&lb, " task switches, ");
-    log_tenths(&lb, b.si_Crossings - a.si_Crossings, JOBS);
-    log_str(&lb, " crossings and ");
-    log_tenths(&lb, b.si_Interrupts - a.si_Interrupts, JOBS);
-    log_str(&lb, " interrupts");
-    KLog(lb.text);
+    t4[0] = tenths(b.si_Calls - a.si_Calls, JOBS);
+    t4[1] = tenths(b.si_Switches - a.si_Switches, JOBS);
+    t4[2] = tenths(b.si_Crossings - a.si_Crossings, JOBS);
+    t4[3] = tenths(b.si_Interrupts - a.si_Interrupts, JOBS);
+    KPrintF("gputest: each job cost, machine-wide, %lu.%lu kernel calls, %lu.%lu task switches, "
+            "%lu.%lu crossings and %lu.%lu interrupts",
+            t4[0] / 10, t4[0] % 10, t4[1] / 10, t4[1] % 10,
+            t4[2] / 10, t4[2] % 10, t4[3] / 10, t4[3] % 10);
     /* The firmware writes how far it has read when it gets to it, not at
      * each job: it has moved on, and never past what was written. */
     for (uint64_t until = CurrentTime() + 100 * MS;
@@ -308,13 +283,8 @@ static int round_(void)
         nap(1);
     CHECK(qout->gq_Extract > 0 && qout->gq_Extract <= qin->gq_Insert);
     if (qout->gq_Extract != qin->gq_Insert) {
-        lb = (struct logbuf){ 0 };
-        log_str(&lb, "gputest: the GPU says it has read ");
-        log_num(&lb, qout->gq_Extract);
-        log_str(&lb, " of ");
-        log_num(&lb, qin->gq_Insert);
-        log_str(&lb, " bytes written, every job done");
-        KLog(lb.text);
+        KPrintF("gputest: the GPU says it has read %lu of %lu bytes written, every job done",
+                (uint64_t)qout->gq_Extract, (uint64_t)qin->gq_Insert);
     }
 
     /* WAITED waited for: the server wakes the word. */
@@ -331,21 +301,10 @@ static int round_(void)
     }
     CHECK(ask(GPU_STATUS) == 0 && m->gm_Faults == 0);
 
-    lb = (struct logbuf){ 0 };
-    log_str(&lb, "gputest: ");
-    log_num(&lb, JOBS);
-    log_str(&lb, " jobs in ");
-    log_num(&lb, total / 1000);
-    log_str(&lb, " us (");
-    log_num(&lb, total / JOBS / 1000);
-    log_str(&lb, " us each, submit to update); ");
-    log_num(&lb, WAITED);
-    log_str(&lb, " waited for, ");
-    log_num(&lb, waited / WAITED / 1000);
-    log_str(&lb, " us each (worst ");
-    log_num(&lb, worst / 1000);
-    log_str(&lb, " us)");
-    KLog(lb.text);
+    KPrintF("gputest: %lu jobs in %lu us (%lu us each, submit to update); %lu waited for, "
+            "%lu us each (worst %lu us)",
+            (uint64_t)JOBS, (uint64_t)(total / 1000), (uint64_t)(total / JOBS / 1000),
+            (uint64_t)WAITED, (uint64_t)(waited / WAITED / 1000), (uint64_t)(worst / 1000));
     return 0;
 }
 
@@ -355,7 +314,6 @@ static int load(uint64_t seconds)
     uint64_t start = CurrentTime(), end = start + seconds * 1000 * MS, last, now, gap = 0;
     uint64_t jobs = 0, since = 0;
     unsigned deaths = 0;
-    struct logbuf lb = { 0 };
     int r;
 
     if ((r = queue()) != 0)
@@ -389,16 +347,9 @@ static int load(uint64_t seconds)
         last = CurrentTime();
     }
     CHECK(since > 0);                   /* jobs ran after the last death */
-    log_str(&lb, "gputest: ");
-    log_num(&lb, jobs);
-    log_str(&lb, " jobs in ");
-    log_num(&lb, seconds);
-    log_str(&lb, " s under load, the longest between two ");
-    log_num(&lb, gap / 1000);
-    log_str(&lb, " us, but for ");
-    log_num(&lb, deaths);
-    log_str(&lb, deaths == 1 ? " death of the GPU server" : " deaths of the GPU server");
-    KLog(lb.text);
+    KPrintF("gputest: %lu jobs in %lu s under load, the longest between two %lu us, but for %lu %s",
+            (uint64_t)jobs, (uint64_t)seconds, (uint64_t)(gap / 1000), (uint64_t)deaths,
+            deaths == 1 ? "death of the GPU server" : "deaths of the GPU server");
     return 0;
 }
 

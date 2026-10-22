@@ -10,12 +10,14 @@
 | 2 | [Exec: tasks and signals](02-tasks-and-signals.md) | Written, V4; checked V5 |
 | 3 | [Exec: memory and Areas](03-areas.md) | Written, V4; `AREAF_NC` and `ReleaseArea`, V5; pools and `AllocVec`, V6 |
 | 4 | [Exec: ports, connections and messages](04-messages.md) | Written, V4; checked V5 |
-| 5 | Exec: interrupts and driver tasks | Built in V4 as leases' lines (`BindIrq`, `AckWaitIrq`): see [Devices ch. 1](../devices/01-drivers.md) |
+| 5 | [utility.library](05-utility.md): tag lists, hooks, strings, `Span` and `Str` | Written, V6 |
 | 6 | Exec: lending memory with a request (`IOF_LEND`) | **Planned** ([docs §4.2](../../docs/04-ipc.md)). Meanwhile the block class passes buffers in the connection's heap ([Devices ch. 2](../devices/02-block.md)) |
 | 7 | [Exec: futexes](07-futexes.md) (`WaitAddr`, `WakeAddr`) | Written, V5 |
 | 8 | Libraries and interface tables (`IExec->PutMsg()`) | **Planned** ([docs §7.2](../../docs/07-language-toolchain.md)) |
 | 9 | [Queue leases: GPU work from user space](09-queue-leases.md) | Written, V5. The NPU's is V9 |
 | 10 | The hardware database (`hwdb`) | Built in V4: see [Devices ch. 1](../devices/01-drivers.md) ([docs §9](../../docs/09-hardware-description.md)) |
+
+The RKM's Exec chapter on interrupts has no counterpart here: a driver's interrupts are its lease's lines (`BindIrq`, `AckWaitIrq`), in [Devices ch. 1](../devices/01-drivers.md).
 
 Where the RKM had chapters on Intuition, graphics and layers, Planar has none yet. They will be added here as those libraries are designed.
 

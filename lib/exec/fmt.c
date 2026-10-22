@@ -9,6 +9,7 @@
  * no NUL. A conversion it doesn't know is written as it stands.
  */
 #include <planar/exec.h>
+#include <planar/utility.h>
 
 struct out {
     PutChProc put;

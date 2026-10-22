@@ -72,7 +72,6 @@ static void second(uint64_t arg)
 
 int main(void)
 {
-    struct logbuf b = { 0 };
     volatile int local = 0;
     int64_t h;
     int r;
@@ -101,9 +100,7 @@ int main(void)
             return 7;
     if (where[0].ai_Address == where[1].ai_Address)
         return 8;
-    log_str(&b, "tls: 2 tasks, each with its own thread_local copy in its own stack, ");
-    log_num(&b, sizeof zeroed + sizeof counter + sizeof line);
-    log_str(&b, " bytes of it");
-    KLog(b.text);
+    KPrintF("tls: 2 tasks, each with its own thread_local copy in its own stack, %lu bytes of it",
+            (uint64_t)(sizeof zeroed + sizeof counter + sizeof line));
     return 0;
 }

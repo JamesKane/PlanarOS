@@ -164,6 +164,8 @@
         kprintf("V6.1 done\n");
         kprintf("V6.2 exec memory skipped: no tasks\n");
         kprintf("V6.2 done\n");
+        kprintf("V6.3 utility skipped: no tasks\n");
+        kprintf("V6.3 done\n");
         arch_halt();
     }
     sched_idle();

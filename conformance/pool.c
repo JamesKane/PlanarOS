@@ -222,7 +222,6 @@ static uint64_t format(const char *fmt, ...)
 static void costs(void)
 {
     constexpr unsigned N = 10000;
-    struct logbuf b = { 0 };
     struct Pool *p = CreatePool(0, PUDDLE, THRESHOLD);
     uint64_t t0, pooled, vec, fmt;
     void *v;
@@ -244,14 +243,8 @@ static void costs(void)
     for (unsigned i = 0; i < N; i++)
         format("%s %d at %#lx", "block", (int)i, (unsigned long)t0);
     fmt = (CurrentTime() - t0) / N;
-    log_str(&b, "pool: AllocPooled and FreePooled ");
-    log_num(&b, pooled);
-    log_str(&b, " ns, AllocVec and FreeVec ");
-    log_num(&b, vec);
-    log_str(&b, " ns, RawDoFmt of a short line ");
-    log_num(&b, fmt);
-    log_str(&b, " ns");
-    KLog(b.text);
+    KPrintF("pool: AllocPooled and FreePooled %lu ns, AllocVec and FreeVec %lu ns, RawDoFmt of a "
+            "short line %lu ns", pooled, vec, fmt);
 }
 
 static void second(uint64_t tag)
@@ -262,7 +255,6 @@ static void second(uint64_t tag)
 
 int main(void)
 {
-    struct logbuf b = { 0 };
     struct fmtcheck_fail ff;
     unsigned puddles = 0, count = 0, fmts = 0;
     int r;
@@ -275,26 +267,12 @@ int main(void)
     Wait(DONE);
     CHECK(51, !r && !task_failed);
     if (fmt_check(&ff, &fmts)) {
-        log_str(&b, "pool: RawDoFmt at fmtcheck.h:");
-        log_num(&b, ff.line);
-        log_str(&b, " wrote \"");
-        log_str(&b, ff.got);
-        log_str(&b, "\", not \"");
-        log_str(&b, ff.want);
-        log_str(&b, "\"");
-        KLog(b.text);
+        KPrintF("pool: RawDoFmt at fmtcheck.h:%u wrote \"%s\", not \"%s\"", ff.line, ff.got,
+                ff.want);
         return 60;
     }
-    log_str(&b, "pool: ");
-    log_num(&b, BLOCKS);
-    log_str(&b, " blocks over ");
-    log_num(&b, puddles);
-    log_str(&b, " puddles and taken again, ");
-    log_num(&b, count);
-    log_str(&b, " in a fixed buffer, AllocVec shared by 2 tasks; RawDoFmt ");
-    log_num(&b, fmts);
-    log_str(&b, " cases");
-    KLog(b.text);
+    KPrintF("pool: %u blocks over %u puddles and taken again, %u in a fixed buffer, AllocVec "
+            "shared by 2 tasks; RawDoFmt %u cases", BLOCKS, puddles, count, fmts);
     costs();
     return 0;
 }

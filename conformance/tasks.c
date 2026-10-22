@@ -18,7 +18,6 @@ static void worker(uint64_t n)
 int main(void)
 {
     uint64_t want = 0, got = 0;
-    struct logbuf b = { 0 };
 
     main_task = FindTask(nullptr);
     for (int n = 0; n < WORKERS; n++) {
@@ -28,9 +27,6 @@ int main(void)
     }
     while (got != want)
         got |= Wait(want);
-    log_str(&b, "all ");
-    log_num(&b, WORKERS);
-    log_str(&b, " workers signalled");
-    KLog(b.text);
+    KPrintF("all %lu workers signalled", (uint64_t)WORKERS);
     return 0;
 }

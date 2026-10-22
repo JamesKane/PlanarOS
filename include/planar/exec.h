@@ -237,21 +237,10 @@ void *AllocVec(uint64_t byteSize, uint32_t requirements);
 void FreeVec(void *memoryBlock);
 
 /*
- * A string by its length (docs §17.4.3, utility.library's in V6 step 3):
- * no NUL, so a slice of something read-only. Passed in two registers.
- */
-struct Str {
-    const char *st_Data;
-    uint64_t st_Len;
-};
-
-#define STR(lit)    ((struct Str){ .st_Data = (lit), .st_Len = sizeof(lit) - 1 })
-
-/*
  * RawDoFmt (docs §17.4.2): C's printf conversions but floating point's,
  * each byte to putChProc, then a NUL. %d is an int and %ld 64 bits, as
- * C's are (Exec's were 16 and 32); C23's %b and %wN; %S a struct Str.
- * Returns the bytes before the NUL.
+ * C's are (Exec's were 16 and 32); C23's %b and %wN; %S a struct Str
+ * (planar/utility.h). Returns the bytes before the NUL.
  */
 typedef void (*PutChProc)(char ch, void *putChData);
 

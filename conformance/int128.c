@@ -75,7 +75,6 @@ static uint64_t rnd(void)
 
 int main(void)
 {
-    struct logbuf b = { 0 };
     int n = 0;
     unsigned random = 0;
 
@@ -116,11 +115,7 @@ int main(void)
         if (r >= d || q * d + r != a)
             return 1000 + (int)i;
     }
-    log_str(&b, "int128: ");
-    log_num(&b, (uint64_t)n);
-    log_str(&b, " cases as the compiler folds them, ");
-    log_num(&b, random);
-    log_str(&b, " random ones by their identities");
-    KLog(b.text);
+    KPrintF("int128: %lu cases as the compiler folds them, %lu random ones by their identities",
+            (uint64_t)n, (uint64_t)random);
     return 0;
 }

@@ -73,8 +73,10 @@ void selftest_futex(void);
 void selftest_uncached(void);
 void selftest_shares(void);
 
-/* V6 step 1: the runtime floor (compiler-rt, mem*, thread_local). */
+/* V6 steps 1 to 3: the runtime floor (compiler-rt, mem*, thread_local),
+ * exec.library's memory and formatting, utility.library. */
 void selftest_runtime(void);
 void selftest_exec_memory(void);
+void selftest_utility(void);
 
 #endif /* KERNEL_SELFTEST_H */
