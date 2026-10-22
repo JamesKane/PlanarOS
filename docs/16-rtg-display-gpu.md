@@ -400,7 +400,7 @@ Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-
 
 ## 16.9 Open Questions
 
-- **VQ38 Compressed / Tiled Framebuffer Modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. Linear-Only Surfaces in V6.**
+- **VQ38 Compressed / Tiled Framebuffer Modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. Linear-Only Surfaces in the Workbench (V7–V8).**
   Both the CIX P1 (Immortalis-G720 + Linlon DPU) and RK3588 (Mali-G610 + VOP2) support **Arm Frame Buffer Compression (AFBC)** end-to-end: the GPU renders compressed 16×16 superblocks into memory and the DPU scans them out directly, cutting memory bandwidth by ~40–50%. However, CPU SIMD (`GFX_BACKEND_SIMD`) cannot cheaply draw single pixels into an AFBC buffer without a tile decoder/encoder. Should `AllocBitMap` default to `MOD_LINEAR` and reserve `MOD_AFBC_16x16` for explicit `BMF_GPU_RENDER | BMF_DISPLAYABLE` surfaces?
   *Leaning:* yes—`MOD_LINEAR` (`ARGB8888` / `XRGB8888`) is the universal baseline for all CPU SIMD and mixed surfaces, while `AllocBitMap` selects `MOD_AFBC_16x16` only when the caller sets `BMF_GPU_ONLY | BMF_DISPLAYABLE` on a `friend_bitmap` belonging to an AFBC-capable `MonitorSpec`.
 
@@ -414,4 +414,4 @@ Applying [§11.4](11-driver-model.md#114-teardown-unbind-is-kill) and [§12](12-
 
 - **VQ41 Shader compilation pipeline (`tools/shaderc` fat `.gbin` vs. runtime micro-JIT in `gfx3d.library`).**
   Should shaders ship as fat `.gbin` binaries compiled on the host by `tools/shaderc` (carrying Valhall/Immortalis, Adreno A6xx and SIMD bytecode sections) or should `gfx3d.library` include a small (~5–8k LoC) runtime translator from a restricted pointer-based SPIR-V subset to native GPU ISA?
-  *Leaning:* build-time `tools/shaderc` `.gbin` bundles first for V6 (so the V6 triangle and compute demos need zero runtime compiler complexity on the board), then add a tiny pointer-first SPIR-V translator in user space once both G720/G610 and Adreno 690 are up.
+  *Leaning:* build-time `tools/shaderc` `.gbin` bundles first for V11 (so V11's triangle and compute demos need zero runtime compiler complexity on the board), then add a tiny pointer-first SPIR-V translator in user space once both G720/G610 and Adreno 690 are up.

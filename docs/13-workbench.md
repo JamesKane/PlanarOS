@@ -253,8 +253,8 @@ The reference desktop comprises three first-party programs that ship in the base
 | Milestone | Scope | Verification |
 |---|---|---|
 | **V4 (Framebuffer shell)** ✅ | `display` on the firmware's framebuffer, an 8×8 text console, and the Shell, with keys from the serial console ([v4-plan](v4-plan.md)). | Boots from storage to a shell on the framebuffer on the RV2 and the CIX P1. |
-| **V5 (Scanout and input)** | Native scanout with planes, a cursor plane and vblank flips; USB HID keyboard and mouse through `input`; GPU queue leases; futexes ([v5-plan](v5-plan.md)). | Flips at vblank on both boards; USB keys drive the Shell. |
-| **V6 (Intuition + Workbench)** | `intuition` server, `gfx.library`, `ui.library`, hardware cursor plane, `ScreenBar`, `Workbench` backdrop/icons, `Prefs` and windowed `Shell`. | Window creation, dragging, depth-arrangement, zero-copy `PresentWindow` flips at 60 Hz, and clean window reclamation when a client process is killed (`kill-window` conformance test). |
+| **V5 (Scanout and input)** ✅ | Native scanout with planes, a cursor plane and vblank flips; USB HID keyboard and mouse through `input`; GPU queue leases; futexes ([v5-plan](v5-plan.md)). | Flips at vblank on both boards; USB keys drive the Shell. |
+| **V7–V8 (Intuition, then the desktop; was V6)** | `intuition` server, `gfx.library`, `ui.library`, hardware cursor plane, `ScreenBar`, `Workbench` backdrop/icons, `Prefs` and windowed `Shell`. | Window creation, dragging, depth-arrangement, zero-copy `PresentWindow` flips at 60 Hz, and clean window reclamation when a client process is killed (`kill-window` conformance test). |
 
 ---
 
@@ -262,7 +262,7 @@ The reference desktop comprises three first-party programs that ship in the base
 
 - **VQ31 Direct DPU plane promotion vs. full-screen composition.**
   All four target SoCs have multi-plane display controllers (K1 DPU, Linlon/komeda, VOP2, MDSS). Should `intuition` assign each visible top-level window to a hardware DPU plane when the window count fits the plane budget, falling back to CPU/GPU composition only when windows exceed planes or use translucency?
-  *Leaning:* always use the dedicated hardware cursor plane for the red pointer; compose windows into one primary scanout buffer first in V6, then promote full-screen or video/3D queue-lease windows to dedicated overlay planes.
+  *Leaning:* always use the dedicated hardware cursor plane for the red pointer; compose windows into one primary scanout buffer first in V7, then promote full-screen or video/3D queue-lease windows to dedicated overlay planes.
 
 - **VQ32 Icon asset representation.**
   Should icons be stored in sidecar `.info` files (classic Workbench style, works on FAT32 as well as the native filesystem) using a compact binary vector bytecode so they scale cleanly to any DPI, or as pre-rasterised `64×64` and `128×128` `ARGB8888` images?

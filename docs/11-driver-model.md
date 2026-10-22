@@ -1,6 +1,6 @@
 # 11. Driver model: lessons from other systems
 
-**Status: proposed (2026-10-20).** Nothing here is built. Drivers arrive with V4 ([roadmap](08-roadmap.md)).
+**Status: mostly built (V4, V5); the rest proposed.** Built: hwdb as the driver manager, graph ordering, matching as data with ties refused, decline and the next driver, quirks, lease-tied DMA and quarantine, a stop method per driver, power before the lease (D3), `pci` as a source, and the kill test. Not built: a graceful `STOP` (D1, in V6), the generic stop table (bus master off and FLR through `pci`, reset and clock gate through `power`), runtime PM, a USB hub or an aux bus as node sources, one task per hardware queue, the IOMMU, TDR, `AbortIO`, the serial and net classes, and match tables in ELF notes (VQ25) ([roadmap](08-roadmap.md#replanned-after-v5)).
 
 The evidence comes from the AbyssBSD driver-model survey and design, written in October 2026 (`~/Desktop/DRIVER-MODEL-SURVEY.md` and `DRIVER-MODEL.md`). They cover FreeBSD, NetBSD and OpenBSD, illumos, Linux and Rust for Linux, IOKit and DriverKit, WDM and WDF, Fuchsia, the Rust research kernels, seL4's sDDF, Genode, QNX and MINIX 3. References in the form *S§n* are to sections of the survey.
 

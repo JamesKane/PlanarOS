@@ -12,7 +12,7 @@ Two servers give it:
 
 `gm_Kind`, from `GPU_OPEN`, says which a client has: `GPU_CSF` or `GPU_ROGUE`. The commands in the ring are the GPU's own, so a client writes one kind or the other.
 
-V5's jobs are the smallest each GPU can be seen to run: add 1 to a sync object (the CSF), or a NULL command and an update of it (Rogue). Compute shaders and graphics are V6's.
+V5's jobs are the smallest each GPU can be seen to run: add 1 to a sync object (the CSF), or a NULL command and an update of it (Rogue). Compute shaders and graphics are V11's.
 
 ## Concepts
 

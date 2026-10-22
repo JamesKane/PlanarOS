@@ -4,7 +4,7 @@
 
 ## What it's for
 
-Keys and the mouse, from every keyboard and mouse there is, to one program: the Shell now, `intuition` in V6. `input` (`servers/input`) is the class's server: one for the system, with no device of its own. The drivers that find keyboards and mice send it what they report, and it turns that into **events** on a ring the client reads with no message per event. USB's are the only ones so far: `xhci` (`drv/xhci`) drives the USB host controllers, walks their hubs, and reads every keyboard and mouse that speaks the HID boot protocol.
+Keys and the mouse, from every keyboard and mouse there is, to one program: the Shell now, `intuition` in V7. `input` (`servers/input`) is the class's server: one for the system, with no device of its own. The drivers that find keyboards and mice send it what they report, and it turns that into **events** on a ring the client reads with no message per event. USB's are the only ones so far: `xhci` (`drv/xhci`) drives the USB host controllers, walks their hubs, and reads every keyboard and mouse that speaks the HID boot protocol.
 
 The serial console stays as it was ([chapter 3](03-console.md)): the Shell reads both.
 

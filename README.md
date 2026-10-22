@@ -113,4 +113,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V6, the Workbench ([roadmap](docs/08-roadmap.md)): RTG on V5's planes and GPU queues, `intuition` and `font.library`. Carried from V5: an intermittent `dos` stall after the RV2's kill rounds ([v5-plan](docs/v5-plan.md) §7).
+Next: V6, foundations ([roadmap](docs/08-roadmap.md#replanned-after-v5)): §17's C runtime and libraries, interface tables and the shared library region, and the supervision the design set asks for (`init`, ports that survive a restart, deadlines, a graceful `STOP`), with the RV2's `dos` stall carried from V5. Then the Workbench in two phases, V7 (windows) and V8 (type and the desktop).

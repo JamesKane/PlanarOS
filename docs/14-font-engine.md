@@ -1,6 +1,6 @@
 # 14. OpenType and TrueType font engine (`font.library`)
 
-**Status: proposed (2026-10-20).** Required by `gfx.library`, `ui.library` and the [Workbench desktop environment](13-workbench.md) in V6.
+**Status: proposed (2026-10-20).** Required by `gfx.library`, `ui.library` and the [Workbench desktop environment](13-workbench.md) in V8 (the roadmap's replan after V5).
 
 Planar renders proportional UI typography (`System Sans`) and terminal/code text (`System Mono`) through a clean-room user-mode shared library, **`font.library`**. Rather than porting FreeType and HarfBuzz—which together exceed 250,000 lines of C and C++ covering legacy formats and every world script—Planar implements its own OpenType/TrueType engine **from scratch in C23 directly from the specification documents**.
 

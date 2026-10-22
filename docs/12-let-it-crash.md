@@ -1,6 +1,6 @@
 # 12. Fault tolerance: let it crash
 
-**Status: proposed (2026-10-20).** The kernel and IPC pieces in §12.2 are built (V1, V2). The supervision and restart rules are proposed for V4 alongside the [driver model](11-driver-model.md).
+**Status: partly built; the rest is V6's.** The kernel and IPC pieces in §12.2 are built (V1, V2), and futex waits end when a mapping goes, more widely than proposed (V5). hwdb restarts leaf drivers one for one with backoff, and restarts `dos`, `input`, `display` and `power`; votes are made again after `power` restarts (VQ30's leaning). Not built, and placed in V6 ([roadmap](08-roadmap.md#replanned-after-v5)): `init` as root over hwdb (VQ29), ports that survive a restart (VQ28; clients poll), and deadlines on calls to core servers. Not placed: `rest_for_one` restarts of a bus's subtree, acpid's restart, and a filesystem handler separate from `dos` with crash recovery (VQ14a).
 
 Erlang's "let it crash" rule says that a process should not write defensive code to recover from its own bugs or corrupt state. When an invariant breaks, the process dies at once, the runtime reclaims everything it owned and tells its peers, and a supervisor starts a fresh copy in a known state.
 

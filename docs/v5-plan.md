@@ -11,7 +11,7 @@
 - hwdb sees every device this plan drives: on the CIX `GPU_`/`GPUP` (CIXH5000/5001), `DPU0`–`DPU4` (CIXH5010), `SCMI` (CIXHA006) and `USB0`–`USB9` (PNP0D10); on the RV2 the GPU at `0xcac00000`, the DPU at `0xc0440000`, and the DWC3 at `0xc0a00000`. All are "no driver" today.
 
 **Not built, and needed here** (all three built in step 1):
-- `WaitAddr`/`WakeAddr` ([docs §4.1](04-ipc.md)): the sleeping wait on a sync object (§5.1), and on V6's `safe_seq`/`disp_seq` (§16.3 pillar 4).
+- `WaitAddr`/`WakeAddr` ([docs §4.1](04-ipc.md)): the sleeping wait on a sync object (§5.1), and on the Workbench's `safe_seq`/`disp_seq` (§16.3 pillar 4).
 - Mapping one page of a device to an app: a CSF doorbell (§5.1's `AREAF_DEVICE`). Today only hwdb makes leases, and only drivers hold them.
 - Non-cacheable and write-combining Areas ([docs §3.3](03-memory.md)): the G720 doesn't see CPU writes that are still in cache (below).
 
@@ -259,10 +259,10 @@ The kill rounds kill `gpu-panthor` too, during bring-up and after, with no clien
 
 **Corrected:**
 - The plan's five power-on steps are four on this firmware: power's set, GPUP's `_ON`, the reset pulse, and the Q-channel. The memory repair runs only if RST0's strap (`0x504` bit 4) asks, and it didn't on this board.
-- Mesa's `genxml` wasn't needed: V5's job uses only `MOV48`, `SYNC_ADD64` and `ERROR_BARRIER`, whose encodings are panthor's own. `SYNC_WAIT` waits for V6.
+- Mesa's `genxml` wasn't needed: V5's job uses only `MOV48`, `SYNC_ADD64` and `ERROR_BARRIER`, whose encodings are panthor's own. `SYNC_WAIT` waits for V11.
 
 **Not yet:**
-- More groups than slots; compute and the tiler heap (V6).
+- More groups than slots; compute and the tiler heap (V11).
 - A fault reaching the client as a message: it's kept for `GPU_STATUS`, and the client's sync object doesn't move.
 - The step 7 costs under load.
 
@@ -279,7 +279,7 @@ The kill rounds kill `gpu-panthor` too, during bring-up and after, with no clien
 - **A wait in a queue** (`SYNC_WAIT`) makes it idle as `CS_IDLE_SYNC_WAIT`, which the server must watch. The encodings of `SYNC_WAIT64` and `SYNC_SET64` are in Mesa's `genxml`, which isn't here (decision 5).
 - **Faults and death** (§5.4). A fault becomes a message to the lease's holder, and the server terminates that group alone. When the holder dies, the server terminates its group and unmaps its address space before its Areas leave quarantine.
 - **The firmware's watchdog** pings every 12 s, and the server must answer it.
-- **Compute only.** No tiler heap: that's V6's, with graphics. About 3,000 to 4,000 lines, against panthor's 15,200.
+- **Compute only.** No tiler heap: that's V11's, with graphics. About 3,000 to 4,000 lines, against panthor's 15,200.
 
 ## 6. `gpu-rogue` on the RV2
 
@@ -306,7 +306,7 @@ The kill rounds kill `gpu-panthor` too, during bring-up and after, with no clien
 - About 1,400 lines, not 3,000 to 5,000.
 
 **Not yet:**
-- The GPU's MMU, and compute (V6).
+- The GPU's MMU, and compute (V11).
 - A context reset reaching the client as a message: as on the CIX, it's kept for `GPU_STATUS`.
 - The step 7 costs under load.
 
@@ -376,6 +376,6 @@ The BXE-2-32 is Rogue core **36.29.52.182**, with a MIPS firmware processor. The
 1. **The RV2's GPU.** In V5 with a NULL job through a server queue; in V5 with a compute job; or later, on CPU SIMD until after V6. **Decided (2026-10-20): in V5, a NULL job.** The exit proves one API over two providers.
 2. **The NPU.** The roadmap put the Zhouyi NPU at the end of V5. **Decided (2026-10-20): moved out,** to V7 with the RK3588's RKNN, as a second server-queue provider.
 3. **USB input.** **Decided (2026-10-20): in V5,** so V6 starts with a keyboard and mouse.
-4. **The Workbench phase.** **Decided (2026-10-20): V6**, with RTG (§16) and `font.library` (§14), before the other boards. The RK3588 becomes V7, the Q8B V8 and the PMP profile V9.
+4. **The Workbench phase.** **Decided (2026-10-20): V6**, with RTG (§16) and `font.library` (§14), before the other boards. The RK3588 becomes V7, the Q8B V8 and the PMP profile V9. *Replanned after V5 (2026-10-22):* the Workbench is V7 and V8 on a V6 of libraries and supervision, the RK3588 V9, the Q8B V12 and the PMP profile V13 ([roadmap](08-roadmap.md#replanned-after-v5)).
 5. **Firmware and references from outside.** Both blobs are on the NAS, at `/Volumes/nas/firmware` (found 2026-10-20). Mesa's `genxml` (for CSF encodings, read only) is still to fetch. *Leaning:* blobs stay out of the repository. A tool copies them from the NAS onto each board's boot partition, checked against the SHA-256s above, and the GPU servers read them through `dos`, as programs are read now.
 6. **How many leases.** One pinned group slot each means as many GPU clients as slots. *Leaning:* enough for V5's tests and V6's `intuition` plus a few apps. Scheduling groups over slots comes when something needs more.

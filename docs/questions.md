@@ -41,7 +41,7 @@ Raised in §3.1 and §8.
 
 **VQ5 PMP and M-mode on RISC-V.**
 
-Should we ever replace OpenSBI with our own M-mode monitor? *Leaning:* not before V9. The `pmp` back end stays in the contract.
+Should we ever replace OpenSBI with our own M-mode monitor? *Leaning:* not before V13 (the PMP profile). The `pmp` back end stays in the contract.
 
 Raised in §1.2 and §3.5.
 
@@ -207,7 +207,7 @@ Raised in §13.5 and §13.7.
 
 **VQ34 Base system font files (`System Sans` and `System Mono`).**
 
-Which permissive open-source `.ttf`/`.otf` fonts should ship in the image via `#embed` for V4 (`Shell`) and V6 (`Workbench`)? *Leaning:* subsetted OFL builds of a geometric/humanist sans (Inter or IBM Plex Sans) and programmer monospace (JetBrains Mono or IBM Plex Mono) in the boot image, with unmodified full fonts in `tools/font-oracle/`.
+Which permissive open-source `.ttf`/`.otf` fonts should ship in the image via `#embed` for V4 (`Shell`) and V8 (`Workbench`)? *Leaning:* subsetted OFL builds of a geometric/humanist sans (Inter or IBM Plex Sans) and programmer monospace (JetBrains Mono or IBM Plex Mono) in the boot image, with unmodified full fonts in `tools/font-oracle/`.
 
 Raised in §14.7.
 
@@ -217,7 +217,7 @@ Should `font.library` cache `4×` horizontal subpixel phases (`0.0`, `0.25`, `0.
 
 Raised in §14.7.
 
-**VQ38 Compressed / tiled framebuffer modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. linear-only surfaces in V6.**
+**VQ38 Compressed / tiled framebuffer modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. linear-only surfaces in the Workbench (V7–V8).**
 
 Should `AllocBitMap` default to `MOD_LINEAR` and reserve `MOD_AFBC_16x16` for explicit GPU-rendered scanout surfaces on CIX P1 (G720 + Linlon) and RK3588 (G610 + VOP2)? *Leaning:* yes; `MOD_LINEAR` (`ARGB8888` / `XRGB8888`) is the universal baseline for CPU SIMD and mixed surfaces, while `MOD_AFBC_16x16` is selected only when `BMF_GPU_ONLY | BMF_DISPLAYABLE` is requested on an AFBC-capable `friend_bitmap`.
 
@@ -245,7 +245,7 @@ Raised in §16.5 and §16.9.
 
 **VQ36 Hardware Audio DSP offload (`sky1_audss0` HiFi4, Q8B ADSP) vs. efficiency-core SIMD.**
 
-Should V5/V6 drive the on-SoC audio DSPs, or run `audio` and `dsp.library` on an efficiency core (A520 on CIX, X60 on RV2) and keep the `dsp-*` queue lease optional? *Leaning:* run `audio` and `dsp.library` on CPU SIMD first (pinned to an A520 / cluster-1 core); keep the `DSP_PROVIDER_LEASE` hook in `dsp.library` so `sky1_audss0` can be bound later without changing client code.
+Should the audio phase (V10) drive the on-SoC audio DSPs, or run `audio` and `dsp.library` on an efficiency core (A520 on CIX, X60 on RV2) and keep the `dsp-*` queue lease optional? *Leaning:* run `audio` and `dsp.library` on CPU SIMD first (pinned to an A520 / cluster-1 core); keep the `DSP_PROVIDER_LEASE` hook in `dsp.library` so `sky1_audss0` can be bound later without changing client code.
 
 Raised in §15.5 and §15.9.
 

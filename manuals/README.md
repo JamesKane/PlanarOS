@@ -21,7 +21,7 @@ The RKM was split into volumes by what the reader is doing. Planar keeps the spl
 | [**Hardware**](hardware/README.md) | *Hardware Reference Manual* | The machines Planar runs on, and the `arch_*`/`plat_*` contract a port implements. | Outline only |
 | [**DOS**](dos/README.md) | *AmigaDOS Manual* | Volumes, paths and files, programs on disk, the Shell and its commands. | Written (V5) |
 
-A *User Interface Style Guide* comes with a windowing system (V6 and later).
+A *User Interface Style Guide* comes with a windowing system (V7 and later).
 
 ## Reading order
 
