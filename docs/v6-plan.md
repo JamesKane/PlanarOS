@@ -46,10 +46,40 @@ Steps 1 to 3 are in order. Step 4 needs step 1, and is built on 2 and 3 as its f
 
 ## 1. The runtime floor
 
-- **compiler-rt** (§17.4.1): LLVM 22's `udivmodti4.c`, `divti3.c`, `udivti3.c`, `modti3.c`, `umodti3.c` and `multi3.c`, vendored in `third_party/compiler-rt/` with their licence, built into `lib/rt`. Tested by a conformance program that divides and multiplies `unsigned __int128` values against the compiler's own constant folding.
-- **`mem*` by words, then by SIMD.** `lib/rt/string.c`'s loops move a byte a step. First 8 bytes a step with aligned heads and tails, then RVV 1.0 and NEON versions in `arch/<isa>/user/`. Until step 4 there's no interface table to choose through, so each is picked by the ISA at build time. The X60 has RVV and every Arm core has NEON. A host test runs every length from 0 to 512 at every alignment against a byte loop.
-- **`CopyMem`, `CopyMemQuick`, `SetMem`** in `planar/exec.h`: Exec's names over the same code.
-- **`thread_local`.** `.tdata` and `.tbss` in `user.ld`. A block for each task, allocated with its stack by `CreateTask`, and `tp` or `TPIDR_EL0` pointing at it. The kernel already switches both, so this is crt0 and lib/exec work. Tested by two tasks of one process each seeing their own copy.
+**Done (2026-10-22), on QEMU.** Every program links compiler-rt's 128-bit builtins, `mem*` by the vector unit, and `thread_local`, a copy per task.
+
+- **compiler-rt** (§17.4.1): LLVM 22.1.8's `udivmodti4.c`, `udivti3.c`, `umodti3.c`, `divti3.c`, `modti3.c` and `multi3.c`, with the headers they include, unchanged in `third_party/compiler-rt/` with the licence and a README. They're built into `libcompiler-rt.a`, which goes last on every user link line, so a program takes only what it calls. Clang 22 inlines 128-bit multiplication on both ISAs, and combines a division and a modulo of the same operands into `__udivti3` and a multiply, so `int128` links two of the six.
+- **`mem*` by words, then by SIMD.**
+  - `lib/rt/string.c` moves 8 bytes a step: aligned heads, words (4 to a step), byte tails. Where source and destination are out of step, `memcpy` shifts aligned words together. Those reads may go up to 7 bytes past the source's end, but stay within the word that holds its last byte.
+  - Each function is weak, and `arch/<isa>/user/string.S` replaces `memcpy`, `memmove` and `memset`.
+  - **RVV:** e8 with m8, as many bytes a step as `vsetvli` grants.
+  - **NEON:** 32 bytes a step through `q` registers. A length of 32 or more takes its last 32 bytes as one more overlapping step, so there's no byte tail. Shorter lengths are two overlapping loads of the largest size that fits.
+  - `memcmp` stays the word loop on both ISAs.
+  - Picked by the ISA at build time until step 4.
+- **`CopyMem`, `CopyMemQuick`, `SetMem`**: inline in `planar/exec.h` over `memmove`, `memcpy` and `memset`, in Exec's order, source first. `CopyMem` is right for overlapping ranges, which Exec didn't promise.
+- **`thread_local`.**
+  - `user.ld` gathers `.tdata` and `.tbss`, aligned to 64, and the link fails for a program whose TLS segment is aligned to more. On Arm, the variables' offsets from the thread pointer depend on that alignment.
+  - Each task's block is at the top of its own stack. No allocator is needed, and it goes with the task. crt0 makes the first task's (`lib/rt/tls.c`) and sets `tp` or `TPIDR_EL0`.
+  - **Changed in the kernel:** `CreateTask` became a library function (`lib/exec/task.c`) over the kernel call, renamed `_CreateTask`. The call now takes a third argument and starts the task with it in the second argument register. CreateTask starts every task at crt0's `_task_start`, with the function in that register. The trampoline makes the block, calls the function, and calls `ExitTask(0)` if it returns. So a task's entry function may now return, which closes the autodoc's one bug.
+
+**Tested by:**
+- `conformance/int128.c`: 18 cases against the compiler's constant folding, unsigned, signed and `_BitInt(128)`, with each operand read back through a volatile. Then 4,096 random cases, with divisors of every width from 1 bit to 128, checked by `a = q·b + r`, `r < b`.
+- `conformance/memfns.c`, running `conformance/memcheck.h`'s cases: every length from 0 to 512, at every source and destination alignment within 8, between guard bytes. `memcmp` equal and one byte apart, either way. `memmove` over its own buffer at every overlap to ±72 bytes. That's 257,768 cases.
+- `make rt-test`: the same cases on the host, with the sanitizers, against `string.c`'s word loops renamed. It's part of `make test-all`. Mutation-tested: a wrong shift in the out-of-step copy fails at length 16.
+- `conformance/tls.c`: two tasks each start with the first values and zeros, set their own, and find them kept after the other has set its. Each copy is in the Area its task's locals are in, and those differ. The second task ends by returning.
+- `V6.1 runtime ok`, on every QEMU boot.
+
+**Costs**, under QEMU, 64 KiB at a time:
+
+| | RV64 (RVV) | AArch64 (NEON) |
+|---|---|---|
+| `memcpy` | 5.0 GB/s | 8.0 GB/s |
+| `memset` | 6.5 GB/s | 9.7 GB/s |
+| A byte loop | 0.66 GB/s | 0.41 GB/s |
+
+QEMU's figures count instructions, not the hardware.
+
+**Not yet on the boards.** The RV2's X60 has 256-bit vectors, twice QEMU's, and the CIX's cores have NEON. Each board runs `V6.1` the next time it's on the bench, with its own costs.
 
 ## 2. exec.library's memory and formatting
 

@@ -71,6 +71,24 @@ FreeArea((Handle)a);
 
 **One call still returns `Handle`**: `FindTask`. `Handle` is unsigned 32-bit, so its error comes back as `(Handle)ERR_NOTFOUND`, and `(int64_t)h > 0` does **not** catch it. `FindTask(nullptr)` can't fail.
 
+## What every program links
+
+There's no C library yet. Every program links the runtime instead (`lib/rt`, `lib/exec`, `third_party/compiler-rt`), which has what C compiled freestanding needs:
+- **Start and end.** crt0 relocates the program, makes its first task's `thread_local` variables, calls `main`, and passes its return value to `ExitProcess`.
+- **The memory functions** `memcpy`, `memmove`, `memset` and `memcmp`. The compiler calls them for struct copies and initialisers, and a program may too. Exec's names for them are `CopyMem`, `CopyMemQuick` and `SetMem` (`planar/exec.h`). On both ISAs the first three use the vector unit, RVV or NEON, 32 bytes or more a step; `memcmp` compares 8 bytes a step.
+- **128-bit arithmetic.** `__int128` and `_BitInt(128)` division and modulo call compiler-rt's builtins. A program links only the ones it uses.
+- **`thread_local`**, a copy for each task (chapter 2). A variable can be aligned to 64 bytes at most: the build refuses a program with more.
+
+Measured by `conformance/memfns.c`, 64 KiB at a time, under QEMU:
+
+| | RV64 | AArch64 |
+|---|---|---|
+| `memcpy` | 5.0 GB/s | 8.0 GB/s |
+| `memset` | 6.5 GB/s | 9.7 GB/s |
+| A byte loop, for comparison | 0.66 GB/s | 0.41 GB/s |
+
+QEMU's figures say only how many instructions each takes. The boards' are measured when each is next on the bench.
+
 ## Limits
 
 So that no one process can use up what every process shares, each has limits. Going past one gives `ERR_LIMIT`.
@@ -96,6 +114,7 @@ Public names follow Exec: `CamelCase` functions, structures with a two-letter fi
 ## Functions used
 
 [CloseHandle](../autodocs/exec.md#execclosehandle),
+[CopyMem](../autodocs/exec.md#execcopymem),
 [CreateProcess](../autodocs/exec.md#execcreateprocess),
 [CreateProcessImage](../autodocs/exec.md#execcreateprocessimage),
 [ExitProcess](../autodocs/exec.md#execexitprocess),

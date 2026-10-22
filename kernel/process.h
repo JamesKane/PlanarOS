@@ -132,7 +132,7 @@ unsigned process_count(void);
 [[noreturn]] void process_fault(enum fault kind, uint64_t pc, uint64_t addr);
 
 /* The kernel calls behind CreateTask and ExitTask. */
-int64_t process_create_task(uint64_t entry, uint64_t arg);
+int64_t process_create_task(uint64_t entry, uint64_t arg0, uint64_t arg1);
 [[noreturn]] void process_exit_task(void);
 
 /* The kernel calls behind CreateProcess, StartProcess, KillProcess and

@@ -1394,6 +1394,8 @@ void selftest_tasks(void *)
     kprintf("V5.6 done\n");
     /* And of the kills under a GPU client's load (gpu.c's load test). */
     kprintf("V5.7 done\n");
+    selftest_runtime();
+    kprintf("V6.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2818,4 +2820,34 @@ void selftest_shares(void)
     else
         kprintf("V5.2 firmware calls ok: refused, ERR_NOSYS: no firmware conduit here; set only "
                 "by the owner, while the lease is idle\n");
+}
+
+/*
+ * V6 step 1: the runtime floor every program links. compiler-rt's 128-bit
+ * builtins against the compiler's own folding (conformance/int128.c),
+ * the ISA's memcpy, memmove and memset, and the word memcmp, against
+ * byte loops (memfns.c), and thread_local, a copy for each task (tls.c).
+ */
+void selftest_runtime(void)
+{
+    static const char *const tests[] = { "int128", "memfns", "tls" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.1 runtime skipped: no user programs\n");
+        return;
+    }
+    for (unsigned i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+        struct process *p = run(tests[i], 0, 30000000);
+
+        if (!atomic_load(&p->dead) || p->fault != FAULT_NONE || p->exit_code != 0) {
+            kprintf("%s: exit %lld, fault %d\n", tests[i], (long long)p->exit_code, p->fault);
+            fail("V6.1 runtime", "a runtime test failed");
+        }
+        process_free(p);
+    }
+    if (!processes_down_to(0, 1000000))
+        fail("V6.1 runtime", "a test's process outlived it");
+    kprintf("V6.1 runtime ok: 128-bit division by compiler-rt's builtins as the compiler "
+            "folds it; memcpy, memmove and memset by the vector unit, memcmp by words, right at "
+            "every length to 512 and alignment; thread_local, a copy in each task's stack\n");
 }

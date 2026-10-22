@@ -2,7 +2,7 @@
 
 *Checked against V5.*
 
-The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
+The kernel calls, in alphabetical order, and the few library functions over them that every program links. Each kernel call is one stub in `arch/<isa>/user/syscalls.S` and traps on every call; a library function says so. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
 Most programs use connections through the [msg library](msg.md) rather than the connection calls here.
 
@@ -262,6 +262,73 @@ The device root can't be closed: it lasts as long as its process.
 
 ---
 
+## exec/CopyMem
+
+**NAME**
+CopyMem -- copy memory
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void CopyMem(const void *source, void *dest, uint64_t size);
+```
+
+**FUNCTION**
+Copies `size` bytes from `source` to `dest`. The ranges may overlap: the copy is right whichever way they do.
+
+A library function, inline in `planar/exec.h`, over the runtime's `memmove` (`lib/rt`). It doesn't trap. On both ISAs it moves 32 bytes or more a step with the vector unit (`arch/<isa>/user/string.S`).
+
+**INPUTS**
+- `source` -- the bytes to copy, readable.
+- `dest` -- where to put them, writable.
+- `size` -- how many. 0 copies nothing.
+
+**NOTES**
+- Exec's argument order: the source first, unlike `memcpy`'s.
+- The compiler's own calls for struct copies go to the same code, so a struct assignment costs the same.
+- On RISC-V, a process's first call is its first use of the vector unit, which costs a trap for the kernel to switch it on ([docs §7.4](../../docs/07-language-toolchain.md)).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CopyMemQuick](#execcopymemquick), [SetMem](#execsetmem)
+
+---
+
+## exec/CopyMemQuick
+
+**NAME**
+CopyMemQuick -- copy aligned memory that doesn't overlap
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void CopyMemQuick(const void *source, void *dest, uint64_t size);
+```
+
+**FUNCTION**
+Copies `size` bytes from `source` to `dest`, which must not overlap.
+
+A library function, inline in `planar/exec.h`, over the runtime's `memcpy`. It doesn't trap.
+
+**INPUTS**
+- `source` -- the bytes to copy: 8-byte aligned.
+- `dest` -- where to put them: 8-byte aligned.
+- `size` -- a multiple of 8.
+
+**NOTES**
+- Exec's took longwords; Planar's words are 8 bytes.
+- The alignment isn't checked, and nothing is faster for it: the vector unit doesn't care. It's kept for code written to Exec.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CopyMem](#execcopymem)
+
+---
+
 ## exec/CreatePort
 
 **NAME**
@@ -446,12 +513,12 @@ int64_t CreateTask(void (*entry)(uint64_t arg), uint64_t arg);
 ```
 
 **FUNCTION**
-Starts a task in the calling process, running `entry(arg)` on a new 16 KiB stack at the process's priority. The task may start on any CPU, before this call returns.
+Starts a task in the calling process, running `entry(arg)` on a new 16 KiB stack at the process's priority. The task may start on any CPU, before this call returns. It gets its own copy of the program's `thread_local` variables, at their first values, before `entry` runs. If `entry` returns, the task ends as if it had called `ExitTask(0)`.
 
-A kernel call.
+A library function over one kernel call (`lib/exec/task.c`). The kernel starts the task at the runtime's trampoline (`_task_start` in `arch/<isa>/user/crt0.S`), which makes its `thread_local` block, calls `entry`, and calls `ExitTask` after.
 
 **INPUTS**
-- `entry` -- the function to run. It must end with `ExitTask` and must not return.
+- `entry` -- the function to run.
 - `arg` -- passed to `entry`.
 
 **RESULT**
@@ -464,9 +531,10 @@ The new task's handle (positive), or:
 - `entry` isn't checked. A bad address faults the new task, which ends the whole process.
 - The new task may run, and end, before this call returns. The handle is then already stale, and calls on it fail with `ERR_BADHANDLE`.
 - The 64 tasks include the one running `main()`.
+- The `thread_local` block is at the top of the task's stack, so it comes out of the 16 KiB.
 
 **BUGS**
-- Returning from `entry` isn't caught; there is no return address to go to.
+None known.
 
 **SEE ALSO**
 [ExitTask](#execexittask), [FindTask](#execfindtask), [Libraries ch. 2](../libraries/02-tasks-and-signals.md)
@@ -1045,6 +1113,41 @@ None known.
 
 **SEE ALSO**
 [Wait](#execwait), [Signal](#execsignal)
+
+---
+
+## exec/SetMem
+
+**NAME**
+SetMem -- fill memory with a byte
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+void *SetMem(void *dest, uint8_t fill, uint64_t size);
+```
+
+**FUNCTION**
+Sets `size` bytes at `dest` to `fill`, and returns `dest`.
+
+A library function, inline in `planar/exec.h`, over the runtime's `memset`. It doesn't trap. On both ISAs it stores 32 bytes or more a step with the vector unit.
+
+**INPUTS**
+- `dest` -- the memory, writable.
+- `fill` -- the byte.
+- `size` -- how many. 0 sets nothing.
+
+**RESULT**
+`dest`.
+
+**NOTES**
+Exec had no `SetMem`; this is AmigaOS 4's. A new Area is zeroed already: there's no need to clear it.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[CopyMem](#execcopymem)
 
 ---
 

@@ -73,7 +73,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V5.7 done
+EXPECT := V6.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -135,7 +135,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -184,6 +184,21 @@ test-all:
 	@$(MAKE) --no-print-directory hwdb-test
 	@$(MAKE) --no-print-directory power-test
 	@$(MAKE) --no-print-directory display-test
+	@$(MAKE) --no-print-directory rt-test
+
+# lib/rt/string.c's word loops, which the ISAs' own replace, on the host
+# with the sanitizers, renamed so as not to be the host's.
+RT_TEST := build/rt/rt-test
+RT_RENAME := -Dmemcpy=rt_memcpy -Dmemmove=rt_memmove -Dmemset=rt_memset -Dmemcmp=rt_memcmp
+
+$(RT_TEST): lib/rt/string.c lib/rt/test.c conformance/memcheck.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) -ffreestanding -fno-builtin $(RT_RENAME) \
+	  -c lib/rt/string.c -o $(dir $@)string.o
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) lib/rt/test.c $(dir $@)string.o -o $@
+
+rt-test: $(RT_TEST)
+	@$(RT_TEST)
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.

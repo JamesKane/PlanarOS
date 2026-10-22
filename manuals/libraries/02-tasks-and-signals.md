@@ -10,7 +10,8 @@ Tasks are how a Planar program does several things at once. Signals are how a ta
 
 - A process starts with one task, which runs `main()`.
 - `CreateTask(entry, arg)` starts another in the same process: same memory, same handles, its own 16 KiB stack. It returns the new task's handle, or a negative error. A process can have 64 tasks at once; past that, `ERR_LIMIT`.
-- A task ends by calling `ExitTask(code)`. **An entry function must not return**: nothing is set up to catch the return.
+- A task ends by calling `ExitTask(code)`, or by returning from its entry function, which is the same as `ExitTask(0)`.
+- **`thread_local` variables are per task.** Each task starts with its own copy, at the values the program gave them, or zero. Writing one changes only the calling task's copy. The copy is at the top of the task's stack, so a large one comes out of the 16 KiB.
 - When the last task of a process ends, the process ends. `ExitProcess(code)` ends every task at once.
 - `FindTask(nullptr)` returns the calling task's handle.
 
@@ -117,6 +118,7 @@ For a wait with a timeout, arm the alarm, `Wait` for both bits, and disarm it wi
 | `Signal(struct Task *, …)` to any task | `Signal(Handle, …)`, only to a task in the caller's own process; across processes, `SignalConn` to a connection's peer |
 | `AllocSignal` returns -1 when none is free | The same |
 | `timer.device`, with an `IORequest` per delay | `ArmTimer`, one alarm per task, which sets a signal bit |
+| A task's data is reached through `tc_UserData` | `thread_local`, a copy per task, in C23's own syntax |
 | `SetTaskPri`, `Forbid`, `Disable` | None. There is no way to stop other tasks running: use a message, or wait on a sequence number (chapter 7). |
 
 ## Functions used

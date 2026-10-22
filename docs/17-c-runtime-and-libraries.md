@@ -92,10 +92,10 @@ Every user binary links `USER_RT` (`mk/user.mk`). It contains strictly what Clan
 2. **Compiler memory intrinsics**: `memcpy`, `memmove`, `memset`, `memcmp` in `lib/rt/string.c`, upgraded from byte loops to 64-bit word / SIMD (`RVV 1.0` on RV64, `NEON` on AArch64) loops that handle unaligned heads and tails safely.
 3. **Vendored 128-bit integer builtins (`third_party/compiler-rt/`)**:
    - Vendored from LLVM 22's `compiler-rt/lib/builtins/` (`Apache-2.0 WITH LLVM-exception`):
-     - `udivmodti4.c`, `divti3.c`, `udivti3.c`, `modti3.c`, `umodti3.c`, `multi3.c` (with minimal `int_types.h`).
+     - `udivmodti4.c`, `divti3.c`, `udivti3.c`, `modti3.c`, `umodti3.c`, `multi3.c`, with the headers they include, unchanged (built V6 step 1).
    - Satisfies software `__int128` and `_BitInt(128)` division, modulo, and multiplication on both `rv64` and `aarch64`.
 4. **C23 `thread_local` support (when needed)**:
-   - `.tdata` / `.tbss` sections in `arch/<isa>/user/user.ld` initialized per task in `crt0.S` and `CreateTask`, pointed to by `tp` (RV64) and `TPIDR_EL0` (AArch64, context-switched since V2.5 M3).
+   - `.tdata` / `.tbss` sections in `arch/<isa>/user/user.ld` made per task at the top of its stack by `crt0.S` and `CreateTask`'s trampoline, pointed to by `tp` (RV64) and `TPIDR_EL0` (AArch64, context-switched since V2.5 M3).
 
 ---
 

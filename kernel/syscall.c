@@ -195,7 +195,7 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
     case SYS_FIND_TASK:
         return a[0] ? ERR_NOTFOUND : self->handle;
     case SYS_CREATE_TASK:
-        return process_create_task(a[0], a[1]);
+        return process_create_task(a[0], a[1], a[2]);
     case SYS_EXIT_TASK:
         process_exit_task();
     case SYS_ALLOC_SIGNAL:

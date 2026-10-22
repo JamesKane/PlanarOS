@@ -21,9 +21,15 @@ USER_CFLAGS  := -std=c23 -Wall -Wextra -O2 $(USER_FLAGS) -ffreestanding -fno-bui
 USER_LDFLAGS := $(USER_FLAGS) -nostdlib -static-pie --ld-path=$(LD_PATH) \
 	-Wl,-T,arch/$(ARCH)/user/user.ld -Wl,--no-dynamic-linker
 USER_ARCH_C  := $(basename $(notdir $(wildcard arch/$(ARCH)/user/*.c)))
-USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/rt/string.o \
-	$(BUILD)/user/rt/reloc.o $(BUILD)/user/exec/msg.o \
+USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/string.o \
+	$(BUILD)/user/rt/string.o $(BUILD)/user/rt/reloc.o $(BUILD)/user/rt/tls.o \
+	$(BUILD)/user/exec/msg.o $(BUILD)/user/exec/task.o \
 	$(patsubst %,$(BUILD)/user/%.o,$(USER_ARCH_C))
+# compiler-rt's 128-bit builtins (third_party/compiler-rt): an archive,
+# last on every link line, so a program takes only what it calls.
+USER_BUILTINS := $(BUILD)/user/libcompiler-rt.a
+BUILTINS_OBJS := $(patsubst third_party/compiler-rt/lib/builtins/%.c,$(BUILD)/user/compiler-rt/%.o,\
+	$(wildcard third_party/compiler-rt/lib/builtins/*.c))
 USER_DRV     := $(patsubst lib/drv/%.c,$(BUILD)/user/drv-lib/%.o,$(wildcard lib/drv/*.c))
 USER_BLK     := $(BUILD)/user/blk/blk.o
 USER_DOS     := $(BUILD)/user/dos/dos.o
@@ -41,6 +47,15 @@ $(BUILD)/user/%.o: arch/$(ARCH)/user/%.c
 $(BUILD)/user/rt/%.o: lib/rt/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/user/compiler-rt/%.o: third_party/compiler-rt/lib/builtins/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_FLAGS) -std=c23 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fPIE \
+	  -MMD -MP -c $< -o $@
+
+$(USER_BUILTINS): $(BUILTINS_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
 
 $(BUILD)/user/exec/%.o: lib/exec/%.c
 	@mkdir -p $(dir $@)
@@ -83,9 +98,17 @@ $(BUILD)/user/%.o: conformance/%.c
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/user/%.o \
-		$(USER_RT) $(USER_BLK) $(USER_DOS) arch/$(ARCH)/user/user.ld
+		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
 	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) \
-	  $(if $(filter dos%,$*),$(USER_DOS)) -o $@
+	  $(if $(filter dos%,$*),$(USER_DOS)) $(USER_BUILTINS) -o $@
+	$(check_tls)
+
+# thread_local's segment, if a program has one, must be aligned to the
+# 64 bytes lib/rt/tls.c and crt0 build each task's block for: a variable
+# aligned to more would move the variables' offsets from the thread
+# pointer on Arm.
+check_tls = @$(READELF) -lW $@ | awk '$$1 == "TLS" && $$NF != "0x40" { exit 1 }' || \
+	{ echo "$@: thread_local aligned to more than 64 bytes"; rm -f $@; exit 1; }
 
 # A program per directory: $(1) its name, $(2) the directory.
 define user_dir_prog
@@ -93,8 +116,9 @@ $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA)) \
 	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) \
 	$(if $(filter servers/hwdb drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
-$(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) arch/$(ARCH)/user/user.ld
-	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) -o $$@
+$(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
+	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_BUILTINS) -o $$@
+	$$(check_tls)
 -include $$(patsubst %.o,%.d,$$(filter %.o,$$($(1)_OBJS)))
 endef
 $(foreach d,$(USER_DIRS),$(eval $(call user_dir_prog,$(notdir $(d)),$(d))))
@@ -118,8 +142,10 @@ $(BUILD)/user/cmd/%.o: cmd/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD)/user/cmd/%.elf: $(BUILD)/user/cmd/%.o $(USER_RT) $(USER_DOS) arch/$(ARCH)/user/user.ld
-	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(USER_DOS) -o $@
+$(BUILD)/user/cmd/%.elf: $(BUILD)/user/cmd/%.o $(USER_RT) $(USER_DOS) $(USER_BUILTINS) \
+		arch/$(ARCH)/user/user.ld
+	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(USER_DOS) $(USER_BUILTINS) -o $@
+	$(check_tls)
 
 -include $(patsubst %,$(BUILD)/user/cmd/%.d,$(CMD_PROGS))
 

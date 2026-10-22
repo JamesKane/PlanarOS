@@ -41,10 +41,12 @@
 | con_open, con_write, con_puts, con_dec, con_close | [dos](dos.md#doscon_open) | library |
 | ConnectPort | [msg](msg.md#execconnectport) | library |
 | CreateLease | [lease](lease.md#leasecreatelease) | kernel |
+| CopyMem | [exec](exec.md#execcopymem) | library |
+| CopyMemQuick | [exec](exec.md#execcopymemquick) | library |
 | CreatePort | [exec](exec.md#execcreateport) | kernel |
 | CreateProcess | [exec](exec.md#execcreateprocess) | kernel |
 | CreateProcessImage | [exec](exec.md#execcreateprocessimage) | kernel |
-| CreateTask | [exec](exec.md#execcreatetask) | kernel |
+| CreateTask | [exec](exec.md#execcreatetask) | library |
 | CurrentTime | [exec](exec.md#execcurrenttime) | kernel |
 | DeletePort | [exec](exec.md#execdeleteport) | kernel |
 | DoMsg | [msg](msg.md#execdomsg) | library |
@@ -93,6 +95,7 @@
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |
 | RevokeLease | [lease](lease.md#leaserevokelease) | kernel |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
+| SetMem | [exec](exec.md#execsetmem) | library |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
 | Signal | [exec](exec.md#execsignal) | kernel |
 | SignalConn | [exec](exec.md#execsignalconn) | kernel |

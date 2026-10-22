@@ -343,7 +343,10 @@ static void set_result(struct process *p, int64_t code, enum fault kind, uint64_
     leave();
 }
 
-int64_t process_create_task(uint64_t entry, uint64_t arg)
+/* A task at 'entry' with its two argument registers: user code's
+ * CreateTask starts its trampoline with the function in the second
+ * (lib/exec/task.c). */
+int64_t process_create_task(uint64_t entry, uint64_t arg0, uint64_t arg1)
 {
     struct process *p = task_self()->process;
     struct area *stack;
@@ -354,7 +357,7 @@ int64_t process_create_task(uint64_t entry, uint64_t arg)
         return ERR_LIMIT;       /* early, cheap; launch() decides */
     if (!new_stack(p, &stack))
         return ERR_NOMEM;
-    if (!(t = new_user_task(p, entry, stack, arg, 0))) {
+    if (!(t = new_user_task(p, entry, stack, arg0, arg1))) {
         area_release(stack, p);
         return handle_error(p);
     }
