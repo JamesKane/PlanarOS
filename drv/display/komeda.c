@@ -10,7 +10,11 @@
  * are at the output's size, not the framebuffer's.
  *
  * Vblank is the DOU's PL0 interrupt. A commit is latched when
- * GCU_CONFIG_VALID0 reads 0 again. komeda.h has the registers.
+ * GCU_CONFIG_VALID0 reads 0 again. The GOP leaves PL0 at line 0, before
+ * the prefetch line where the DPU takes a commit: a commit made at the
+ * vblank then missed that frame and every flip was a frame late. PL0 is
+ * moved to the line after it, as the vendor's driver has it. komeda.h
+ * has the registers.
  */
 #include "display.h"
 #include "komeda.h"
@@ -117,6 +121,29 @@ static bool take(struct dp_out *o, bool again)
         .di_Flags = DISPLAYP_CONSOLE, .di_Formats = 1u << DISPLAY_XRGB8888,
         .di_MaxWidth = o->con_width, .di_MaxHeight = o->con_height,
     };
+    /* PL0 a line after the fetch starts, as the vendor's driver has it:
+     * the commit for the next frame is taken then, and a client woken
+     * at the vblank has a frame to make it. */
+    {
+        uint32_t prog = k_rd(r, bs + K_BS_PROG_LINE), pre = k_rd(r, bs + K_BS_PREFETCH_LINE);
+        char line[120];
+        unsigned n = 0;
+
+        for (const char *t = "komeda: PL0 at line "; *t; t++)
+            line[n++] = *t;
+        n += dp_dec(line + n, prog);
+        for (const char *t = ", prefetch at "; *t; t++)
+            line[n++] = *t;
+        n += dp_dec(line + n, pre);
+        for (const char *t = ", vertical porches "; *t; t++)
+            line[n++] = *t;
+        n += dp_hex(line + n, k_rd(r, bs + K_BS_VINTERVALS));
+        line[n] = '\0';
+        if (!again)
+            dp_say(line);
+        if (pre >= 1 && prog != pre - 1)
+            k_wr(r, bs + K_BS_PROG_LINE, pre - 1);
+    }
     k_wr(r, dou + K_IRQ_MASK, k_rd(r, dou + K_IRQ_MASK) | K_DOU_PL0);
     return true;
 }

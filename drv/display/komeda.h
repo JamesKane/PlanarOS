@@ -66,6 +66,9 @@ constexpr uint32_t K_CU_EN = 1u << 0, K_CU_PAD = 1u << 1;   /* PAD: pixel alpha 
 
 /* The timing controller's (BS) */
 enum : uint32_t { K_BS_ACTIVESIZE = 0x0e0 };    /* w [12:0], h [28:16] */
+/* PL0's line, and the line the DPU starts fetching a frame at (and takes
+ * a commit): the vendor's linlon-dp sets them to 4 and 5. */
+enum : uint32_t { K_BS_PROG_LINE = 0x0d4, K_BS_PREFETCH_LINE = 0x0d8, K_BS_VINTERVALS = 0x0e8 };
 
 /* The DOU's interrupts: PL0 is the vblank, on BS's programmed line. */
 constexpr uint32_t K_DOU_PL0 = 1u << 13;
