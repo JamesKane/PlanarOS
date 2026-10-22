@@ -12,6 +12,7 @@
 | [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 | [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing (`planar/gfx.h`, `lib/gfx`) |
+| [intuition.md](intuition.md) | intuition.library: windows on the screen, presented (`planar/intuition.h`, `lib/intuition`) |
 
 ## All calls
 
@@ -45,8 +46,10 @@
 | CallHookPkt | [utility](utility.md#utilitycallhookpkt) | library |
 | CloseConn | [exec](exec.md#execcloseconn) | kernel |
 | CloseHandle | [exec](exec.md#execclosehandle) | kernel |
+| CloseIntuition | [intuition](intuition.md#intuitioncloseintuition) | library, through `IIntuition` |
 | CloseLibrary | [exec](exec.md#execcloselibrary) | library, through `IExec` |
 | ClosePort | [msg](msg.md#execcloseport) | library |
+| CloseWindow | [intuition](intuition.md#intuitionclosewindow) | library, through `IIntuition` |
 | ColdReboot | [lease](lease.md#leasecoldreboot) | kernel |
 | ConnectPort, ConnectPortUntil | [msg](msg.md#execconnectport) | library |
 | CreateDir, DeletePath | [dos](dos.md#doscreatedir) | library |
@@ -105,9 +108,12 @@
 | OpenCon, WriteCon, PutStr, CloseCon | [dos](dos.md#dosopencon) | library |
 | OpenDos, OpenDosUntil, CloseDos | [dos](dos.md#dosopendos) | library |
 | OpenFile, CloseFile | [dos](dos.md#dosopenfile) | library |
+| OpenIntuition | [intuition](intuition.md#intuitionopenintuition) | library, through `IIntuition` |
 | OpenLibrary | [exec](exec.md#execopenlibrary) | library, through `IExec` |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
+| OpenWindowTagList, OpenWindowTags | [intuition](intuition.md#intuitionopenwindowtaglist) | library, through `IIntuition` |
 | PortGone | [msg](msg.md#execportgone) | library |
+| PresentWindow | [intuition](intuition.md#intuitionpresentwindow) | library, through `IIntuition` |
 | Printf, VPrintf | [dos](dos.md#dosprintf) | library |
 | ProtectArea | [exec](exec.md#execprotectarea) | kernel |
 | PutMsg | [msg](msg.md#execputmsg) | library |
@@ -153,6 +159,7 @@
 | Wait | [exec](exec.md#execwait) | kernel |
 | WaitPort | [msg](msg.md#execwaitport) | library |
 | WaitPorts | [msg](msg.md#execwaitports) | library |
+| WaitSafe | [intuition](intuition.md#intuitionwaitsafe) | library, through `IIntuition` |
 | WaitUntil | [exec](exec.md#execwaituntil) | kernel |
 
 ## Known problems found while writing these

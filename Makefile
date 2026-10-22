@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V7.2 done
+EXPECT := V7.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -112,6 +112,9 @@ QEMU_USB = -device qemu-xhci,id=xhci -device usb-hub,bus=xhci.0,port=1 \
 	-qmp unix:$(QMP_SOCK),server=on,wait=off
 QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercised' \
 	--forbid 'typing not exercised'
+# A QEMU machine with a screen (RV64's ramfb, AArch64's through edk2)
+# must show it: display's and intuition's tests may not be skipped there.
+QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] screen|7\.[0-9] windows): not exercised'
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
@@ -136,7 +139,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -193,6 +196,7 @@ test-all:
 	@$(MAKE) --no-print-directory clib-test
 	@$(MAKE) --no-print-directory dos-lib-test
 	@$(MAKE) --no-print-directory gfx-test
+	@$(MAKE) --no-print-directory intuition-test
 
 # lib/rt/string.c's word loops, which the ISAs' own replace, on the host
 # with the sanitizers, renamed so as not to be the host's.
@@ -301,6 +305,21 @@ $(GFX_TEST): $(GFX_SRCS) $(GFX_NEON) lib/gfx/test.c lib/gfx/rows.h lib/gfx/font8
 gfx-test: $(GFX_TEST)
 	@$(GFX_TEST)
 
+# intuition's compositor (servers/intuition/compose.c) on the host with the
+# sanitizers, over made-up windows, against a naive compositor that
+# redraws everything: through lib/gfx's scalar entries, and NEON's too on
+# an Arm host.
+INTUITION_TEST := build/intuition/intuition-test
+
+$(INTUITION_TEST): $(GFX_SRCS) $(GFX_NEON) servers/intuition/compose.c servers/intuition/compose.h \
+		servers/intuition/test.c lib/gfx/rows.h include/planar/gfx.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/intuition) $(if $(GFX_NEON),-DGFX_TEST_NEON) \
+	  $(GFX_SRCS) $(GFX_NEON) servers/intuition/compose.c servers/intuition/test.c -o $@
+
+intuition-test: $(INTUITION_TEST)
+	@$(INTUITION_TEST)
+
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.
 # The kernel must take the same facts from each (kernel/hw.h), and hwdb's
@@ -351,7 +370,7 @@ ACPID_BUILD := build/acpid
 # The graph: what the server and the host share (not the server's loop).
 HWDB_SRCS := $(filter-out servers/hwdb/host.c servers/hwdb/test.c servers/hwdb/server.c \
 	servers/hwdb/killtest.c servers/hwdb/acpid.c servers/hwdb/pci.c servers/hwdb/power.c \
-	servers/hwdb/display.c servers/hwdb/input.c servers/hwdb/gpu.c,\
+	servers/hwdb/display.c servers/hwdb/intuition.c servers/hwdb/input.c servers/hwdb/gpu.c,\
 	$(wildcard servers/hwdb/*.c))
 HWDB_HOST := $(HWDB_BUILD)/hwdb-host
 HWDB_TEST := $(HWDB_BUILD)/hwdb-test

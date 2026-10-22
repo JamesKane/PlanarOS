@@ -1,6 +1,6 @@
 # V7 plan: Workbench I, windows
 
-**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
+**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 3 done.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
 
 **Goal (§8):** windows on the screen of both boards, composed on the CPU, with the pointer on its own plane. A client draws into its own memory with `gfx.library`, presents it without a copy across IPC, and is dragged, raised, closed and, when it dies, cleared away by `intuition`, which the client can't hang. Text is the 8×8 font until V8.
 
@@ -132,6 +132,40 @@ QEMU's `ramfb` is a framebuffer in guest memory that the guest describes through
   - 120 frames presented as fast as `safe_seq` allows, counting the kernel calls a frame and the frames missed;
   - the refusals: a buffer too small, a buffer not shared, a damage rectangle outside the window, a window that isn't the caller's.
 - **`V7.3 windows ok`**, with the costs: composition per megapixel, present to latch, calls per frame.
+
+**Done (2026-10-22).** `servers/intuition` (the server and its compositor, `compose.c`), `include/planar/intuition.h`, `lib/intuition` and `libs/intuition`: intuition.library 7.3, 6.6 KiB on RV64, the region's fourth library. `make intuition-test` passes 10,865 frames of random windows against the naive compositor, through the scalar table and NEON's, with no pixel written twice in a frame. `conformance/window.c` passes on the six QEMU boots with a screen, run by hwdb's new `T_WINDOW` phase after `T_DISPLAY`. hwdb then kills intuition and checks display freed its three buffers. Built so, not quite as planned:
+- **hwdb doesn't keep intuition yet.** It starts intuition for the window test (decision 4: on demand), and kills it after. Keeping it and restarting it is step 5's.
+- **A buffer is sent by its address, not its Area's handle.** Handles are the process's own, and mean nothing to intuition. intuition finds the Area with `QueryArea`: it must be another process's (`ai_Area` 0, two sharers at least), readable, and hold every row the buffer says it has. intuition describes the buffer itself with `InitBitMap`, and never reads the client's `BitMap`.
+- **`INTUI_INFO`**, which the plan didn't list, gives the client intuition's task, to `ShareArea` its bitmaps with before `INTUI_OPEN`, and the screen's size. It gives the tests intuition's costs too.
+- **A window joins the screen at its first frame**, at the front, so nothing half drawn is shown. Then the window's latest frame is taken whenever intuition composes. A frame that changes nothing on the screen (a window off it) is safe and shown at once.
+- **The sync words are `is_Safe`, `is_Disp` and `is_DispTime`.** `safe_seq` became `is_Safe`: the last frame composed, after which intuition reads nothing of the window's other buffer. So `WaitSafe` waits for `is_Safe` to reach the frame last presented, with two buffers or one.
+- **`PresentWindow` doesn't wait for its answer.** It sends on one of 4 messages of its own, whose answers are taken later. A refusal of intuition's comes back with the next `PresentWindow` or `WaitSafe`. The library makes intuition's checks first, so such a refusal is a client's bug.
+- **intuition waits for the latch with a second task**, in `WaitAddr` on display's `ds_Disp`, which signals the first. The first sleeps on its ports.
+- **The pointer doesn't move yet.** It's committed on plane 2 with the first frame, at the screen's centre. Step 4 moves it, with input.
+- **`pi_Calls`** was added to `QueryProcess`'s `ProcessInfo`: a process's own kernel calls (`process_calls`, the kernel's, until now for its self-tests). `window.c` counts a frame's with it, and checks that `WaitSafe` on a free buffer makes none.
+- **hwdb's display connection** is made again when it's asked for, if display's restart was seen before its old connection's end (`display_ask`). The window test asks display for its buffer count after `T_DISPLAY` killed display.
+- **What a client can still do to intuition:**
+  - unshare a bitmap under an open window, which ends intuition at its next read (`UnshareArea`'s note), for step 5's supervision to restart;
+  - give the address of its connection's arena as a buffer, which is the kernel's and shared with both, and is shown.
+
+  Neither touches another client's memory.
+- **Mutation-tested.** In the compositor, each of these failed `intuition-test`:
+  - the last frame's damage left out;
+  - a piece beside a window taken too tall, or one dropped;
+  - damage merged without starting again;
+  - a move not damaging where the window was;
+  - a frame's damage overflowing, dropped.
+
+  One survived, and it's equivalent: clipping a pixel past the screen's right edge, which gfx.library clips again. In the server and the library, each of these failed `window.c`:
+  - damage one column past the window, accepted;
+  - `is_Safe` never moved, or waited for a frame too far;
+  - the Areas kept after `CloseWindow`;
+  - the same screen buffer shown each frame;
+  - a buffer's rows not checked against its Area;
+  - a window's height not checked against its buffer's;
+  - a frame off the screen never made safe;
+  - `WaitSafe` making a kernel call when the buffer is free.
+- **Costs under TCG.** Composing takes 2.6 to 3.5 ms a megapixel on RV64, and 1.9 to 2.0 on AArch64. A frame presented one at a time takes 14 to 21 ms to latch on RV64, and 10 to 18 on AArch64, a vblank or so. Presented as fast as `is_Safe` allows, 120 frames are all shown, in 120 vblanks (124 at worst, on RV64), at 3 kernel calls a frame: `WaitSafe`'s `WaitAddr`, the signal that wakes intuition, and `window.c`'s own `CurrentTime`. intuition's buffers are cached on QEMU (`fb.c`'s), so NC's cost is step 6's to measure.
 
 ## 4. intuition II: input and the chrome
 

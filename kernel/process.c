@@ -535,6 +535,7 @@ int64_t process_query_call(uint32_t h, uint64_t info_out)
     }
     info.pi_Handles = __atomic_load_n(&p->handles, __ATOMIC_RELAXED);
     info.pi_Pages = area_process_pages(p, &info.pi_LibraryPages);
+    info.pi_Calls = process_calls(p);
     process_put(p);
     return arch_copy_to_user(info_out, &info, sizeof info) ? 0 : ERR_BADADDR;
 }

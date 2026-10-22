@@ -188,6 +188,12 @@ void display_down(void);
 void display_serve(struct MsgPort *mp);
 bool display_test(void);            /* the kill test's display step: true when it's over */
 struct unit *display_unit(void);    /* the console's display, running */
+uint32_t display_buffers(void);     /* display's, every client's, as last asked; UINT32_MAX: not known */
+bool display_ask(void);             /* ask again; true once the answer is in */
+
+/* --- intuition (intuition.c): the window test. --- */
+
+bool window_test(void);             /* the kill test's window step: true when it's over */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */
 void input_keep(void);              /* started, and again when it ends; ended when stopping */

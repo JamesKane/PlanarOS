@@ -120,6 +120,7 @@ struct ProcessInfo {
     uint32_t pi_Pad;
     uint64_t pi_Pages;              /* pages it maps, each Area once */
     uint64_t pi_LibraryPages;       /* of those, the shared library region's */
+    uint64_t pi_Calls;              /* kernel calls its tasks have made, ever (V7 step 3) */
 };
 
 int64_t CreateProcess(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);

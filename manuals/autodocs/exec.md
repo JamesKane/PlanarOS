@@ -1386,10 +1386,11 @@ Once it is dead, the other fields say how:
 | `pi_FaultAddress` | The address the fault was about: for an access fault, the one touched |
 | `pi_FaultPC` | Where it faulted |
 
-While the process is held or running, they are 0. Three are always filled in:
+While the process is held or running, they are 0. Four are always filled in:
 - `pi_Handles` -- the handles the process holds now, its tasks' among them. A supervisor checks with it that restarting its children leaks none (hwdb's kill test).
 - `pi_Pages` -- the pages it maps, each Area once however it's shared: its image, stacks, Areas, and those shared with it. 0 once it's dead.
 - `pi_LibraryPages` -- of those, the shared library region's, which is the same in every process, and in memory once ([Libraries ch. 8](../libraries/08-libraries.md)).
+- `pi_Calls` -- the kernel calls its tasks have made since it started, the dead tasks' included. A program measures its own with `process` 0, as `conformance/window.c` counts a frame's (V7 step 3).
 
 A kernel call.
 

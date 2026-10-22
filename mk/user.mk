@@ -204,7 +204,7 @@ USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 # ISA's base, so a RISC-V hart without V runs it: the vector unit's
 # memory functions are string.S's, renamed, which the kernel picks at
 # boot where the hart has V.
-USER_LIBS := exec utility gfx
+USER_LIBS := exec utility gfx intuition
 LIB_CFLAGS := $(subst rv64gcv,rv64gc,$(USER_CFLAGS))
 LIB_LDFLAGS := $(subst /user.ld,/lib.ld,$(USER_LDFLAGS)) -Wl,-z,norelro
 LIB_exec_SRCS := libs/exec/base.c lib/exec/pool.c lib/exec/fmt.c lib/exec/task.c \
@@ -217,6 +217,10 @@ LIB_utility_SRCS := libs/utility/base.c $(filter-out %/test.c,$(wildcard lib/uti
 LIB_gfx_SRCS := libs/gfx/base.c $(filter-out %/test.c,$(wildcard lib/gfx/*.c)) \
 	arch/$(ARCH)/lib/gfx.c lib/rt/string.c arch/$(ARCH)/user/syscalls.S
 $(BUILD)/libs/arch/$(ARCH)/lib/gfx.o: LIB_CFLAGS := $(USER_CFLAGS)
+# intuition.library's: lib/intuition, and what it calls linked in: the
+# messages (lib/exec/msg.c), tag lists (lib/utility/tags.c) and the stubs.
+LIB_intuition_SRCS := libs/intuition/base.c lib/intuition/intuition.c lib/exec/msg.c \
+	lib/utility/tags.c lib/rt/string.c arch/$(ARCH)/user/syscalls.S
 LIB_VEC := $(BUILD)/libs/vec-string.o
 LIB_HEAD := $(BUILD)/libs/lib/libhead.o
 LIB_BINS := $(patsubst %,$(BUILD)/libs/%.library.bin,$(USER_LIBS))

@@ -1,10 +1,10 @@
 # The display class
 
-*Checked against V7 step 2.*
+*Checked against V7 step 3.*
 
 ## What it's for
 
-The screen, without setting it up. The firmware lit one output on each board (UEFI's GOP on the CIX, U-Boot on the RV2), and `display` (`drv/display`) takes that over: the mode, the timing and the link stay as the firmware left them. Mode setting, EDID and a second monitor come later. What display adds is **planes**: buffers the controller shows over one another and composes as it scans out, each moved or flipped at a vblank without copying a pixel ([docs §16.3](../../docs/16-rtg-display-gpu.md), pillars 3 and 4). `intuition` will be its client (V7 step 3). Now the test is (`conformance/displaytest.c`).
+The screen, without setting it up. The firmware lit one output on each board (UEFI's GOP on the CIX, U-Boot on the RV2), and `display` (`drv/display`) takes that over: the mode, the timing and the link stay as the firmware left them. Mode setting, EDID and a second monitor come later. What display adds is **planes**: buffers the controller shows over one another and composes as it scans out, each moved or flipped at a vblank without copying a pixel ([docs §16.3](../../docs/16-rtg-display-gpu.md), pillars 3 and 4). `intuition` is its client ([Libraries ch. 13](../libraries/13-intuition.md)): two full-screen buffers flipped on plane 1, over the console, and the pointer on plane 2. So is the test (`conformance/displaytest.c`).
 
 It drives:
 - **the K1's HDMI DPU** (the RV2), "saturn" (`saturn.c`);

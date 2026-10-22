@@ -1495,6 +1495,9 @@ void selftest_tasks(void *)
     kprintf("V7.1 done\n");
     selftest_gfx();
     kprintf("V7.2 done\n");
+    /* hwdb's window test said what it saw of intuition (servers/hwdb/
+     * intuition.c), and exited 0 only if that held. */
+    kprintf("V7.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

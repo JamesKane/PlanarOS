@@ -138,6 +138,20 @@ static bool asked(void)
     return false;
 }
 
+uint32_t display_buffers(void)
+{
+    return dc.buffers;
+}
+
+/* Connected again first if display's restart came before its old
+ * connection was seen to go (display_up found it still up). */
+bool display_ask(void)
+{
+    if (!dc.up && display_unit())
+        display_up();
+    return asked();
+}
+
 /* --- The test. --- */
 
 enum : uint8_t { D_START, D_SHOWN, D_KILLED, D_SHOWN2, D_BACK, D_DONE };
