@@ -144,6 +144,10 @@ int64_t GrantRoot(Handle root, Handle process);
 /* Reset the board: a watchdog or PMIC, else PSCI or SBI. Returns only
  * if none can (V6 step 7). */
 int64_t ColdReboot(Handle root);
+/* The kernel log's last 'len' bytes at most (4096), oldest first, into
+ * 'buf': what was shown on the console, and what's still to be, every
+ * process's lines among the kernel's. The bytes copied (V6 step 8). */
+int64_t ReadLog(Handle root, char *buf, uint32_t len);
 int64_t ReadConsole(char *buf, uint32_t len);
 
 struct MsiInfo {

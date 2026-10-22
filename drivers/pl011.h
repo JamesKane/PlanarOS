@@ -14,6 +14,8 @@ struct pl011 {
 };
 
 void pl011_putc(const struct pl011 *u, char c);
+/* Bytes it takes now without waiting: 1 while its FIFO isn't full, else 0. */
+unsigned pl011_room(const struct pl011 *u);
 int pl011_getc(const struct pl011 *u);      /* a byte received, or -1 */
 
 #endif /* DRIVERS_PL011_H */

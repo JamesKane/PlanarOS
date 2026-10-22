@@ -25,7 +25,7 @@ constexpr unsigned KLOG_PER_S = 20;
 static atomic_uint_fast64_t klog_drops;
 
 /* Signals a user task may not wait for, send or change: the kernel's. */
-constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL | SIGF_WAKE | SIGF_PORT;
+constexpr uint64_t SIGF_KERNEL = SIGF_SLEEP | SIGF_KILL | SIGF_WAKE | SIGF_PORT | SIGF_LOG;
 
 bool syscall_copy_string(char *dst, uint64_t src, unsigned size)
 {
@@ -43,17 +43,39 @@ bool syscall_sigbit(int64_t bit)
     return bit >= 16 && bit < 64;
 }
 
+/* Append 's' at 'n' in 'd' (room for 'size'), and return the new end. */
+static unsigned cat(char *d, unsigned n, unsigned size, const char *s)
+{
+    while (*s && n < size)
+        d[n++] = *s++;
+    return n;
+}
+
+static unsigned cat_u64(char *d, unsigned n, unsigned size, uint64_t v)
+{
+    char digits[21];
+    unsigned k = sizeof digits;
+
+    digits[--k] = '\0';
+    do {
+        digits[--k] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    return cat(d, n, size, &digits[k]);
+}
+
 /*
- * The console is polled: a line holds the log, and interrupts, for about
- * 19 ms at 115200 baud. So a process gets KLOG_BURST lines at once and
- * KLOG_PER_S a second after that, the rest only counted, and only
- * printable bytes reach the terminal (review M12). A buffered console
- * drained by its driver comes with the drivers (V4).
+ * A line costs the caller a copy into the log's ring, which a kernel
+ * task drains to the console (kernel/kprintf.c, review M12). A process
+ * gets KLOG_BURST lines at once and KLOG_PER_S a second after that, the
+ * rest only counted, and only printable bytes reach the terminal. One
+ * that finds the ring full waits for room, as it waited for the polled
+ * UART before.
  */
 static int64_t sys_klog(struct task *self, uint64_t text)
 {
     struct process *p = self->process;
-    char buf[KLOG_MAX + 1];
+    char buf[KLOG_MAX + 1], line[2 * KLOG_MAX];
     uint64_t now = time_now(), dropped = 0;
     unsigned n;
 
@@ -89,9 +111,24 @@ static int64_t sys_klog(struct task *self, uint64_t text)
             return 0;
         }
     }
-    if (dropped)
-        kprintf("[%s] (%llu lines dropped)\n", self->name, (unsigned long long)dropped);
-    kprintf("[%s] %s\n", self->name, buf);
+    n = 0;
+    if (dropped) {
+        n = cat(line, n, sizeof line, "[");
+        n = cat(line, n, sizeof line, self->name);
+        n = cat(line, n, sizeof line, "] (");
+        n = cat_u64(line, n, sizeof line, dropped);
+        n = cat(line, n, sizeof line, " lines dropped)\r\n");
+    }
+    n = cat(line, n, sizeof line, "[");
+    n = cat(line, n, sizeof line, self->name);
+    n = cat(line, n, sizeof line, "] ");
+    n = cat(line, n, sizeof line - 2, buf);
+    n = cat(line, n, sizeof line, "\r\n");
+    while (!klog_user(line, n)) {
+        if (atomic_load(&self->killed))
+            return 0;
+        task_sleep_until(time_now() + time_us(1000));
+    }
     return 0;
 }
 
@@ -178,7 +215,14 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
 {
     struct task *self = task_self();
 
-    cpu_count(&this_cpu()->syscalls);
+    {
+        /* Interrupts off: a move between the load and the store would
+         * have two CPUs writing one count (§10.8). */
+        unsigned long was = arch_irq_save();
+
+        cpu_count(&this_cpu()->syscalls);
+        arch_irq_restore(was);
+    }
     cpu_count(&self->calls);
     prof_mark(P_SYSCALL);
     switch (nr) {
@@ -303,6 +347,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_root_grant_call((uint32_t)a[0], (uint32_t)a[1]);
     case SYS_COLD_REBOOT:
         return lease_cold_reboot_call((uint32_t)a[0]);
+    case SYS_READ_LOG:
+        return lease_read_log_call((uint32_t)a[0], a[1], (uint32_t)a[2]);
     default:
         return ERR_NOSYS;
     }

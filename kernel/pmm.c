@@ -45,7 +45,7 @@ static void set_range(uint64_t first, uint64_t last, bool used)
 static bool span_pages(uint64_t start, uint64_t end, uint64_t *first, uint64_t *last)
 {
     uint64_t lo = start >> PAGE_SHIFT;
-    uint64_t hi = (end + PAGE_SIZE - 1) >> PAGE_SHIFT;
+    uint64_t hi = (end >> PAGE_SHIFT) + ((end & (PAGE_SIZE - 1)) != 0);   /* no wrap at 2^64 */
 
     if (lo < base_pfn)
         lo = base_pfn;
@@ -62,7 +62,9 @@ void pmm_reserve(uint64_t start, uint64_t size)
 {
     uint64_t first, last;
 
-    if (!bitmap || !size || !span_pages(start, start + size, &first, &last))
+    /* A range running past 2^64 is reserved to the top, not dropped (§10.8). */
+    if (!bitmap || !size || !span_pages(start, size > ~0ULL - start ? ~0ULL : start + size,
+                                        &first, &last))
         return;
     unsigned long was = spin_lock_irqsave(&lock);
     set_range(first, last, true);
@@ -188,10 +190,23 @@ uint64_t pmm_alloc_contig_aligned(size_t n, uint64_t align)
     return pmm_alloc_contig_below(n, align, ~0ULL);
 }
 
+static uint64_t contig_steps;      /* the scan's steps, for the selftest */
+
+uint64_t pmm_contig_steps(void)
+{
+    return contig_steps;
+}
+
+/*
+ * First fit, a run of the bitmap at a time: a taken run or a free one is
+ * one step, found with ctz, not one step a page, so a fragmented span
+ * costs its runs, not its pages, with the lock held and interrupts off
+ * (§10.8). A run may only start aligned.
+ */
 uint64_t pmm_alloc_contig_below(size_t n, uint64_t align, uint64_t limit)
 {
     uint64_t start = 0, len = 0, page = 0, step = align / PAGE_SIZE;
-    uint64_t end = npages;
+    uint64_t end = npages, i = 0;
 
     if (n == 0 || step == 0 || (step & (step - 1)))
         return 0;
@@ -200,25 +215,39 @@ uint64_t pmm_alloc_contig_below(size_t n, uint64_t align, uint64_t limit)
     if ((limit >> PAGE_SHIFT) - base_pfn < end)
         end = (limit >> PAGE_SHIFT) - base_pfn;     /* pages wholly below 'limit' */
     unsigned long was = spin_lock_irqsave(&lock);
-    for (uint64_t i = 0; nfree >= n && i < end; i++) {
-        if (i % 64 == 0 && bitmap[i / 64] == ~0ULL) {
-            i += 63;                /* a word of taken pages at a time */
+    while (nfree >= n && i < end) {
+        uint64_t w = bitmap[i / 64] >> (i % 64), left = 64 - i % 64, run;
+
+        contig_steps++;
+        if (w & 1) {                /* taken, to the first free bit */
+            run = ~w ? (uint64_t)__builtin_ctzll(~w) : 64;
+            i += run < left ? run : left;
             len = 0;
             continue;
         }
-        if (taken(i)) {
-            len = 0;
-            continue;
-        }
-        if (len == 0 && (base_pfn + i) % step)
-            continue;               /* a run may only start aligned */
-        if (len++ == 0)
+        run = w ? (uint64_t)__builtin_ctzll(w) : 64;
+        if (run > left)
+            run = left;
+        if (run > end - i)
+            run = end - i;
+        if (len == 0) {             /* start at the first aligned page in it */
+            uint64_t skip = (step - (base_pfn + i) % step) % step;
+
+            if (skip >= run) {
+                i += run;
+                continue;
+            }
+            i += skip;
+            run -= skip;
             start = i;
-        if (len == n) {
+        }
+        if (len + run >= n) {
             set_range(start, start + n, true);
             page = (base_pfn + start) << PAGE_SHIFT;
             break;
         }
+        len += run;
+        i += run;
     }
     spin_unlock_irqrestore(&lock, was);
     if (page)

@@ -15,6 +15,11 @@ void pl011_putc(const struct pl011 *u, char c)
     *(volatile uint32_t *)(u->base + UARTDR) = (uint8_t)c;
 }
 
+unsigned pl011_room(const struct pl011 *u)
+{
+    return *(volatile uint32_t *)(u->base + UARTFR) & UARTFR_TXFF ? 0 : 1;
+}
+
 int pl011_getc(const struct pl011 *u)
 {
     if (*(volatile uint32_t *)(u->base + UARTFR) & UARTFR_RXFE)

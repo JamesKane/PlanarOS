@@ -185,6 +185,7 @@ void ipi_handle(void)
     struct cpu_call *list;
 
     atomic_fetch_add(&self->ipis, 1);
+    klog_ipi();
     spin_lock(&self->call_lock);
     list = self->calls;
     self->calls = nullptr;

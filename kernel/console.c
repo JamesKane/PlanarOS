@@ -58,6 +58,7 @@ static bool try_node(int32_t node)
                 .reg_shift = (uint8_t)fdt_getprop_u32(node, "reg-shift", 0),
                 .reg_width = (uint8_t)fdt_getprop_u32(node, "reg-io-width", 1),
             };
+            uart8250_probe_fifo(&u8250);
             kind = CONSOLE_8250;
             console_node = node;
             return true;
@@ -83,6 +84,7 @@ static bool try_acpi(void)
             .base = (uintptr_t)phys_to_virt(c.base),
             .reg_shift = c.reg_shift, .reg_width = c.reg_width,
         };
+        uart8250_probe_fifo(&u8250);
         kind = CONSOLE_8250;
     }
     return true;
@@ -162,6 +164,18 @@ void console_putc(char c)
     case CONSOLE_PLAT:
         plat_console_putc(c);
         break;
+    }
+}
+
+unsigned console_room(void)
+{
+    switch (kind) {
+    case CONSOLE_8250:
+        return uart8250_room(&u8250);
+    case CONSOLE_PL011:
+        return pl011_room(&pl011);
+    default:
+        return 1;                   /* the platform's waits itself */
     }
 }
 

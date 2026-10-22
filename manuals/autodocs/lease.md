@@ -754,6 +754,49 @@ No receive interrupt, so a reader must poll.
 
 ---
 
+## lease/ReadLog
+
+**NAME**
+ReadLog -- read the kernel log's tail
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t ReadLog(Handle root, char *buf, uint32_t len);
+```
+
+**FUNCTION**
+Copies the kernel log's last `len` bytes, at most 4096, oldest first, into `buf`. The log is the ring every `KLog` line and every kernel line goes through on its way to the console, and it keeps what it showed: 64 KiB of it, lines ending `\r\n`. What's in the ring and not yet shown is there too. init reads it when hwdb dies, and ends its meditation with hwdb's last lines (V6 step 8).
+
+A kernel call. It needs the device root, since the log has every process's lines.
+
+**INPUTS**
+- `root` -- the device root handle, owned by the calling process.
+- `buf` -- where to put the bytes.
+- `len` -- how many at most; more than 4096 is 4096.
+
+**RESULT**
+The bytes copied, or:
+- `ERR_BADHANDLE` -- `root` isn't a device root the calling process owns.
+- `ERR_BADADDR` -- `buf` isn't writable.
+- `ERR_NOMEM` -- no page to copy through.
+
+**NOTES**
+- The first bytes may be the end of a line: the ring's oldest are overwritten.
+- From `servers/init/main.c`:
+```c
+static char log[4096];
+int64_t got = ReadLog(root, log, sizeof log);   /* then each "[hwdb] " line */
+```
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[KLog](exec.md#execklog), [ColdReboot](#leasecoldreboot)
+
+---
+
 ## lease/RevokeLease
 
 **NAME**

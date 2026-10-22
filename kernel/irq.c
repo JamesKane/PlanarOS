@@ -13,7 +13,8 @@ static struct {
     atomic_bool running;        /* its handler runs now, on some CPU */
 } handlers[IRQ_SOURCES];
 
-static uint64_t taken;
+/* Every CPU's interrupts: from all of them at once, so atomic (§10.8). */
+static atomic_uint_fast64_t taken;
 
 bool irq_attach(uint32_t source, unsigned level, irq_handler_t fn, void *data)
 {
@@ -51,7 +52,7 @@ void irq_external(void)
     uint32_t source;
 
     while ((source = intc_claim()) != 0) {
-        taken++;
+        atomic_fetch_add_explicit(&taken, 1, memory_order_relaxed);
         irq_handler_t fn = nullptr;
 
         if (source < IRQ_SOURCES) {
@@ -72,17 +73,17 @@ void irq_external(void)
 
 void irq_timer(void)
 {
-    taken++;
+    atomic_fetch_add_explicit(&taken, 1, memory_order_relaxed);
     time_expired();
 }
 
 void irq_ipi(void)
 {
-    taken++;
+    atomic_fetch_add_explicit(&taken, 1, memory_order_relaxed);
     ipi_handle();
 }
 
 uint64_t irq_count(void)
 {
-    return taken;
+    return atomic_load_explicit(&taken, memory_order_relaxed);
 }

@@ -46,6 +46,9 @@ uint64_t pmm_place(uint64_t start, uint64_t bytes, uint64_t avoid, uint64_t avoi
 
 /* Frees of pages that weren't allocated: always a kernel bug. */
 unsigned pmm_bad_frees(void);
+
+/* Steps pmm_alloc_contig's scan has taken (a run of the bitmap each). */
+uint64_t pmm_contig_steps(void);
 uint64_t pmm_free_pages(void);
 
 /* The longest run of free pages: how fragmented memory is (VQ3). */

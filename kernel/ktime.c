@@ -50,14 +50,16 @@ uint64_t time_now(void)
     return arch_read_time();
 }
 
+/* Whole seconds and the rest apart, as time_ns does: a year's worth
+ * either way fits, where us * hz didn't past hours at 1 GHz. */
 uint64_t time_us(uint64_t us)
 {
-    return us * hz / 1000000;
+    return us / 1000000 * hz + us % 1000000 * hz / 1000000;
 }
 
 uint64_t time_to_us(uint64_t ticks)
 {
-    return hz ? ticks * 1000000 / hz : 0;
+    return hz ? ticks / hz * 1000000 + ticks % hz * 1000000 / hz : 0;
 }
 
 /* Whole seconds and the rest apart: the rest times 10^9 fits in 64

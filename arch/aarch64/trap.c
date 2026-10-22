@@ -35,6 +35,7 @@ constexpr unsigned EC_SVE         = 0x19;   /* SVE while CPACR_EL1.ZEN traps it 
 constexpr unsigned EC_IABT_LOWER = 0x20;
 constexpr unsigned EC_PC_ALIGN   = 0x22;
 constexpr unsigned EC_DABT_LOWER = 0x24;
+constexpr unsigned EC_DABT_CUR = 0x25;
 constexpr unsigned EC_SP_ALIGN   = 0x26;
 constexpr unsigned EC_BRK        = 0x3c;
 
@@ -67,6 +68,14 @@ void trap_sync(struct trap_frame *f, uint64_t kind)
 {
     for (const struct fixup *e = __fixup_start; e < __fixup_end; e++) {
         if (e->insn == f->elr) {
+            uint64_t esr = sysreg_read(esr_el1), far = sysreg_read(far_el1);
+
+            /* A copy's fault on a page that's there after all (a remap's
+             * break before make) runs again, as a user access's does,
+             * rather than fail the copy (§10.8). */
+            if (((esr >> 26) & 0x3f) == EC_DABT_CUR && far < ARCH_USER_TOP &&
+                area_fault_retry(far, esr & (1u << 6) ? MAP_WRITE : MAP_READ))
+                return;
             f->x[0] = sysreg_read(esr_el1);
             f->elr = e->resume;
             return;

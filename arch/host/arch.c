@@ -11,6 +11,7 @@
 #include <planar/syscalls.h>
 
 #include "arch.h"
+#include "kprintf.h"
 #include "userimg.h"
 
 const char arch_name[] = "host";
@@ -156,6 +157,10 @@ unsigned arch_asid_bits(void)
     return 0;
 }
 
+void arch_asid_limit(unsigned)
+{
+}
+
 bool arch_domain_create(struct arch_domain *)
 {
     return false;
@@ -251,6 +256,7 @@ bool arch_probe_read(uint64_t, uint64_t *)
 /* A halted host "CPU" is a finished process. */
 [[noreturn]] void arch_halt(void)
 {
+    klog_flush();
     fflush(stdout);
     exit(0);
 }

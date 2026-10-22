@@ -8,7 +8,8 @@
  * after the delay it asks for: an answer in time, one too late
  * (ERR_TIMEOUT, the message in mp_Lost), ERR_BUSY until the late answer
  * comes and is dropped, and ERR_PORT_DIED, not ERR_BUSY, when the
- * server dies holding one. Last, a waiter in OpenPort (argument 2) that
+ * server dies holding one; and a DoMsgUntil woken with ERR_PORT_DIED when
+ * a sibling task closes its port. Last, a waiter in OpenPort (argument 2) that
  * no port will ever wake is killed, and must die at once. Then what a
  * DoMsgUntil costs against a DoMsg. Exits 0, or 1 with the line.
  */
@@ -73,6 +74,13 @@ static int waiter(void)
 
     OpenPort("never", SIG_CONN, 0, 0, &a, DEADLINE_NONE);
     return 1;                       /* only a kill ends the wait */
+}
+
+/* A sibling's ClosePort, 50 ms in, under the main task's DoMsgUntil. */
+static void closer(uint64_t arg)
+{
+    nap(50);
+    ClosePort((struct MsgPort *)arg);
 }
 
 static bool dead(Handle p, uint64_t within_ms, struct ProcessInfo *pi)
@@ -162,6 +170,22 @@ int main(uint64_t arg)
     for (unsigned i = 0; i < 2000; i++)
         CHECK(DoMsgUntil(&mp, &m1->dl_Msg, CurrentTime() + 1000 * MS) == 0);
     el = (CurrentTime() - t) / 2000;
+
+    /* Closed by a sibling task while this one waits: woken, and told. */
+    {
+        struct MsgPort mp2;
+        struct DlMsg *m3;
+
+        CHECK(ConnectPortUntil(&mp2, "deadline", SIG_CONN + 1, 4, 4096,
+                               CurrentTime() + 1000 * MS) == 0);
+        CHECK((m3 = AllocMsg(&mp2, sizeof *m3)));
+        m3->dl_Msg.mn_Length = sizeof *m3;
+        m3->dl_Delay = 5000;
+        CHECK(CreateTask(closer, (uint64_t)&mp2) > 0);
+        t = CurrentTime();
+        CHECK(DoMsgUntil(&mp2, &m3->dl_Msg, t + 2000 * MS) == ERR_PORT_DIED);
+        CHECK(CurrentTime() - t < 1000 * MS);
+    }
 
     /* Lost, and then the server dies: gone, not busy. */
     m1->dl_Delay = 5000;

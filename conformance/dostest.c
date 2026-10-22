@@ -141,6 +141,19 @@ int main(void)
         check(pi.pi_State == PROCS_EXITED && pi.pi_ExitCode == 7, "C:hello didn't exit 7");
         CloseHandle((Handle)r);
     }
+    /* Loaded from a disk, it may not take a port's name: not "dos". */
+    r = RunCommand(&d, "C:hello", "name", SIG_CHILD, 0);
+    check(r >= 0, "C:hello wouldn't load");
+    if (r >= 0) {
+        uint64_t since = CurrentTime();
+
+        while (QueryProcess((Handle)r, &pi) == 0 && pi.pi_State < PROCS_EXITED &&
+               CurrentTime() - since < 3000 * MS)
+            nap(1);
+        check(pi.pi_State == PROCS_EXITED && pi.pi_ExitCode == 8,
+              "C:hello, from the disk, took a port's name");
+        CloseHandle((Handle)r);
+    }
     if (test_disk)
         check(RunCommand(&d, "SYS:EFI/planar/hello.txt", nullptr, SIG_CHILD, 0) == ERR_BADARG,
               "a text file was taken for a program");
@@ -180,7 +193,7 @@ int main(void)
     put(&l, failures ? "dostest: FAILED: " : "dostest: ok: ");
     put(&l, "volumes listed, ");
     put(&l, test_disk ? "files read by short and long names, " : "no test files (a board's disk), ");
-    put(&l, "C:hello loaded from it and run");
+    put(&l, "C:hello loaded from it and run, and refused a port's name");
     put(&l, writable ? ", a 150 KB file written, read back and removed" : ", nothing written");
     KLog(l.text);
     return failures ? 1 : 0;

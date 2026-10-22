@@ -129,7 +129,7 @@ static void signal_task_handle(Handle h, uint64_t sig);
 static struct process *create_from(struct area *image, uint64_t etext, uint64_t entry,
                                    const char *name, int pri, uint64_t arg,
                                    struct task *watcher, Handle watch_task, uint64_t sig,
-                                   uint64_t affinity, bool held)
+                                   uint64_t affinity, bool held, bool names)
 {
     struct area *stack = nullptr;
     struct process *p;
@@ -144,7 +144,8 @@ static struct process *create_from(struct area *image, uint64_t etext, uint64_t 
     /* Two references: the watcher's, and its own while it lives. */
     *p = (struct process){ .name = name, .pri = pri, .affinity = affinity,
                            .watcher = watcher, .watch_task = watch_task, .watch_sig = sig,
-                           .refs = 2, .klog_tokens = 32, .klog_at = time_now() };
+                           .refs = 2, .klog_tokens = 32, .klog_at = time_now(),
+                           .names = names };
     if (!name) {
         p->name = p->name_buf;
     }
@@ -186,7 +187,8 @@ static struct process *create_from(struct area *image, uint64_t etext, uint64_t 
 
 /* Load built-in program 'name' into a new process (create_from). */
 static struct process *create(const char *name, int pri, uint64_t arg, struct task *watcher,
-                              Handle watch_task, uint64_t sig, uint64_t affinity, bool held)
+                              Handle watch_task, uint64_t sig, uint64_t affinity, bool held,
+                              bool names)
 {
     const struct user_image *img = find_image(name);
     const uint8_t *file;
@@ -207,25 +209,25 @@ static struct process *create(const char *name, int pri, uint64_t arg, struct ta
         return nullptr;
     area_copy_in(image, 0, file, file_size);
     return create_from(image, etext, 0, img->name, pri, arg, watcher, watch_task, sig, affinity,
-                       held);
+                       held, names);
 }
 
 struct process *process_create(const char *name, int pri, uint64_t arg,
                                struct task *watcher, uint64_t sig)
 {
-    return create(name, pri, arg, watcher, 0, sig, TASK_ANY_CPU, false);
+    return create(name, pri, arg, watcher, 0, sig, TASK_ANY_CPU, false, true);
 }
 
 struct process *process_create_on(const char *name, int pri, uint64_t arg,
                                   struct task *watcher, uint64_t sig, uint64_t affinity)
 {
-    return create(name, pri, arg, watcher, 0, sig, affinity, false);
+    return create(name, pri, arg, watcher, 0, sig, affinity, false, true);
 }
 
 struct process *process_create_root(const char *name, int pri, uint64_t arg,
                                     struct task *watcher, uint64_t sig)
 {
-    struct process *p = create(name, pri, arg, watcher, 0, sig, TASK_ANY_CPU, true);
+    struct process *p = create(name, pri, arg, watcher, 0, sig, TASK_ANY_CPU, true, true);
     struct task *t;
 
     if (!p)
@@ -398,12 +400,14 @@ int64_t process_create_call(uint64_t user_name, uint64_t arg, int64_t sigbit, ui
 
     if (!syscall_copy_string(name, user_name, sizeof name))
         return ERR_BADADDR;
-    if (!syscall_sigbit(sigbit) || (flags & ~PROCF_HELD))
+    if (!syscall_sigbit(sigbit) || (flags & ~(PROCF_HELD | PROCF_NAMES)))
         return ERR_BADARG;
     if (!find_image(name))
         return ERR_NOTFOUND;
+    /* A built-in program is the system's own, and names ports if its
+     * parent may. */
     if (!(p = create(name, parent->pri, arg, nullptr, self->handle, 1ULL << sigbit,
-                     parent->affinity, true)))
+                     parent->affinity, true, parent->names)))
         return ERR_NOMEM;
     if (!(h = handle_new(HANDLE_PROCESS, p, parent))) {
         int64_t err = handle_error(parent);
@@ -429,8 +433,12 @@ int64_t process_create_image_call(uint64_t user_image, uint64_t arg, int64_t sig
 
     if (!arch_copy_from_user(&pi, user_image, sizeof pi))
         return ERR_BADADDR;
-    if (!syscall_sigbit(sigbit) || (flags & ~PROCF_HELD))
+    if (!syscall_sigbit(sigbit) || (flags & ~(PROCF_HELD | PROCF_NAMES)))
         return ERR_BADARG;
+    /* A loaded program names ports only if given the right, by a parent
+     * that has it (§10.8: first come, first served let anyone be "dos"). */
+    if ((flags & PROCF_NAMES) && !parent->names)
+        return ERR_RIGHTS;
     pi.pi_Name[sizeof pi.pi_Name - 1] = '\0';
     if (pi.pi_Etext % PAGE_SIZE || pi.pi_Entry >= pi.pi_Etext)
         return ERR_BADARG;
@@ -438,7 +446,8 @@ int64_t process_create_image_call(uint64_t user_image, uint64_t arg, int64_t sig
         return ERR_BADHANDLE;
     /* The Area is the kernel's now: the parent no longer maps or names it. */
     if (!(p = create_from(image, pi.pi_Etext, pi.pi_Entry, nullptr, parent->pri, arg, nullptr,
-                          self->handle, 1ULL << sigbit, parent->affinity, true)))
+                          self->handle, 1ULL << sigbit, parent->affinity, true,
+                          flags & PROCF_NAMES)))
         return ERR_NOMEM;
     for (unsigned i = 0; i < sizeof p->name_buf - 1 && pi.pi_Name[i]; i++)
         p->name_buf[i] = pi.pi_Name[i];

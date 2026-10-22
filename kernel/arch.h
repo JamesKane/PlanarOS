@@ -149,6 +149,9 @@ constexpr uint32_t MAP_GLOBAL = 1u << 6;
 
 bool arch_domain_create(struct arch_domain *d);
 unsigned arch_asid_bits(void);                      /* 0: none, every switch flushes */
+/* For a selftest: give domains at most 'n' ASIDs of their own (0: as
+ * many as the CPU has). The rest share one, flushed when loaded. */
+void arch_asid_limit(unsigned n);
 void arch_domain_destroy(struct arch_domain *d);   /* tables and ASID, not pages */
 bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags);
 uint64_t arch_unmap(struct arch_domain *d, uint64_t va);  /* the page's pa, or 0 */

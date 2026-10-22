@@ -214,6 +214,7 @@ void arch_wait_for_interrupt(void)
 {
     struct sbiret r;
 
+    klog_flush();
     if (!sbi_has(SBI_EXT_SRST)) {
         kprintf("planar: reboot failed: the firmware has no SBI SRST\n");
         arch_halt();
@@ -225,6 +226,7 @@ void arch_wait_for_interrupt(void)
 
 [[noreturn]] void arch_halt(void)
 {
+    klog_flush();                   /* the ring's last lines, a meditation's among them */
     __asm__ volatile("csrw sie, zero");
     for (;;)
         __asm__ volatile("wfi");

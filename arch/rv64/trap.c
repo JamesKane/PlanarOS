@@ -36,6 +36,9 @@ uint64_t probe_copy_to_user(uint64_t dst, const void *src, size_t n);
 
 void trap_init(void)
 {
+    /* trap_entry reads a nonzero sscratch as a trap from user mode: what
+     * a loader left there mustn't look like one (§10.8). */
+    __asm__ volatile("csrw sscratch, zero");
     csr_write_stvec((uint64_t)(uintptr_t)trap_entry);
 }
 
@@ -91,6 +94,13 @@ static void kernel_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
 {
     for (const struct fixup *e = __fixup_start; e < __fixup_end; e++) {
         if (e->insn == f->sepc) {
+            /* A copy's fault on a page that's there after all (a stale
+             * entry, or a remap's break before make) runs again, as a
+             * user access's does, rather than fail the copy (§10.8). */
+            if ((scause == 13 || scause == 15) && stval < ARCH_USER_TOP &&
+                (riscv_fault_spurious(stval, scause) ||
+                 area_fault_retry(stval, scause == 15 ? MAP_WRITE : MAP_READ)))
+                return;
             f->x[10] = scause;
             f->sepc = e->resume;
             return;

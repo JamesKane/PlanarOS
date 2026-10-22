@@ -31,10 +31,12 @@
  * on every exception to EL1, so the kernel can't touch user memory but
  * through the unprivileged loads and stores of its copy routines. */
 #define SCTLR_EL1_RES1  0x30500800      /* MMU, caches, alignment checks off */
-/* ... | UCI | UCT | I | C | M: EL0 may clean and invalidate the data
- * cache by address, and read CTR_EL0 for its line size, as a driver
- * whose device doesn't snoop must (arch/aarch64/user/cache.c). */
-#define SCTLR_EL1_MMU   0x34509805
+/* ... | UCI | nTWE | UCT | DZE | I | C | M: EL0 may clean and invalidate
+ * the data cache by address, and read CTR_EL0 for its line size, as a
+ * driver whose device doesn't snoop must (arch/aarch64/user/cache.c);
+ * a wfe in a spin loop and a dc zva in a memset don't trap (review
+ * §10.8, conformance/userinsn.c). wfi still does. */
+#define SCTLR_EL1_MMU   0x3454d805
 #define HCR_EL2_RW      (1 << 31)       /* EL1 is AArch64 */
 #define SPSR_EL1H_DAIF  0x3c5           /* EL1h, D A I F masked */
 #define CPTR_EL2_RES1   0x22ff          /* RES1 only: no FP/SIMD, SVE or SME traps to EL2 */
@@ -136,9 +138,10 @@ section_table:
  * found: on a core just powered on by PSCI they're UNKNOWN, and a trap
  * to an EL2 with no vectors hangs the core silently (three of the CIX's
  * A520s, at their first virtual timer access: CNTHCTL_EL2's FEAT_ECV
- * trap bits). MDCR_EL2 gives EL1 every PMU counter; the fine-grained
- * traps (FEAT_FGT) and HCRX_EL2 (FEAT_HCX) are cleared where they exist;
- * ICC_SRE_EL2 lets EL1 use the GIC's system registers. Uses x9 and x10.
+ * trap bits). VPIDR_EL2 and VMPIDR_EL2 get the CPU's own IDs. MDCR_EL2
+ * gives EL1 every PMU counter; the fine-grained traps (FEAT_FGT) and
+ * HCRX_EL2 (FEAT_HCX) are cleared where they exist; ICC_SRE_EL2 lets EL1
+ * use the GIC's system registers. Uses x9 and x10.
  */
     .macro  EL2_TO_EL1 resume
     mrs     x9, CurrentEL
@@ -150,6 +153,10 @@ section_table:
     mov     x9, #3                  /* EL1PCTEN, EL1PCEN; with FEAT_ECV, no */
     msr     cnthctl_el2, x9         /* trap of EL1's virtual timer (EL1TVT) */
     msr     cntvoff_el2, xzr
+    mrs     x10, midr_el1           /* what EL1 reads as MIDR and MPIDR: the */
+    msr     vpidr_el2, x10          /* CPU's own, which the kernel names CPUs */
+    mrs     x10, mpidr_el1          /* by, not the firmware's leftovers */
+    msr     vmpidr_el2, x10
     mov     x9, #CPTR_EL2_RES1
     msr     cptr_el2, x9
     msr     hstr_el2, xzr

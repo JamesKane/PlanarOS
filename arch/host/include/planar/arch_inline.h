@@ -34,6 +34,7 @@ struct arch_cpu {
 /* No protection in a host process. */
 struct arch_domain {
     uint64_t unused;
+    uint32_t asid;      /* always 0: kernel/selftest.c's ASID test reads it */
 };
 
 static inline void *phys_to_virt(uint64_t pa)

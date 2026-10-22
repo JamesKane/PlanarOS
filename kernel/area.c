@@ -655,6 +655,15 @@ struct area *area_take(uint32_t h, struct process *p, uint64_t min_size)
     return a;
 }
 
+/* What the Area holds, made visible to instruction fetch on every CPU. */
+static void sync_code(struct area *a)
+{
+    for (uint64_t off = 0; off < a->size; off += PAGE_SIZE)
+        arch_sync_icache(phys_to_virt(area_pa(a, off)), PAGE_SIZE);
+}
+
+/* Shared executable, it's synced as ProtectArea syncs: the owner may have
+ * written it through a mapping it has since made read-only (§10.8). */
 int64_t area_share_call(uint32_t h, uint32_t task, uint32_t rights)
 {
     struct process *self = task_self()->process;
@@ -668,8 +677,9 @@ int64_t area_share_call(uint32_t h, uint32_t task, uint32_t rights)
         err = ERR_NOTFOUND;
     else if (target != self && !ipc_connected(self, target))
         err = ERR_RIGHTS;           /* only to a peer: review M10 */
-    else if (!(err = check_rights(a, rights)))
-        err = map_into(a, target, rights, 0, h);
+    else if (!(err = check_rights(a, rights)) && !(err = map_into(a, target, rights, 0, h)) &&
+             (rights & AREAR_EXEC))
+        sync_code(a);
     if (a)
         put_area(a);
     if (target)
@@ -758,8 +768,7 @@ int64_t area_protect_call(uint32_t h, uint32_t rights)
     }
     spin_unlock_irqrestore(&lock, was);
     if (m && (rights & AREAR_EXEC))
-        for (uint64_t off = 0; off < a->size; off += PAGE_SIZE)
-            arch_sync_icache(phys_to_virt(area_pa(a, off)), PAGE_SIZE);
+        sync_code(a);
     put_area(a);
     return m ? 0 : ERR_NOTFOUND;
 }

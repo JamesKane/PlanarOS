@@ -44,6 +44,8 @@ constexpr unsigned SIGB_WAKE = 4;           /* WakeAddr's (kernel/futex.c) */
 constexpr uint64_t SIGF_WAKE = 1ULL << SIGB_WAKE;
 constexpr unsigned SIGB_PORT = 5;           /* a port's name came (kernel/port.c) */
 constexpr uint64_t SIGF_PORT = 1ULL << SIGB_PORT;
+constexpr unsigned SIGB_LOG = 6;            /* the log has text to show (kernel/kprintf.c) */
+constexpr uint64_t SIGF_LOG = 1ULL << SIGB_LOG;
 
 enum task_state : uint8_t {
     TASK_READY,
@@ -91,7 +93,17 @@ struct task {
     uint64_t user_pc, user_sp, user_arg[3];
     uint64_t sig_alloc;             /* AllocSignal's bits */
     _Atomic uint64_t calls;         /* kernel calls it made (cpu_count) */
+    bool stack_test;                /* a selftest's: an overflow is counted, not fatal */
+
+    /* Last, so it's the first word a stack overflowing into the struct
+     * writes: TASK_STACK_END, checked at every switch away (§10.8). */
+    uint64_t stack_end;
 };
+
+constexpr uint64_t TASK_STACK_END = 0x5374616b456e6421ULL;
+
+/* Overflows the switch check found in tasks with stack_test set. */
+uint64_t sched_stack_overflows(void);
 
 /* Make the code running on this CPU its idle task. Each CPU, once,
  * before it takes interrupts that may schedule. */
@@ -116,8 +128,9 @@ void task_discard(struct task *t);
 [[noreturn]] void task_exit(void);
 struct task *task_self(void);
 
-/* Change where the calling task may run; it moves at once if it must. */
-void task_set_affinity(uint64_t affinity);
+/* Change where the calling task may run; it moves at once if it must.
+ * False, and nothing changed, if no CPU in 'affinity' is online. */
+bool task_set_affinity(uint64_t affinity);
 void task_set_pri(struct task *t, int pri);
 
 /* The calling task gives back priority lent to it by task_post(). */

@@ -60,8 +60,13 @@ void arch_cpu_init(void)
     arch_domain_switch(nullptr);
     tlb_flush_local();
     __asm__ volatile("msr pan, #1" : : : "memory");
-    /* User mode may read the virtual counter (TimeNow without a trap). */
-    sysreg_write(cntkctl_el1, sysreg_read(cntkctl_el1) | 2);
+    /* User mode may read the virtual counter (TimeNow without a trap),
+     * and nothing else of the timers: the whole register, not ORed into
+     * what the firmware left (review §10.8). */
+    sysreg_write(cntkctl_el1, 2);       /* EL0VCTEN */
+    /* No debug exceptions, single step or kernel debug the firmware might
+     * have left on. */
+    sysreg_write(mdscr_el1, 0);
 
     /* The cycle counter, if there's a PMU (PMUVer neither 0 nor 0xf). */
     dfr0 = (sysreg_read(id_aa64dfr0_el1) >> 8) & 0xf;
@@ -124,10 +129,15 @@ static int64_t psci_call(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
     register uint64_t x2 __asm__("x2") = a2;
     register uint64_t x3 __asm__("x3") = a3;
 
+    /* SMCCC 1.0 lets the firmware change x1-x17 (review §10.8). */
     if (psci_smc)
-        __asm__ volatile("smc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
+        __asm__ volatile("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) :
+                         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+                           "x14", "x15", "x16", "x17", "memory");
     else
-        __asm__ volatile("hvc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
+        __asm__ volatile("hvc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) :
+                         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+                           "x14", "x15", "x16", "x17", "memory");
     return (int64_t)x0;
 }
 
@@ -379,6 +389,7 @@ void arch_wait_for_interrupt(void)
 {
     constexpr uint64_t PSCI_SYSTEM_RESET = 0x84000009;
 
+    klog_flush();
     if (psci_ready())
         psci_call(PSCI_SYSTEM_RESET, 0, 0, 0);
     kprintf("planar: reboot failed: PSCI SYSTEM_RESET returned\n");
@@ -387,6 +398,7 @@ void arch_wait_for_interrupt(void)
 
 [[noreturn]] void arch_halt(void)
 {
+    klog_flush();                   /* the ring's last lines, a meditation's among them */
     __asm__ volatile("msr daifset, #0xf");
     for (;;)
         __asm__ volatile("wfi");

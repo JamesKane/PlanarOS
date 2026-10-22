@@ -49,6 +49,7 @@
         for (uint64_t t = time_now(); time_now() - t < time_us(200000);)
             arch_cpu_relax();
         kprintf("planar: rebooting\n");
+        klog_flush();
         plat_reboot();
         arch_reboot();
     }
@@ -126,9 +127,22 @@ void selftest_pmm(void)
         pmm_free(run + i * PAGE_SIZE);
     if (pmm_free_pages() != before)
         fail("V1.1 pmm", "pages leaked");
-    kprintf("V1.1 pmm ok: %llu pages (%llu MiB) managed, %llu free, largest run %llu\n",
-            (unsigned long long)pmm_total(), (unsigned long long)(pmm_total() >> 8),
-            (unsigned long long)before, (unsigned long long)pmm_largest_free_run());
+    /* A run one longer than any there is: the scan goes over all of
+     * memory and fails, a run of the bitmap a step, not a page (§10.8). */
+    {
+        uint64_t largest = pmm_largest_free_run(), steps = pmm_contig_steps();
+
+        if (pmm_alloc_contig(largest + 1))
+            fail("V1.1 pmm", "a run longer than the largest was found");
+        steps = pmm_contig_steps() - steps;
+        if (steps > pmm_total() / 16)
+            fail("V1.1 pmm", "the contiguous scan went a page at a time");
+        kprintf("V1.1 pmm ok: %llu pages (%llu MiB) managed, %llu free, largest run %llu, "
+                "scanned for one longer in %llu steps\n",
+                (unsigned long long)pmm_total(), (unsigned long long)(pmm_total() >> 8),
+                (unsigned long long)before, (unsigned long long)largest,
+                (unsigned long long)steps);
+    }
 }
 
 /*
@@ -284,6 +298,7 @@ static void timer_fn(void *)
  */
 void selftest_timer(void)
 {
+    constexpr uint64_t YEAR_S = 365 * 86400ULL;
     static struct ktimer t = { .fn = timer_fn };
     uint64_t start, interrupts = time_interrupts(), deadline, waited;
 
@@ -304,7 +319,12 @@ void selftest_timer(void)
         fail("V1.1 timer", "timer fired early");
     if (time_interrupts() == interrupts)
         fail("V1.1 timer", "no timer interrupt taken");
-    kprintf("V1.1 timer ok: %s at %llu Hz, 10 ms timer took %llu us\n", arch_timer_name(),
+    /* A year's ticks, past where ticks * 10^6 overflowed (§10.8). */
+    if (time_to_us(time_hz() * YEAR_S) != YEAR_S * 1000000 ||
+        time_us(YEAR_S * 1000000) != time_hz() * YEAR_S || time_to_us(time_hz()) != 1000000)
+        fail("V1.1 timer", "a year's ticks didn't convert");
+    kprintf("V1.1 timer ok: %s at %llu Hz, 10 ms timer took %llu us; a year converted "
+            "both ways\n", arch_timer_name(),
             (unsigned long long)time_hz(), (unsigned long long)time_to_us(waited));
 }
 
@@ -509,6 +529,58 @@ static void spawn_fn(void *)
     atomic_fetch_or(&ran_on_mask, 1ULL << this_cpu()->index);
     if (atomic_fetch_add(&spawned_done, 1) + 1 == SPAWN)
         task_signal(tester, SIGF_TEST);
+}
+
+/*
+ * A kernel stack overflowing: a task recurses down its own stack until a
+ * frame reaches the struct at its base, writes over the last word of it
+ * and no further (the rest of the struct is the scheduler's), and yields.
+ * The switch must find it. stack_test makes that a count, not a halt.
+ */
+static _Atomic bool dug;
+
+[[gnu::noinline]] static void dig(volatile uint64_t *end)
+{
+    volatile uint64_t pad[64];
+
+    if ((uintptr_t)pad > (uintptr_t)end) {
+        dig(end);
+        pad[0] = 0;                 /* a use after the call: no tail call */
+        return;
+    }
+    for (unsigned i = 0; i < 64; i++)
+        if (&pad[i] >= end)
+            pad[i] = 0;
+    if ((uintptr_t)(pad + 64) <= (uintptr_t)end)
+        *end = 0;                   /* the frame skipped it, landing below */
+}
+
+static void overflow_fn(void *)
+{
+    struct task *t = task_self();
+    unsigned long was;
+
+    t->stack_test = true;
+    was = arch_irq_save();          /* no trap frame below the deepest one */
+    dig(&t->stack_end);
+    arch_irq_restore(was);
+    task_yield();
+    atomic_store(&dug, true);
+    task_signal(tester, SIGF_TEST);
+}
+
+static void test_stack_overflow(void)
+{
+    uint64_t before = sched_stack_overflows();
+
+    atomic_store(&dug, false);
+    if (!task_create("overflow", 5, cpu_mask(0), overflow_fn, nullptr))
+        fail("V1.3 stack", "task_create failed");
+    if (!wait_test(1000000) || !atomic_load(&dug))
+        fail("V1.3 stack", "the overflowing task never came back");
+    if (sched_stack_overflows() != before + 1)
+        fail("V1.3 stack", "a stack run into its task's struct wasn't found at the switch");
+    kprintf("V1.3 stack ok: a kernel stack overflowing into its task was found at the switch\n");
 }
 
 static void test_spawn(void)
@@ -772,7 +844,10 @@ static void test_migrate(void)
     to = atomic_load(&moved_to) - 1;
     if (from != 1 || to != (2 % ncpus))
         fail("V1.3 migrate", "task didn't end up on its new CPU");
-    kprintf("V1.3 migrate ok: cpu %u to cpu %u\n", from, to);
+    if (ncpus < 64 && task_set_affinity(1ULL << 63))
+        fail("V1.3 migrate", "an affinity to no online CPU was taken");
+    kprintf("V1.3 migrate ok: cpu %u to cpu %u; an affinity to no online CPU refused\n",
+            from, to);
 }
 
 
@@ -1320,6 +1395,7 @@ static void run_system(void)
     if (bootargs_has("reboot")) {
         task_sleep_until(time_now() + time_us(200000));
         kprintf("planar: rebooting\n");
+        klog_flush();
         task_sleep_until(time_now() + time_us(50000));
         plat_reboot();
         arch_reboot();
@@ -1340,6 +1416,7 @@ void selftest_tasks(void *)
     test_strand();
     test_lower();
     test_migrate();
+    test_stack_overflow();
     test_pingpong();
     kprintf("V1.3 scheduler: %llu switches, %llu steals so far\n",
             (unsigned long long)sched_switches(), (unsigned long long)sched_steals());
@@ -1410,6 +1487,8 @@ void selftest_tasks(void *)
     kprintf("V6.6 done\n");
     selftest_supervision();
     kprintf("V6.7 done\n");
+    selftest_debts();
+    kprintf("V6.8 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -1420,6 +1499,7 @@ void selftest_tasks(void *)
         /* Let the serial line drain, then start over (a board's loop). */
         task_sleep_until(time_now() + time_us(200000));
         kprintf("planar: rebooting\n");
+        klog_flush();
         task_sleep_until(time_now() + time_us(50000));
         plat_reboot();
         arch_reboot();      /* says so if the firmware can't */
@@ -1564,6 +1644,58 @@ static void test_fpu(void)
             (unsigned long long)(after.reuses - before.reuses));
 }
 
+/* More domains than ASIDs (capped here to one of their own): the rest
+ * share the last, and a CPU loading one of those mustn't reach another's
+ * page at the same address through what its TLB kept. */
+static void test_asids(void)
+{
+    constexpr unsigned N = 4;
+    struct arch_domain d[N];
+    uint64_t page[N], va, v;
+    const struct arch_domain *old;
+    unsigned long was;
+    unsigned live = arch_domains_live();
+    bool ok = true;
+
+    arch_asid_limit(2);
+    for (unsigned i = 0; i < N; i++) {
+        if (!(page[i] = pmm_alloc()) || !arch_domain_create(&d[i]))
+            fail("V1.4 asids", "a domain past the ASIDs wasn't made");
+        *(uint64_t *)phys_to_virt(page[i]) = 0xa51d0000 + i;
+    }
+    arch_asid_limit(0);
+    va = page[0];
+    if (va >= ARCH_USER_TOP || d[N - 1].asid != d[N - 2].asid)
+        fail("V1.4 asids", "the last two domains don't share an ASID");
+    for (unsigned i = 0; i < N - 1; i++)    /* the last maps nothing */
+        if (!arch_map(&d[i], va, page[i], MAP_USER | MAP_READ))
+            fail("V1.4 asids", "arch_map failed");
+    was = arch_irq_save();
+    old = this_cpu()->loaded_domain;
+    for (unsigned round = 0; round < 3; round++)
+        for (unsigned i = 0; i < N; i++) {
+            arch_domain_switch(&d[i]);
+            if (i < N - 1)
+                ok &= arch_copy_from_user(&v, va, sizeof v) && v == 0xa51d0000 + i;
+            else
+                ok &= !arch_copy_from_user(&v, va, sizeof v);
+        }
+    arch_domain_switch((struct arch_domain *)old);
+    arch_irq_restore(was);
+    for (unsigned i = 0; i < N; i++) {
+        if (i < N - 1)
+            arch_unmap(&d[i], va);
+        arch_domain_destroy(&d[i]);
+        pmm_free(page[i]);
+    }
+    if (!ok)
+        fail("V1.4 asids", "a domain saw another's page through a shared ASID");
+    if (arch_domains_live() != live)
+        fail("V1.4 asids", "ASIDs leaked");
+    kprintf("V1.4 asids ok: %u domains on one ASID of their own and one shared, "
+            "each saw only its own page\n", N);
+}
+
 void selftest_user(void)
 {
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages(), spin_us, wait_us;
@@ -1594,6 +1726,8 @@ void selftest_user(void)
     kprintf("V1.4 kill ok: 3 spinning tasks dead %llu us after the kill, a blocked one %llu us\n",
             (unsigned long long)spin_us, (unsigned long long)wait_us);
 
+    test_asids();
+    expect_exit("userinsn", 0);
     test_fpu();
     expect_exit("vecfp", 42);
     expect_exit("callregs", 0);
@@ -1683,6 +1817,7 @@ void selftest_areas(void)
     process_free(p);
     expect_fault("rofault", 0, FAULT_WRITE, 0);
     expect_fault("protrace", 0, FAULT_WRITE, 0);
+    expect_exit("copyrace", 0);
     expect_exit("protflip", 0);
     kprintf("V1.5 rights ok: a write to a read-only Area faulted, and a write on another "
             "CPU just after ProtectArea took write away; a reader lived through 2000 rights changes\n");
@@ -2496,6 +2631,48 @@ static void test_server_dies(void)
 
 /* A server drops a client that dies, or that breaks the rules, and goes
  * on serving others. */
+/*
+ * The console held from CPU 1 for 50 ms, as a slow UART holds it: a
+ * process's KLog on CPU 0 still returns at once, its line copied into the
+ * ring and shown after (review M12). With the polled console it waited
+ * the 50 ms out, with interrupts off.
+ */
+static _Atomic bool holding;
+
+static void hold_fn(void *)
+{
+    klog_hold(time_us(50000));
+    atomic_store(&holding, false);
+}
+
+static void test_klog_cost(void)
+{
+    struct process *p;
+    int64_t us;
+
+    if (ncpus < 2) {
+        kprintf("V2.4 klog skipped: one CPU\n");
+        return;
+    }
+    atomic_store(&holding, true);
+    if (!task_create("hold", 20, cpu_mask(1), hold_fn, nullptr))
+        fail("V2.4 klog", "task_create failed");
+    task_sleep_until(time_now() + time_us(2000));      /* it has the console */
+    p = run_on("klogcost", 0, 1000000, cpu_mask(0));
+    if (!atomic_load(&p->dead) || p->fault != FAULT_NONE)
+        fail("V2.4 klog", "klogcost failed");
+    us = p->exit_code;
+    process_free(p);
+    if (!atomic_load(&holding) || us > 5000) {
+        kprintf("V2.4 klog: the line took %lld us\n", (long long)us);
+        fail("V2.4 klog", "a KLog line waited for the console");
+    }
+    while (atomic_load(&holding))
+        task_sleep_until(time_now() + time_us(1000));
+    kprintf("V2.4 klog ok: a KLog line took %lld us while the console was held for 50 ms; "
+            "shown after, from the ring\n", (long long)us);
+}
+
 static void test_client_dies(void)
 {
     struct process *echo, *talker;
@@ -2526,6 +2703,7 @@ static void test_client_dies(void)
         fail("V2.4 limits", "a process flooded the console");
     kprintf("V2.4 limits ok: a process stopped at 64 tasks, 256 handles and 32 connections; "
             "a flood of KLog lines was cut to its rate, escapes filtered\n");
+    test_klog_cost();
     kill_and_free(echo);
     kprintf("V2.4 client ok: the server dropped a killed client, and four rogue ones "
             "(a pointer outside the heap, a broken ring, scribbling, a message running off the heap), and served on\n");
@@ -2950,6 +3128,26 @@ void selftest_supervision(void)
     kprintf("V6.7 supervision ok: OpenPort waits for a name and wakes when it's made, "
             "WaitUntil and DoMsgUntil keep their deadlines, a late answer is dropped; init "
             "saw hwdb die and logged its meditation\n");
+}
+
+/*
+ * V6 step 8: the review's low findings (§10.8) that a user program shows:
+ * a server's accepts past a broken client and when full
+ * (conformance/crowd.c). The kernel's own are in the steps they belong
+ * to: V1.1 pmm and timer, V1.3 stack and migrate, V1.4 asids and
+ * userinsn, V2.4 klog.
+ */
+void selftest_debts(void)
+{
+    static const char *const tests[] = { "crowd" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.8 debts skipped: no user programs\n");
+        return;
+    }
+    run_each("V6.8 debts", tests, 1);
+    kprintf("V6.8 debts ok: a broken client passed over by AcceptPort, and one past a "
+            "server's places told, not left waiting\n");
 }
 
 /*

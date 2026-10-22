@@ -22,6 +22,8 @@ int64_t AcceptPort(struct MsgPort *mp, Handle port, int64_t sigbit);
 **FUNCTION**
 `AcceptConn` on `port`, then checks the arena is laid out as the kernel lays them out, and sets up `mp` as the server's end.
 
+A client may write its arena until it's accepted, so its header may be broken. Such a connection is closed and the next one taken, so a broken client can't strand the clients queued behind it, for whom the port was signalled once (V6 step 8).
+
 **INPUTS**
 - `mp` -- filled in.
 - `port` -- from `CreatePort`.
@@ -30,8 +32,18 @@ int64_t AcceptPort(struct MsgPort *mp, Handle port, int64_t sigbit);
 **RESULT**
 0, or:
 - `ERR_NOTFOUND` -- no connection is waiting. The usual way to stop accepting.
-- `ERR_BADARG` -- `sigbit` out of range, or the arena isn't laid out as the kernel lays them out (the connection is closed again).
+- `ERR_BADARG` -- `sigbit` out of range.
 - Any other error from `AcceptConn`, notably `ERR_LIMIT` once the process holds 32 connection ends.
+
+**NOTES**
+A server with no place for one more should still accept it and `ClosePort` it, as dos, input and `conformance/echo.c` do: its client then hears `ERR_PORT_DIED` rather than nothing.
+```c
+while (AcceptPort(&clients[n < MAX ? n : MAX], port, sig) == 0)
+    if (n < MAX)
+        n++;
+    else
+        ClosePort(&clients[MAX]);   /* clients[] has MAX + 1 */
+```
 
 **BUGS**
 None known.
@@ -127,10 +139,12 @@ void ClosePort(struct MsgPort *mp);
 ```
 
 **FUNCTION**
-`CloseConn` on this end, and marks `mp` broken so later calls on it fail with `ERR_PORT_DIED`. Messages in the arena can't be used afterwards. A kernel call.
+Marks `mp` broken, so later calls on it fail with `ERR_PORT_DIED`, then `CloseConn` on this end. Messages in the arena can't be used afterwards. A kernel call.
+
+Another task of the process asleep in `DoMsg` on this end is woken by the kernel and returns `ERR_PORT_DIED`, without touching the arena or its message (V6 step 8).
 
 **BUGS**
-None known.
+A sibling task already inside the arena when it goes, between its check and its access, faults. As in the RKM, a `MsgPort` is one task's.
 
 **SEE ALSO**
 [CloseConn](exec.md#execcloseconn), [PortGone](#execportgone)

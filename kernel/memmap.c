@@ -8,6 +8,7 @@
 #include "efi.h"
 #include "fdt.h"
 #include "kprintf.h"
+#include "kstring.h"
 #include "memmap.h"
 
 constexpr unsigned MAX_RANGES = 64;
@@ -68,16 +69,25 @@ uint64_t memmap_unmapped(void)
     return unmapped;
 }
 
-/* From the device tree's memory nodes. */
+/* From the device tree's memory nodes: named so, and saying so with
+ * device_type, not disabled (a node only named "memory" isn't RAM, §10.8). */
 static void fdt_ram(void)
 {
     int32_t node = -1;
     uint64_t base, size;
+    uint32_t len;
 
     while ((node = fdt_find_name(node, "memory")) >= 0) {
+        const char *type = fdt_getprop(node, "device_type", &len);
+        uint32_t tlen = len;
+        const char *status = fdt_getprop(node, "status", &len);
+
+        if (!type || tlen != 7 || memcmp(type, "memory", 7) != 0 ||
+            (status && len == 9 && memcmp(status, "disabled", 9) == 0))
+            continue;
         for (uint32_t i = 0; fdt_reg(node, i, &base, &size); i++) {
             uint64_t lo = (base + ROUND - 1) & ~(ROUND - 1);
-            uint64_t hi = (base + size) & ~(ROUND - 1);
+            uint64_t hi = (size > ~0ULL - base ? ~0ULL : base + size) & ~(ROUND - 1);
 
             if (hi > lo)
                 add(ram, &nram, lo, hi - lo);

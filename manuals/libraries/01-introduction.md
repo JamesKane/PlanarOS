@@ -109,7 +109,7 @@ The limits are the kernel's (`kernel/process.h`, `kernel/port.c`), not in a publ
 
 ## Logging
 
-A program writes text for the user with `dos.library`'s console calls (`OpenCon`, `PutStr`, `Printf`), which go to the screen where there is one ([Devices ch. 3](../devices/03-console.md)). Underneath, and for anything that is only for the log, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
+A program writes text for the user with `dos.library`'s console calls (`OpenCon`, `PutStr`, `Printf`), which go to the screen where there is one ([Devices ch. 3](../devices/03-console.md)). Underneath, and for anything that is only for the log, a program writes a line to the serial console with `KLog("text")`. The kernel prefixes it with the program's name and writes any byte that isn't printable ASCII as `?`. The line costs a copy into the kernel log's ring, which a kernel task drains to the console, so a program isn't held while the UART sends it. Each process may write 32 lines at once and 20 a second after that; lines past the limit are dropped and counted, and the next line written says how many. The conformance programs format numbers into a buffer first (`conformance/log.h`).
 
 ## Names in this volume
 

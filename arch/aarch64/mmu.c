@@ -5,6 +5,10 @@
  * TTBR0 table: four levels, 4 KiB pages, 48-bit addresses, tagged with an
  * ASID (16 bits where ID_AA64MMFR0 says so, else 8), so switching is one
  * TTBR0 write. The kernel's own domain is an empty table with ASID 0.
+ * When the ASIDs run out, the domains made after share the last one, and
+ * a CPU loading one of those drops what that ASID tagged first, unless
+ * the domain was the last it loaded with it (a destroy's flush reaches
+ * every CPU, so a domain made later at the same address finds nothing).
  * User pages are non-global, never executable by the kernel (PXN), and
  * normal write-back memory, normal non-cacheable memory (MAP_NC), or
  * Device-nGnRE and never executable for a lease's registers (MAP_DEVICE). TLB invalidation uses the inner-shareable
@@ -38,6 +42,7 @@ alignas(4096) static desc_t empty_root[PTES];
 static spinlock_t asid_lock;
 static uint64_t asid_used[65536 / 64] = { 1 };  /* ASID 0 is the kernel's */
 static unsigned asids_live;
+static unsigned asid_cap;           /* arch_asid_limit's, or 0 */
 
 static desc_t *table(uint64_t pa)
 {
@@ -56,30 +61,46 @@ static unsigned asid_count(void)
     return ((sysreg_read(id_aa64mmfr0_el1) >> 4) & 0xf) == 2 ? 65536 : 256;
 }
 
+/* The ASID domains share once the rest are taken. */
+static uint32_t asid_shared(void)
+{
+    return asid_count() - 1;
+}
+
+void arch_asid_limit(unsigned n)
+{
+    asid_cap = n;
+}
+
 static uint32_t asid_alloc(void)
 {
     unsigned long was = spin_lock_irqsave(&asid_lock);
-    unsigned n = asid_count();
+    unsigned n = asid_shared();
 
-    for (unsigned w = 0; w < n / 64; w++) {
+    if (asid_cap && asid_cap < n)
+        n = asid_cap;
+    asids_live++;
+    for (unsigned w = 0; w * 64 < n; w++) {
         if (asid_used[w] != ~0ULL) {
             unsigned b = (unsigned)__builtin_ctzll(~asid_used[w]);
 
+            if (w * 64 + b >= n)
+                break;
             asid_used[w] |= 1ULL << b;
-            asids_live++;
             spin_unlock_irqrestore(&asid_lock, was);
             return w * 64 + b;
         }
     }
     spin_unlock_irqrestore(&asid_lock, was);
-    return 0;
+    return asid_shared();
 }
 
 static void asid_free(uint32_t asid)
 {
     unsigned long was = spin_lock_irqsave(&asid_lock);
 
-    asid_used[asid / 64] &= ~(1ULL << (asid % 64));
+    if (asid != asid_shared())
+        asid_used[asid / 64] &= ~(1ULL << (asid % 64));
     asids_live--;
     spin_unlock_irqrestore(&asid_lock, was);
 }
@@ -108,8 +129,7 @@ unsigned arch_domain_tables(struct arch_domain *d)
 
 bool arch_domain_create(struct arch_domain *d)
 {
-    if (!(d->asid = asid_alloc()))
-        return false;
+    d->asid = asid_alloc();
     if (!(d->root = pmm_alloc())) {
         asid_free(d->asid);
         return false;
@@ -228,6 +248,11 @@ void arch_domain_switch(struct arch_domain *d)
     else
         sysreg_write(ttbr0_el1, virt_to_phys(empty_root));
     isb();
+    if (d && d->asid == asid_shared() && c->shared_last != d) {
+        c->shared_last = d;
+        __asm__ volatile("tlbi aside1, %0\n\tdsb nsh\n\tisb"
+                         : : "r"((uint64_t)d->asid << 48) : "memory");
+    }
 }
 
 /* Clean the data cache to the point of unification and invalidate the

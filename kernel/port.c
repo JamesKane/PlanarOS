@@ -153,6 +153,10 @@ static void close_end(struct end *e, uint64_t *kicks)
                     e == &c->end[CLIENT] ? CONNF_CLIENT_GONE : CONNF_SERVER_GONE);
     if (peer->open)
         post(peer->task, peer->sig, kicks);
+    /* Closed by a sibling of the task waiting on this end: that one is
+     * woken too, to find its port broken, not left asleep (§10.8). */
+    if (e->task && e->task != task_self())
+        post(e->task, e->sig, kicks);
     handle_free(e->handle);
     e->proc->conns--;
     e->open = false;
@@ -238,6 +242,10 @@ int64_t port_create_call(uint64_t user_name, int64_t sigbit)
 
     if (!syscall_sigbit(sigbit))
         return ERR_BADARG;
+    /* Names are the system's: a program loaded from a disk, not given
+     * the right, can't be "dos" before dos is (§10.8). */
+    if (!self->process->names)
+        return ERR_RIGHTS;
     if (!(pt = kmalloc(sizeof *pt)))
         return ERR_NOMEM;
     *pt = (struct port){ .task = self, .proc = self->process, .sig = 1ULL << sigbit };

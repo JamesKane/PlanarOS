@@ -64,6 +64,7 @@
 #define SYS_WAIT_UNTIL      54
 #define SYS_GRANT_ROOT      55
 #define SYS_COLD_REBOOT     56
+#define SYS_READ_LOG        57
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

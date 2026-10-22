@@ -110,6 +110,9 @@
     /* Before the first process: each maps the libraries from its start. */
     library_init();
 
+    /* From here a kernel task shows the log (kernel/kprintf.c). */
+    klog_start();
+
     /* Step 3's tests need to block, so they run as a task; this code
      * becomes the boot CPU's idle task. */
     if (!task_create("selftest", 10, 1, selftest_tasks, nullptr)) {
@@ -178,6 +181,8 @@
         kprintf("V6.6 done\n");
         kprintf("V6.7 supervision skipped: no tasks\n");
         kprintf("V6.7 done\n");
+        kprintf("V6.8 debts skipped: no tasks\n");
+        kprintf("V6.8 done\n");
         arch_halt();
     }
     sched_idle();

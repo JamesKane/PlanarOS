@@ -66,22 +66,30 @@ int64_t ConnectPortUntil(struct MsgPort *mp, const char *name, int64_t sigbit, u
     return err;
 }
 
+/* A client whose arena header is broken (it's the client's to write
+ * until now) is closed, and the next one taken: stopping there would
+ * leave those queued behind it unanswered, the port signalled once for
+ * them all (§10.8). Only the kernel's errors come back. */
 int64_t AcceptPort(struct MsgPort *mp, Handle port, int64_t sigbit)
 {
-    struct ConnArena *a;
-    int64_t h = AcceptConn(port, sigbit, &a), err;
+    for (;;) {
+        struct ConnArena *a;
+        int64_t h = AcceptConn(port, sigbit, &a);
 
-    if (h < 0)
-        return h;
-    if ((err = attach(mp, (Handle)h, a, sigbit, false)) < 0)
+        if (h < 0)
+            return h;
+        if (attach(mp, (Handle)h, a, sigbit, false) == 0)
+            return 0;
         CloseConn((Handle)h);
-    return err;
+    }
 }
 
+/* Broken first: a sibling task asleep on the port, which the kernel wakes
+ * at the close, sees it before it touches the arena that's going. */
 void ClosePort(struct MsgPort *mp)
 {
+    __atomic_store_n(&mp->mp_Broken, true, __ATOMIC_RELEASE);
     CloseConn(mp->mp_Conn);
-    mp->mp_Broken = true;
 }
 
 bool PortGone(const struct MsgPort *mp)
@@ -322,6 +330,11 @@ int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline)
     if ((err = put(mp, m, &asleep)))
         return err;
     for (;;) {
+        /* Broken (by a sibling's ClosePort, among others), nothing more
+         * comes from the arena, which may be gone, the message with it:
+         * neither is touched. */
+        if (__atomic_load_n(&mp->mp_Broken, __ATOMIC_ACQUIRE))
+            return ERR_PORT_DIED;
         /* Room first: a reply taken must never be dropped. With none,
          * this one's reply is still to come: the caller GetMsgs for it. */
         if (collect(mp, m))

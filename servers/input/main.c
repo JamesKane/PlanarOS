@@ -320,8 +320,16 @@ int main(uint64_t)
         } else {
             WaitPorts(in.conn, in.nconns, 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN);
         }
-        while (in.nconns < CONNS && AcceptPort(&in.conn[in.nconns], in.port, SIG_CONN) == 0)
-            in.nconns++;
+        for (struct MsgPort extra; ;) {
+            struct MsgPort *mp = in.nconns < CONNS ? &in.conn[in.nconns] : &extra;
+
+            if (AcceptPort(mp, in.port, SIG_CONN) != 0)
+                break;
+            if (mp == &extra)
+                ClosePort(&extra);  /* full: told, not left waiting */
+            else
+                in.nconns++;
+        }
         for (unsigned c = 0; c < in.nconns;) {
             struct InputMsg *m;
 

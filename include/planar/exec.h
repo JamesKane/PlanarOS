@@ -87,6 +87,11 @@ int64_t QueryArea(const void *address, struct AreaInfo *info);
  * asks about the caller's own process (its state is running).
  */
 #define PROCF_HELD      (1u << 0)
+/* A program CreateProcessImage loads (from a disk) may make named ports
+ * only if given this, by a process that may itself: ERR_RIGHTS from
+ * CreateProcessImage otherwise. A built-in program, CreateProcess's, may
+ * if its parent may, and the kernel's own processes (init) may. */
+#define PROCF_NAMES     (1u << 1)
 
 /* ProcessInfo.pi_State */
 #define PROCS_HELD      1

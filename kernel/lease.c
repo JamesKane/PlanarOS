@@ -1042,8 +1042,28 @@ int64_t lease_cold_reboot_call(uint32_t root_h)
     if (!handle_get(root_h, HANDLE_DEVROOT, task_self()->process))
         return ERR_BADHANDLE;
     kprintf("planar: ColdReboot\n");
+    klog_flush();
     plat_reboot();
     arch_reboot();
+}
+
+/* The log's tail, for the root's holder alone: it has every process's
+ * lines (init's meditation gives hwdb's last ones, V6 step 8). */
+int64_t lease_read_log_call(uint32_t root_h, uint64_t buf, uint32_t len)
+{
+    uint64_t page, n;
+    bool ok;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, task_self()->process))
+        return ERR_BADHANDLE;
+    if (len > PAGE_SIZE)
+        len = PAGE_SIZE;
+    if (!(page = pmm_alloc()))
+        return ERR_NOMEM;
+    n = klog_read(phys_to_virt(page), len, nullptr);
+    ok = arch_copy_to_user(buf, phys_to_virt(page), n);
+    pmm_free(page);
+    return ok ? (int64_t)n : ERR_BADADDR;
 }
 
 /* The same, into a process the root's holder made: acpid (step 4). */

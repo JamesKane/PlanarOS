@@ -1,6 +1,6 @@
 # 10. Adversarial review of the code through V2
 
-**Status (2026-10-20, V2.5):** every critical, high and medium finding has been fixed or, where noted, changed in the docs. Each fix came with a test that fails without it, except M1 (no SVE in QEMU) and M9 (a one-instruction window). The "Now" column gives the commit. Of the low findings, three are fixed and one in part (§10.8); the rest are open.
+**Status (2026-10-22, V6 step 8):** every critical, high and medium finding has been fixed or, where noted, changed in the docs. Each fix came with a test that fails without it, except M1 (no SVE in QEMU) and M9 (a one-instruction window). The "Now" column gives the commit. Every low finding (§10.8) is now fixed or closed with its reason; "V6.8" marks the ones fixed in V6 step 8, each with a test that fails without it unless the row says why not. M12's `KLog` is a ring now (below).
 
 This document reviews the tree as of `f03eea2` plus the uncommitted changes on 2026-10-20. That covers V0, V1 and V2 steps 1–4 plus the round-trip work. The review assumed a hostile user process, a hostile peer on a connection, and a skeptical reading of the boot inputs. Six passes covered IPC, scheduling/SMP, memory and processes, the rv64 arch layer, the aarch64 and hosted arch layers, and boot plus the syscall boundary. Every critical and high finding was then checked against the code a second time.
 
@@ -42,7 +42,7 @@ Nothing in the repo was changed during the review. `kernel/sched.c` and `kernel/
 | M9 | Medium | Sched | `task_self()` can be read on one CPU and used on another | Plausible | Fixed `8c33239`, `66ac684` (untested: one-instruction window) |
 | M10 | Medium | Syscalls | Signal and ShareArea reach any task in any process | Confirmed | Fixed `bf60913` |
 | M11 | Medium | Resources | No per-process limits on handles, tasks, connections or arena bytes | Confirmed | Fixed `5233209` (no memory quota yet) |
-| M12 | Medium | Syscalls | `KLog` keeps interrupts off for ~19 ms per call | Confirmed | In part `13e9e1b`: filtered, rate-limited; still polled |
+| M12 | Medium | Syscalls | `KLog` keeps interrupts off for ~19 ms per call | Confirmed | Fixed V6.8: a ring a kernel task drains (`V2.4 klog`); filtered and rate-limited since `13e9e1b` |
 | M13 | Medium | Boot | RAM above the direct map is handed to the allocator | Confirmed | Fixed `6326b81` (clip untested by a boot) |
 | M14 | Medium | FDT | Length wrap hangs boot; negative depth writes below `stack[]`; header offsets unchecked | Reproduced | Fixed `0f9e38b` |
 | M15 | Medium | Boot | The pmm bitmap is written after the kernel before any reservation check | Plausible | Fixed `218f209` |
@@ -265,31 +265,31 @@ All of OP-V (0x57) is classed `EXT_VEC`, but OPFVV/OPFVF (funct3 1 and 5, e.g. `
 | Area | Finding | Where |
 |---|---|---|
 | Processes | **Fixed** `5233209`: `return t->handle` after `launch()`: the new task may already have exited and freed its stack | `process.c:262-264` |
-| Areas | No I-cache sync when sharing EXEC rights, and in protect the sync runs after the RX mapping is live | `area.c:463, 502-504` |
-| Areas | Oversized AllocArea scans the whole bitmap bit by bit with the pmm lock held and IRQs off | `pmm.c:133-164` |
+| Areas | **Fixed** V6.8 (share), **closed** (protect): No I-cache sync when sharing EXEC rights, and in protect the sync runs after the RX mapping is live. ShareArea with execute syncs as ProtectArea does; protect's window is seen only by a sibling racing its own process's unpublished code (untested: QEMU's I-cache is coherent) | `area.c:463, 502-504` |
+| Areas | **Fixed** V6.8: Oversized AllocArea scans the whole bitmap bit by bit with the pmm lock held and IRQs off. It fails before the scan, and the scan steps a run of the bitmap at a time (`V1.1 pmm`) | `pmm.c:133-164` |
 | Areas | **Fixed** `20ed799`: `AREAF_LARGE` + `AREAF_CONTIG` in the global layout: VA 2 MiB-aligned, PA only page-aligned | `area.c:117-118` |
-| Areas | No ASID rollover (doc §3.6); 8-bit-ASID parts fail process creation after 255 domains | `aarch64/mmu.c:49-66` |
-| rv64 | `sstatus.SUM` (and FS/VS) carries over to another task on preemption inside a user copy | `rv64/trap.c:172-187` |
-| rv64 | `sscratch` never zeroed at boot; firmware garbage makes the first kernel trap look like a user trap | `rv64/entry.S:42, 94` |
-| rv64 | Kernel-mode faults in user copies skip the spurious-fault retry, so they can fail with a bogus copy error | `rv64/trap.c:86-94` |
-| rv64 | `asid_alloc` loop bound reads `asid_used[1024]` at exhaustion | `rv64/mmu.c:77` |
-| aarch64 | CNTKCTL ORed; MDCR_EL2, VMPIDR_EL2, ICC_SRE_EL2, MDSCR_EL1 left at firmware values | `arch.c:60`, `entry.S:70-91` |
-| aarch64 | SCTLR leaves nTWE, UCT, UCI, DZE at 0, so `wfe`, a `CTR_EL0` read or `dc zva` kill the process | `entry.S:29` |
-| aarch64 | PSCI asm doesn't declare x1–x17 clobbered (SMCCC v1.0 allows it) | `arch.c:88-97` |
-| aarch64 | No kernel stack guard; overflow silently overwrites `struct task` at the stack base | `vectors.S:18`, `sched.h:34` |
-| aarch64 | SGI 0 reads as "nothing pending", so it is never EOI'd | `gicv3.c:170`, `irq.c:31` |
-| Host | IRQ ops are no-ops, copies always fail, one CPU: hides contract violations | `arch/host/arch.c:55-74, 185-203` |
+| Areas | **Fixed** V6.8: No ASID rollover (doc §3.6); 8-bit-ASID parts fail process creation after 255 domains. Past the last ASID, domains share one, flushed when a CPU loads a different one with it (`V1.4 asids`, both ISAs) | `aarch64/mmu.c:49-66` |
+| rv64 | **Fixed** V6.8: `sstatus.SUM` (and FS/VS) carries over to another task on preemption inside a user copy. Trap entry clears SUM once the frame has it (untested: QEMU can't show a stray kernel access) | `rv64/trap.c:172-187` |
+| rv64 | **Fixed** V6.8: `sscratch` never zeroed at boot; firmware garbage makes the first kernel trap look like a user trap. `trap_init` zeroes it on every hart (untested: OpenSBI already does) | `rv64/entry.S:42, 94` |
+| rv64 | **Fixed** V6.8: Kernel-mode faults in user copies skip the spurious-fault retry, so they can fail with a bogus copy error. On aarch64 too, which had it: a copy's fault on a page that's there runs again (`conformance/copyrace.c`) | `rv64/trap.c:86-94` |
+| rv64 | **Fixed** V6.8: `asid_alloc` loop bound reads `asid_used[1024]` at exhaustion. Rewritten with the shared ASID | `rv64/mmu.c:77` |
+| aarch64 | **Fixed** V6.8: CNTKCTL ORed; MDCR_EL2, VMPIDR_EL2, ICC_SRE_EL2, MDSCR_EL1 left at firmware values. CNTKCTL and MDSCR_EL1 written whole, VPIDR/VMPIDR_EL2 the CPU's own; MDCR_EL2 and ICC_SRE_EL2 already were (untested: QEMU's are the reset values) | `arch.c:60`, `entry.S:70-91` |
+| aarch64 | **Fixed** V6.8: SCTLR leaves nTWE, UCT, UCI, DZE at 0, so `wfe`, a `CTR_EL0` read or `dc zva` kill the process. UCT and UCI were set in V5, nTWE and DZE now (`conformance/userinsn.c`) | `entry.S:29` |
+| aarch64 | **Fixed** V6.8: PSCI asm doesn't declare x1–x17 clobbered (SMCCC v1.0 allows it). Untested: no firmware here clobbers them | `arch.c:88-97` |
+| aarch64 | **Fixed** V6.8: No kernel stack guard; overflow silently overwrites `struct task` at the stack base. Both ISAs: a canary, `struct task`'s last word, checked at every switch; the stacks are in the direct map's blocks, so no guard page (`V1.3 stack`) | `vectors.S:18`, `sched.h:34` |
+| aarch64 | **Closed**: SGI 0 reads as "nothing pending", so it is never EOI'd. SGI 0 is never enabled or sent: IPIs are SGI 1, and `irq_attach` refuses source 0 | `gicv3.c:170`, `irq.c:31` |
+| Host | **Closed**: IRQ ops are no-ops, copies always fail, one CPU: hides contract violations. The hosted build is for the parsers, ACPI and the sanitizers; QEMU's SMP boots cover masking and ordering | `arch/host/arch.c:55-74, 185-203` |
 | Sched | **Fixed** `e8055d8`: `set_pri` races the enqueue of a migrating task, so the queue level is wrong (selftest-only today) | `sched.c:481-511, 229-239` |
-| Sched | Affinity to no online CPU loses a migrating task, and its stack leaks | `sched.c:230-239` |
-| Sched | **In part** `e8055d8` (sleep timer stopped when woken early): `ktimer_stop` doesn't wait for a handler already running, so it can use a freed task (latent) | `ktime.c:105-141` |
-| Sched | A woken task can run once outside its affinity | `sched.c:622-623` |
-| Sched | `cpu_count` with interrupts on, and the global `taken`, lose updates; this loosens the V2.2/V2.3 call-count bounds | `syscall.c:78`, `irq.c` |
-| Sched | `time_to_us` overflows (`ticks * 1e6`), and selftest passes it an absolute time | `ktime.c:58-61`, `selftest.c:738` |
-| IPC | A lent priority outlives the request when the reply needs no call | `port.c:387`, `sched.c:561` |
-| IPC | Echo's accept loop stops at the first error, stranding queued clients; 8 idle connections lock it out | `echo.c:28-30` |
-| IPC | `ClosePort` from a sibling task leaves a DoMsg waiter in that process asleep for ever | `port.c:129-146` |
-| IPC | Port names are first-come and global, so any process can impersonate "echo" | `port.c:203-234` |
-| Boot | Memory nodes matched by name only; a wrapping reservation is silently dropped | `memmap.c:37-52`, `pmm.c:41-61` |
+| Sched | **Fixed** V6.8: Affinity to no online CPU loses a migrating task, and its stack leaks. `task_set_affinity` refuses it (`V1.3 migrate`) | `sched.c:230-239` |
+| Sched | **Fixed** `268591d` (after the sleep timer, `e8055d8`): `ktimer_stop` doesn't wait for a handler already running, so it can use a freed task (latent). It waits now for one running on another CPU | `ktime.c:105-141` |
+| Sched | **Closed**: A woken task can run once outside its affinity. Only a selftest can change a waiting task's affinity | `sched.c:622-623` |
+| Sched | **Fixed** V6.8: `cpu_count` with interrupts on, and the global `taken`, lose updates; this loosens the V2.2/V2.3 call-count bounds. The call count is taken with interrupts off, and `taken` is atomic (untested: a race) | `syscall.c:78`, `irq.c` |
+| Sched | **Fixed** V6.8: `time_to_us` overflows (`ticks * 1e6`), and selftest passes it an absolute time. `time_us` too; no caller passes an absolute time now (`V1.1 timer`: a year both ways) | `ktime.c:58-61`, `selftest.c:738` |
+| IPC | **Closed**: A lent priority outlives the request when the reply needs no call. The loan ends at the server's next wait, which every server loop reaches | `port.c:387`, `sched.c:561` |
+| IPC | **Fixed** V6.8: Echo's accept loop stops at the first error, stranding queued clients; 8 idle connections lock it out. `AcceptPort` closes a broken client and takes the next; echo and input close one past their places (`conformance/crowd.c`) | `echo.c:28-30` |
+| IPC | **Fixed** V6.8: `ClosePort` from a sibling task leaves a DoMsg waiter in that process asleep for ever. The kernel wakes the end's waiter, which sees the port broken before touching the arena (`conformance/deadline.c`); a sibling already inside the arena still faults: a MsgPort is one task's, as in the RKM | `port.c:129-146` |
+| IPC | **Fixed** V6.8: Port names are first-come and global, so any process can impersonate "echo". Naming a port takes a right, `PROCF_NAMES`: the kernel's processes have it, built-in programs inherit it, a program loaded from a disk has it only if given it (dostest's `C:hello`) | `port.c:203-234` |
+| Boot | **Fixed** V6.8: Memory nodes matched by name only; a wrapping reservation is silently dropped. A memory node must say `device_type = "memory"` and not be disabled, and a range past 2^64 is reserved to the top (untested: a dtb of its own costs more than it shows) | `memmap.c:37-52`, `pmm.c:41-61` |
 
 ## 10.9 Test gaps
 

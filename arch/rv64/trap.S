@@ -18,6 +18,7 @@
 #define FRAME_SIZE  (34 * 8)
 #define SSTATUS_SPP (1 << 8)
 #define SSTATUS_SIE (1 << 1)
+#define SSTATUS_SUM (1 << 18)
 
     .section .text
     .balign 4
@@ -52,6 +53,8 @@ saved:
     sd      t0, 32*8(sp)
     csrr    t0, sstatus
     sd      t0, 33*8(sp)
+    li      t0, SSTATUS_SUM         /* a copy preempted with it set gets it back */
+    csrc    sstatus, t0             /* from the frame, and no other code runs so (§10.8) */
 
     mv      a0, sp
     call    trap_handler
@@ -113,6 +116,8 @@ ecall_entry:
     sd      t0, 32*8(sp)
     csrr    t0, sstatus
     sd      t0, 33*8(sp)
+    li      t0, SSTATUS_SUM         /* a copy preempted with it set gets it back */
+    csrc    sstatus, t0             /* from the frame, and no other code runs so (§10.8) */
     mv      a0, sp
     call    trap_handler
     ld      t0, 33*8(sp)

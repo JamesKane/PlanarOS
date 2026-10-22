@@ -69,6 +69,7 @@ struct cpu {
     uint64_t work_ticks;        /* the class workload's best time here, in timer ticks */
     uint64_t capacity;          /* its class's speed; the fastest class is 1024 */
     const void *loaded_domain;  /* arch: the domain this CPU has loaded */
+    const void *shared_last;    /* arch: the last loaded with the shared ASID */
     struct arch_cpu arch;       /* arch: lazily switched register state */
 };
 

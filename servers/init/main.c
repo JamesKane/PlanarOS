@@ -17,9 +17,12 @@
  *   PSCI or SBI). In test mode it doesn't reset: it reports, and exits
  *   with hwdb's code, as the kernel did.
  *
+ * The meditation ends with hwdb's last lines, read back from the kernel's
+ * log (ReadLog, which only the root's holder may call).
+ *
  * INIT_DEATH (the kernel's V6.7 test) starts hwdb with HWDB_FAULT, so it
- * faults at once: init must see the death and log the meditation, and
- * exits 0 if it did.
+ * says so and faults at once: init must see the death, log the
+ * meditation with that line last, and exits 0 if it did.
  */
 #include <planar/lease.h>
 #include <planar/syscalls.h>
@@ -49,8 +52,37 @@ static void say(const char *format, ...)
     KLog(line);
 }
 
-/* How hwdb ended, the Amiga's way: the box no one wanted to see. */
-static void meditation(const struct ProcessInfo *pi)
+/* hwdb's last lines in the kernel log, oldest first. Whether the last
+ * was 'expect', for the test. */
+static bool last_words(Handle root, const char *expect)
+{
+    constexpr unsigned LINES = 8;
+    static char log[4096];
+    const char *line[LINES];
+    unsigned len[LINES], n = 0;
+    int64_t got = ReadLog(root, log, sizeof log);
+
+    for (int64_t i = 0, start = 0; got > 0 && i < got; i++) {
+        if (log[i] != '\n')
+            continue;
+        if (i - start > 7 && StrSame((struct Str){ &log[start], 7 }, StrFromC("[hwdb] "))) {
+            line[n % LINES] = &log[start + 7];
+            len[n % LINES] = (unsigned)(i - start - 7 - (log[i - 1] == '\r'));
+            n++;
+        }
+        start = i + 1;
+    }
+    if (!n)
+        say("init:   | (nothing: ReadLog gave %ld)", got);
+    for (unsigned k = n > LINES ? n - LINES : 0; k < n; k++)
+        say("init:   | %.*s", (int)len[k % LINES], line[k % LINES]);
+    return n && StrSame((struct Str){ line[(n - 1) % LINES], len[(n - 1) % LINES] },
+                        StrFromC(expect));
+}
+
+/* How hwdb ended, the Amiga's way: the box no one wanted to see; then
+ * the last it said. Whether that ended with 'expect'. */
+static bool meditation(const struct ProcessInfo *pi, Handle root, const char *expect)
 {
     say("init: GURU MEDITATION: hwdb is dead");
     if (pi->pi_State == PROCS_FAULTED)
@@ -60,12 +92,14 @@ static void meditation(const struct ProcessInfo *pi)
         say("init:   it exited %ld", pi->pi_ExitCode);
     else
         say("init:   it was killed");
+    say("init:   its last words:");
+    return last_words(root, expect);
 }
 
 int main(uint64_t arg, uint64_t root)
 {
     struct ProcessInfo pi = { 0 };
-    bool test = arg & (HWDB_TEST | INIT_DEATH);
+    bool test = arg & (HWDB_TEST | INIT_DEATH), heard;
     uint64_t hwdb_arg = (arg & HWDB_BITS) | (arg & INIT_DEATH ? HWDB_FAULT : 0);
     int64_t p;
 
@@ -85,12 +119,14 @@ int main(uint64_t arg, uint64_t root)
 
     if (pi.pi_State == PROCS_EXITED && pi.pi_ExitCode == 0 && !(arg & INIT_DEATH))
         return 0;                   /* ended as asked */
-    meditation(&pi);
+    heard = meditation(&pi, (Handle)root, "hwdb: faulting at once, as init's test asks");
     if (arg & INIT_DEATH) {
         bool seen = pi.pi_State == PROCS_FAULTED;
 
-        say("init: test: the board would be reset now%s", seen ? "" : ", but hwdb didn't fault");
-        return seen ? 0 : 1;
+        say("init: test: the board would be reset now%s", !seen ? ", but hwdb didn't fault"
+                                                          : !heard ? ", but hwdb's last words weren't read"
+                                                                   : "");
+        return seen && heard ? 0 : 1;
     }
     if (test)
         return pi.pi_State == PROCS_EXITED ? (int)pi.pi_ExitCode : 100 + (int)pi.pi_Fault;

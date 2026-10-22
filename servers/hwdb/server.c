@@ -350,8 +350,9 @@ static void start(struct unit *u)
         unit_launch(u);
 }
 
-/* Killed running, a driver's DMA Areas are what it allocated in Bind:
- * all of them must be in quarantine after. */
+/* Killed running, a driver's DMA Areas are at least what it held when
+ * counted here: all of them must be in quarantine after. It may make
+ * more before the kill lands (gpu-panthor's firmware boot, after Bind). */
 void unit_kill(struct unit *u)
 {
     struct LeaseInfo li;
@@ -686,7 +687,7 @@ static void died(struct unit *u, const struct ProcessInfo *pi)
             check_failed(u, "DMA Areas outlived it, unquarantined");
         quarantined += li.li_QuarantinedPages;
     }
-    if (u->killing && u->dma != UINT64_MAX && quarantined != u->dma)
+    if (u->killing && u->dma != UINT64_MAX && quarantined < u->dma)
         check_failed(u, "its DMA Areas weren't all quarantined");
     hwdb.quarantined += quarantined;
     if (u->stopped)
@@ -1227,8 +1228,10 @@ int main(uint64_t arg, uint64_t root)
 {
     int64_t port;
 
-    if (arg & HWDB_FAULT)
-        __builtin_trap();           /* for init's test: a death to see */
+    if (arg & HWDB_FAULT) {         /* for init's test: last words, and a death to see */
+        KLog("hwdb: faulting at once, as init's test asks");
+        __builtin_trap();
+    }
     hwdb.root = (Handle)root;
     hwdb.test = arg & HWDB_TEST;
     hwdb.end = arg & HWDB_END;

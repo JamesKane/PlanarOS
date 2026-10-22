@@ -523,6 +523,8 @@ int64_t CreatePort(const char *name, int64_t sigbit);
 **FUNCTION**
 Creates a port: a system-wide name that clients connect to with `OpenPort`. Each time a client connects, signal bit `sigbit` is set in the calling task. The port has no message queue, only a queue of connections waiting for `AcceptConn`.
 
+Names are the system's: only a process allowed to name ports may make one. The kernel's own processes (init and the selftests') may, a built-in program may if its parent may, and a program loaded from a disk may only if its parent gave it `PROCF_NAMES` (`CreateProcessImage`). So a command can't take `"dos"` before dos does and have every client that waits for it in `OpenPort`.
+
 A kernel call.
 
 **INPUTS**
@@ -534,6 +536,7 @@ The port's handle, or:
 - `ERR_BADARG` -- `sigbit` is out of range.
 - `ERR_BADADDR` -- `name` isn't readable, is empty, or is longer than 31 characters.
 - `ERR_EXISTS` -- a port with that name exists.
+- `ERR_RIGHTS` -- the calling process may not name ports (V6 step 8).
 - `ERR_LIMIT` -- the calling process already holds 256 handles.
 - `ERR_NOMEM` -- out of memory, or the system's handle table is full.
 
@@ -564,6 +567,8 @@ Loads the built-in program `name` into a new process and returns a handle to it,
 
 Without `PROCF_HELD` the process starts at once. With it, the process is made but doesn't run until `StartProcess`, so the caller can grant it a lease first.
 
+A built-in program is the system's own: it may name ports (`CreatePort`) if the caller's process may. `PROCF_NAMES` is accepted and changes nothing here.
+
 When the process is dead, by exiting, faulting or being killed, signal bit `sigbit` is set in the calling task. `QueryProcess` then says how it ended.
 
 A process never outlives its handle: `CloseHandle` on it kills it, and so does the death of the process that owns the handle.
@@ -574,7 +579,7 @@ A kernel call.
 - `name` -- the program's name, at most 31 characters. The built-in programs are the boot bundle: the `conformance/` images, the servers (`servers/`) and the drivers (`drv/`), linked into the kernel. A program on a disk is started with `CreateProcessImage` instead.
 - `arg` -- passed to the program's `main` as its first argument.
 - `sigbit` -- the signal bit, 16–63, set in the calling task when the process is dead.
-- `flags` -- 0 or `PROCF_HELD`.
+- `flags` -- 0, or `PROCF_HELD`, `PROCF_NAMES` or both.
 
 **RESULT**
 The process's handle (positive), or:
@@ -642,17 +647,20 @@ The Area becomes the new process's. The caller stops mapping it and its handle g
 
 Otherwise as `CreateProcess`: `arg` is `main`'s first argument, `sigbit` is set in the calling task when the process is dead, and `PROCF_HELD` holds it for `StartProcess`.
 
+Unlike a built-in program, a loaded one may name ports only if given `PROCF_NAMES`, which only a process that may name ports can give (V6 step 8).
+
 A kernel call.
 
 **INPUTS**
 - `image` -- the Area and its layout.
 - `arg` -- passed to the program's `main`.
 - `sigbit` -- the signal bit, 16–63.
-- `flags` -- 0 or `PROCF_HELD`.
+- `flags` -- 0, or `PROCF_HELD`, `PROCF_NAMES` or both.
 
 **RESULT**
 The process's handle (positive), or:
 - `ERR_BADADDR` -- `image` isn't readable.
+- `ERR_RIGHTS` -- `PROCF_NAMES`, from a process that may not name ports itself.
 - `ERR_BADARG` -- `sigbit` is out of range, `flags` has an unknown bit, `pi_Etext` isn't a page multiple, or `pi_Entry` isn't below it.
 - `ERR_BADHANDLE` -- `pi_Area` isn't an Area the calling process owns and alone maps, wasn't made with `AREAF_EXEC`, is shorter than `pi_Etext`, is a DMA Area, or another call is using it. The Area is still the caller's.
 - `ERR_NOMEM` -- out of memory, or the system's handle table is full.
@@ -1155,6 +1163,8 @@ int64_t KLog(const char *text);
 **FUNCTION**
 Writes `[name] text` and a newline to the serial console, where `name` is the program's. Any byte that isn't printable ASCII (0x20–0x7E) is written as `?`, so a program can't move the cursor or clear the terminal.
 
+The line is copied into the kernel log's ring, and the call returns: a kernel task shows it on the console later, in order with the kernel's own lines, writing only what the UART takes without waiting (V6 step 8). Only when the ring is full does the caller wait, for room. The ring keeps what it showed: the root's holder reads it back with `ReadLog`.
+
 Each process may write 32 lines at once and 20 a second after that. Lines beyond that are dropped and counted. The next line that is written is preceded by `[name] (n lines dropped)`.
 
 A kernel call.
@@ -1171,10 +1181,10 @@ A kernel call.
 
 **BUGS**
 - Truncation is silent, and so, until the next line, is dropping.
-- The console is still polled: a long line holds up the CPU, with interrupts off, for about 19 ms at 115200 baud. A buffered console drained by its driver is **planned** with the drivers (V4).
+- A line in the ring when the system hangs with interrupts off isn't shown. A halt, a reboot and a meditation show what's in it first.
 
 **SEE ALSO**
-[Libraries ch. 1](../libraries/01-introduction.md#logging)
+[ReadLog](lease.md#leasereadlog), [Libraries ch. 1](../libraries/01-introduction.md#logging)
 
 ---
 

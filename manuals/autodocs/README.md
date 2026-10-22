@@ -6,7 +6,7 @@
 |---|---|
 | [exec.md](exec.md) | The kernel calls (`planar/exec.h`, `planar/ipc.h`) |
 | [msg.md](msg.md) | Exec's messages over connections (`planar/msg.h`, `lib/exec`) |
-| [lease.md](lease.md) | Device leases: registers, interrupt lines, MSIs, DMA Areas, the firmware's tables and the console's input (`planar/lease.h`) |
+| [lease.md](lease.md) | Device leases: registers, interrupt lines, MSIs, DMA Areas, the firmware's tables, the console's input and the kernel log (`planar/lease.h`) |
 | [drv.md](drv.md) | drv.library, a driver's main loop (`planar/drv.h`, `lib/drv`) |
 | [blk.md](blk.md) | The block class's client library (`planar/blk.h`, `lib/blk`) |
 | [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
@@ -111,6 +111,7 @@
 | ReadArgs, FreeArgs | [dos](dos.md#dosreadargs) | library |
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
 | ReadFile, WriteFile | [dos](dos.md#dosreadfile) | library |
+| ReadLog | [lease](lease.md#leasereadlog) | kernel |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |
 | ReportUnresponsive | [msg](msg.md#execreportunresponsive) | library, in `libexec.a` |
@@ -151,7 +152,7 @@ Each is under BUGS in its entry.
 - `SignalWaitConn` returns 0 at once for a bad handle, the same as for a closed peer.
 - An over-long port or program name (`CreatePort`, `CreateProcess`) gives `ERR_BADADDR` rather than `ERR_BADARG`.
 - If `OpenPort`'s or `AcceptConn`'s `arena` pointer stops being writable mid-call, the connection is made but its handle is lost.
-- `KLog` drops lines over its rate limit and still returns 0, and the console is still polled.
+- `KLog` drops lines over its rate limit and still returns 0.
 - `AckWaitIrq` reports errors only when its mask is 0. With a nonzero mask a refused call returns 0 at once.
 - `MapFirmware` leaves what it mapped in place when it fails part way.
 - `AllocMsi` makes the sources, and counts the device as given, before it writes `info`; an unwritable `info` loses them.

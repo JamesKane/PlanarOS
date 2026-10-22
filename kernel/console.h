@@ -24,6 +24,9 @@ void console_describe(void);
 /* Write one byte, waiting for room. */
 void console_putc(char c);
 
+/* How many bytes console_putc takes now without waiting (0: none). */
+unsigned console_room(void);
+
 /* A byte typed at the console, or -1 if none is waiting (polled). */
 int console_getc(void);
 

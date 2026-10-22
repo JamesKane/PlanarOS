@@ -81,6 +81,7 @@ struct process {
     Handle watch_task;              /* or this task, by handle (CreateProcess) */
     uint64_t watch_sig;
     struct task *held;              /* its first task, until StartProcess */
+    bool names;                     /* may make named ports (PROCF_NAMES) */
     atomic_bool killed;             /* ended by process_kill */
     uint64_t stack_base;            /* the first task's stack, for the overrun test */
     atomic_uint_fast64_t calls_done;    /* kernel calls made by tasks that have left */

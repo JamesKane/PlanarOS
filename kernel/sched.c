@@ -310,10 +310,36 @@ static void finish_switch(struct task *prev)
  * interrupts off ('was' says whether to turn them back on). A task about
  * to block comes in here straight from marking itself waiting, rather
  * than letting go of the lock only to take it again. */
+static _Atomic uint64_t stack_overflows;
+
+uint64_t sched_stack_overflows(void)
+{
+    return atomic_load(&stack_overflows);
+}
+
+/* The kernel stacks are in the direct map, in blocks too big for a guard
+ * page, so an overflow is found after the fact, at the next switch, once
+ * it has reached the struct at the stack's base. */
+static void check_stack(struct task *t)
+{
+    if (!t->stack || t->stack_end == TASK_STACK_END)
+        return;
+    if (t->stack_test) {
+        atomic_fetch_add(&stack_overflows, 1);
+        t->stack_end = TASK_STACK_END;
+        return;
+    }
+    kprintf("\nGuru Meditation: kernel stack overflow\n");
+    kprintf("  task %p (%s)  cpu %u  stack %p-%p\n", (void *)t, t->name, this_cpu()->index,
+            phys_to_virt(t->stack), phys_to_virt(t->stack + TASK_STACK_PAGES * PAGE_SIZE));
+    arch_halt();
+}
+
 static void schedule_locked(struct cpu *c, unsigned long was)
 {
     struct task *prev = c->current, *next;
 
+    check_stack(prev);
     atomic_store_explicit(&c->need_resched, false, memory_order_relaxed);     /* rq_lock held */
     atomic_store_explicit(&c->quantum_check, false, memory_order_relaxed);
     if (prev->state == TASK_RUNNING && prev != c->idle) {
@@ -479,7 +505,7 @@ struct task *task_new(const char *name, int pri, uint64_t affinity,
     *t = (struct task){ .name = name, .pri = (int8_t)pri, .base_pri = (int8_t)pri,
                         .state = TASK_READY,
                         .affinity = affinity, .entry = entry, .data = data,
-                        .stack = stack };
+                        .stack = stack, .stack_end = TASK_STACK_END };
     arch_context_init(&t->ctx, phys_to_virt(stack + TASK_STACK_PAGES * PAGE_SIZE));
     return t;
 }
@@ -545,15 +571,22 @@ struct task *task_self(void)
     return arch_current();
 }
 
-void task_set_affinity(uint64_t affinity)
+/* A mask with no online CPU is refused: finish_switch would find nowhere
+ * to send the task, and lose it with its stack (§10.8). */
+bool task_set_affinity(uint64_t affinity)
 {
-    unsigned long was = arch_irq_save();
-    struct task *self = this_cpu()->current;
+    unsigned long was;
+    struct task *self;
 
+    if (!place(affinity, nullptr))
+        return false;
+    was = arch_irq_save();
+    self = this_cpu()->current;
     self->affinity = affinity;
     arch_irq_restore(was);
     if (!(affinity & bit(this_cpu())))
         schedule();                     /* schedule() sends it on */
+    return true;
 }
 
 /* Run 't' at 'pri' from now on (t->lock held, interrupts off); returns

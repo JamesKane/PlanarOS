@@ -6,7 +6,11 @@
  * change, so the copy never goes stale. The lower half is the domain's
  * own. ASIDs are 16 bits on the X60 (target.md V1); a domain keeps its
  * ASID for life and switching is one satp write. On a hart without
- * ASIDs every domain uses ASID 0 and a switch flushes the TLB.
+ * ASIDs every domain uses ASID 0 and a switch flushes the TLB. When the
+ * ASIDs run out, the domains made after share the last one, and a hart
+ * loading one of those drops what that ASID tagged first, unless the
+ * domain was the last it loaded with it (a destroy's fence reaches every
+ * hart, so a domain made later at the same address finds nothing).
  *
  * sfence.vma is local to a hart: unmapping a page or destroying a domain
  * fences every hart through SBI RFENCE. A new mapping is fenced only
@@ -44,6 +48,7 @@ static spinlock_t asid_lock;
 static uint64_t asid_used[65536 / 64] = { 1 };  /* ASID 0 is the kernel's */
 static unsigned asid_count = 1;     /* 1 << the hart's ASID bits */
 static unsigned asids_live;
+static unsigned asid_cap;           /* arch_asid_limit's, or 0 */
 
 static pte_t *table(uint64_t pa)
 {
@@ -77,37 +82,45 @@ unsigned riscv_asid_bits(void)
     return (unsigned)__builtin_ctz(asid_count);
 }
 
+/* The ASID domains share once the rest are taken (0 with no ASIDs). */
+static uint32_t asid_shared(void)
+{
+    return asid_count - 1;
+}
+
+void arch_asid_limit(unsigned n)
+{
+    asid_cap = n;
+}
+
 static uint32_t asid_alloc(void)
 {
     unsigned long was = spin_lock_irqsave(&asid_lock);
+    unsigned n = asid_shared();
 
+    if (asid_cap && asid_cap < n)
+        n = asid_cap;
     asids_live++;
-    if (asid_count > 1) {
-        for (unsigned w = 0; w < asid_count / 64 + 1; w++) {
-            if (asid_used[w] != ~0ULL) {
-                unsigned b = (unsigned)__builtin_ctzll(~asid_used[w]);
-                uint32_t asid = w * 64 + b;
+    for (unsigned w = 0; w * 64 < n; w++) {
+        if (asid_used[w] != ~0ULL) {
+            unsigned b = (unsigned)__builtin_ctzll(~asid_used[w]);
 
-                if (asid >= asid_count)
-                    break;
-                asid_used[w] |= 1ULL << b;
-                spin_unlock_irqrestore(&asid_lock, was);
-                return asid;
-            }
+            if (w * 64 + b >= n)
+                break;
+            asid_used[w] |= 1ULL << b;
+            spin_unlock_irqrestore(&asid_lock, was);
+            return w * 64 + b;
         }
-        asids_live--;
-        spin_unlock_irqrestore(&asid_lock, was);
-        return ~0u;
     }
     spin_unlock_irqrestore(&asid_lock, was);
-    return 0;               /* no ASIDs: everyone shares 0 and switches flush */
+    return asid_shared();
 }
 
 static void asid_free(uint32_t asid)
 {
     unsigned long was = spin_lock_irqsave(&asid_lock);
 
-    if (asid)
+    if (asid != asid_shared())
         asid_used[asid / 64] &= ~(1ULL << (asid % 64));
     asids_live--;
     spin_unlock_irqrestore(&asid_lock, was);
@@ -145,8 +158,7 @@ bool arch_domain_create(struct arch_domain *d)
 {
     pte_t *root;
 
-    if ((d->asid = asid_alloc()) == ~0u)
-        return false;
+    d->asid = asid_alloc();
     if (!(d->root = pmm_alloc())) {
         asid_free(d->asid);
         return false;
@@ -296,8 +308,12 @@ void arch_domain_switch(struct arch_domain *d)
         csr_write_satp(SATP_SV39 | (uint64_t)d->asid << SATP_ASID_SHIFT | d->root >> PAGE_SHIFT);
     else
         csr_write_satp(SATP_SV39 | virt_to_phys(boot_root) >> PAGE_SHIFT);
-    if (asid_count == 1)
+    if (asid_count == 1) {
         sfence_vma_all();
+    } else if (d && d->asid == asid_shared() && c->shared_last != d) {
+        c->shared_last = d;
+        __asm__ volatile("sfence.vma zero, %0" : : "r"((uint64_t)d->asid) : "memory");
+    }
 }
 
 bool riscv_zicbom;

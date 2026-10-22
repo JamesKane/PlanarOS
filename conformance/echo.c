@@ -16,7 +16,7 @@ int main(void)
 {
     int64_t psig = AllocSignal(-1), csig = AllocSignal(-1);
     int64_t port = psig > 0 && csig > 0 ? CreatePort("echo", psig) : -1;
-    struct MsgPort clients[MAX_CLIENTS];
+    struct MsgPort clients[MAX_CLIENTS + 1];
     uint64_t got = 1ULL << psig;
     unsigned n = 0;
 
@@ -26,8 +26,13 @@ int main(void)
     }
     for (;;) {
         if (got & (1ULL << psig))
-            while (n < MAX_CLIENTS && AcceptPort(&clients[n], (Handle)port, csig) == 0)
-                n++;
+            while (AcceptPort(&clients[n < MAX_CLIENTS ? n : MAX_CLIENTS], (Handle)port,
+                              csig) == 0) {
+                if (n < MAX_CLIENTS)
+                    n++;
+                else
+                    ClosePort(&clients[MAX_CLIENTS]);   /* full: told, not left waiting */
+            }
         for (unsigned i = 0; i < n; i++) {
             struct MsgPort *mp = &clients[i];
             struct Message *m;

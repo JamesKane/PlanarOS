@@ -82,5 +82,6 @@ void selftest_libraries(void);
 void selftest_clib(void);
 void selftest_dos_args(void);
 void selftest_supervision(void);
+void selftest_debts(void);
 
 #endif /* KERNEL_SELFTEST_H */
