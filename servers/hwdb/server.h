@@ -159,6 +159,7 @@ int64_t power_query(const char *name, uint32_t tag);
 int64_t power_vote_set(const char *name, uint32_t tag, bool on);
 void test_power_answer(const struct PowerMsg *m);
 bool power_test(void);              /* the kill test's power step: true when it's over */
+struct unit *power_unit(void);
 
 /* --- display (display.c): its stop method, and its test. --- */
 
@@ -167,6 +168,7 @@ void display_up(void);              /* its unit is running: connect (test mode) 
 void display_down(void);
 void display_serve(struct MsgPort *mp);
 bool display_test(void);            /* the kill test's display step: true when it's over */
+struct unit *display_unit(void);    /* the console's display, running */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */
 void input_keep(void);              /* started, and again when it ends; ended when stopping */
@@ -175,11 +177,14 @@ bool stop_xhci(struct unit *u);     /* every controller halted */
 void input_conn_down(void);
 void input_conn_serve(struct MsgPort *mp);
 bool input_test(void);              /* the kill test's input step: true when it's over */
+unsigned input_kill(void);          /* killed (it's started again): its starts so far */
+unsigned input_starts(void);
 
 /* --- gpu-panthor (gpu.c): its stop method; the test. --- */
 bool stop_gpu(struct unit *u);      /* the MCU off and the GPU reset */
 bool stop_rogue(struct unit *u);    /* the RV2's GPU: all of it in soft reset */
 bool gpu_test(void);                /* the kill test's GPU step: true when it's over */
+bool gpu_load_test(void);           /* step 7's: the kills under a GPU client's load */
 
 /* --- pci (pci.c): a host bridge's driver, while it binds. --- */
 

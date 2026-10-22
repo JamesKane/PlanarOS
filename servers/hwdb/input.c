@@ -69,6 +69,18 @@ uint64_t input_due(void)
     return ip.proc ? 0 : ip.due;
 }
 
+unsigned input_kill(void)
+{
+    if (ip.proc)
+        KillProcess(ip.proc);
+    return ip.starts;
+}
+
+unsigned input_starts(void)
+{
+    return ip.starts;
+}
+
 /* --- xhci's stop. --- */
 
 bool stop_xhci(struct unit *u)

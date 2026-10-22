@@ -1,6 +1,6 @@
 # The GPU class
 
-*Checked against V5 step 6.*
+*Checked against V5.*
 
 ## What it's for
 
@@ -139,15 +139,17 @@ A kick is a kernel CCB `KICK` with the ring's write offset, then a write to `MTS
 
 **The CIX** (2026-10-21): `GPU_ID 0xc8700008` (arch 12), 10 shader cores (`0x550555`), 8 address spaces, 48-bit VA. The firmware's global interface is version 1.1, with 8 group slots: 7 queues for clients. Measured by `gputest`, three rounds a boot:
 - the first job, doorbell to the sync object's update: 25–50 µs, with 2 kernel calls made meanwhile machine-wide, both the test's own (`QuerySystem` and `CurrentTime`);
-- 1,000 jobs, each spun on: about 11 µs each;
-- one job waited for with `WaitAddr`, woken by the server: 16 µs.
+- 1,000 jobs, each spun on: about 11 µs each. None makes a kernel call on its path, but each costs, machine-wide, about 6 kernel calls, 2 crossings and 1 interrupt off it: the server takes the firmware's sync update to wake the word, whether anyone waits on it or not;
+- 100 jobs waited for with `WaitAddr`, woken by the server: 22–23 µs each, 25 µs at worst (step 5's one job: 16 µs);
+- under load (the kill test's `T_LOAD`), 2,315,511 jobs in 30 s, with at most 60 µs between two while display, input, power and another GPU client were killed, and going on after `gpu-panthor` was.
 
 **QEMU** has no GPU: the test says "not exercised".
 
 **The RV2** (2026-10-22): core 36.29.52.182 (a BXE-2-32), mainline's open firmware 1.0, build 6734358. Measured by `gputest`, three rounds a boot:
 - the first job, `GPU_KICK` to the sync object's update: 52 µs, with 5 kernel calls made meanwhile machine-wide, against the CIX's 2: the kick is a message;
-- 1,000 jobs, each spun on: about 54 µs each;
-- one job waited for with `WaitAddr`, woken by the server: 55–57 µs.
+- 1,000 jobs, each spun on: 53–54 µs each, and each costs, machine-wide, 7.1 kernel calls, 2.1 task switches, 2.0 crossings (the kick's message and its reply) and 2.1 interrupts;
+- 100 jobs waited for with `WaitAddr`, woken by the server: 55–56 µs each, 70–72 µs at worst;
+- under load (the kill test's `T_LOAD`), 510,000–527,000 jobs in 30 s, with at most 865 µs between two while display, input, power and another GPU client were killed, and going on after `gpu-rogue` was.
 
 ## Functions used
 

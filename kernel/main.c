@@ -158,6 +158,8 @@
         kprintf("V5.5 done\n");
         kprintf("V5.6 gpu skipped: no tasks\n");
         kprintf("V5.6 done\n");
+        kprintf("V5.7 load skipped: no tasks\n");
+        kprintf("V5.7 done\n");
         arch_halt();
     }
     sched_idle();

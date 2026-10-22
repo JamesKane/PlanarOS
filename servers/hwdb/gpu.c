@@ -15,6 +15,12 @@
  * then a round across the server's own death. The same for either
  * server: the CIX's gpu-panthor (step 5), where the app rings its own
  * doorbell, and the RV2's gpu-rogue (step 6), a server queue.
+ *
+ * Then the load test (killtest.c's T_LOAD, step 7): a gputest running
+ * jobs without a pause while, a few seconds apart, display, input and
+ * power are killed, then another GPU client with its jobs in flight,
+ * and last the GPU server. The first's jobs must go on through all but
+ * the last (none takes a second), and after it on the restarted server.
  */
 #include <stddef.h>
 
@@ -102,6 +108,7 @@ static struct {
     Handle client;
     uint64_t at;
     bool rogue;
+    bool ok;                        /* every round passed */
 } gt;
 
 static void test_fail(const char *what)
@@ -134,15 +141,20 @@ static struct unit *gpu_unit(void)
 }
 
 /* 0 running, else its exit code + 1 (-1 if it didn't exit). */
-static int client_state(void)
+static int state_of(Handle *h)
 {
     struct ProcessInfo pi;
 
-    if (QueryProcess(gt.client, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+    if (QueryProcess(*h, &pi) != 0 || pi.pi_State < PROCS_EXITED)
         return 0;
-    CloseHandle(gt.client);
-    gt.client = 0;
+    CloseHandle(*h);
+    *h = 0;
     return pi.pi_State == PROCS_EXITED ? (int)pi.pi_ExitCode + 1 : -1;
+}
+
+static int client_state(void)
+{
+    return state_of(&gt.client);
 }
 
 static bool start_client(uint64_t mode)
@@ -235,6 +247,7 @@ bool gpu_test(void)
     case G_ACROSS:
         if (!ended(client_state(), "gputest's round across the GPU server's death failed"))
             return gt.step == G_DONE;
+        gt.ok = true;
         if (gt.rogue)
             say("V5.6 gpu ok: jobs ran from the app's own client CCB, kicked through gpu-rogue; "
                 "again after a client was killed with jobs in flight, and after gpu-rogue was");
@@ -245,5 +258,162 @@ bool gpu_test(void)
     case G_DONE:
         return true;
     }
+    return true;
+}
+
+/* --- The load test (step 7). --- */
+
+constexpr uint64_t LOAD_SECONDS = 30;
+
+/* What's killed, and when, in seconds after the load starts. */
+enum : uint8_t { K_DISPLAY, K_INPUT, K_POWER, K_CLIENT, K_CLIENT_KILL, K_GPU, K_ALL };
+static const uint8_t when[K_ALL] = { 3, 6, 9, 11, 14, 17 };
+
+static struct {
+    uint8_t next;                   /* the next kill */
+    bool started, over;
+    Handle load, other;
+    uint64_t at;
+    unsigned display_deaths, input_starts, power_ups, gpu_deaths;
+    bool killed[K_ALL];
+} lt;
+
+static void load_fail(const char *what)
+{
+    struct hw_line l = { 0 };
+
+    hw_put(&l, "hwdb: load test: FAILED: ");
+    hw_put(&l, what);
+    say(l.text);
+    hwdb.errors++;
+    for (Handle *h = &lt.load; h <= &lt.other; h++)
+        if (*h) {
+            KillProcess(*h);
+            CloseHandle(*h);
+            *h = 0;
+        }
+    lt.over = true;
+}
+
+static void kill_next(void)
+{
+    struct unit *u;
+    int64_t p;
+
+    switch (lt.next) {
+    case K_DISPLAY:
+        if ((u = display_unit())) {
+            lt.display_deaths = u->deaths;
+            unit_kill(u);
+            lt.killed[K_DISPLAY] = true;
+        }
+        break;
+    case K_INPUT:
+        lt.input_starts = input_kill();
+        lt.killed[K_INPUT] = true;
+        break;
+    case K_POWER:
+        if ((u = power_unit()) && u->state == U_RUNNING) {
+            lt.power_ups = power.ups;
+            unit_kill(u);
+            lt.killed[K_POWER] = true;
+        }
+        break;
+    case K_CLIENT:
+        if ((p = CreateProcess("gputest", 1, SIG_DEAD, 0)) < 0) {
+            load_fail("a second gputest couldn't be started");
+            return;
+        }
+        lt.other = (Handle)p;
+        break;
+    case K_CLIENT_KILL:
+        if (state_of(&lt.other) != 0) {
+            load_fail("the second gputest ended with its jobs running");
+            return;
+        }
+        KillProcess(lt.other);
+        lt.killed[K_CLIENT_KILL] = true;
+        break;
+    case K_GPU:
+        if (!(u = gpu_unit())) {
+            load_fail("the GPU server wasn't running to be killed");
+            return;
+        }
+        lt.gpu_deaths = u->deaths;
+        unit_kill(u);
+        lt.killed[K_GPU] = true;
+        break;
+    }
+    lt.next++;
+}
+
+/* Everything killed came back. */
+static bool all_back(void)
+{
+    struct unit *u;
+
+    if (lt.killed[K_DISPLAY] && (!(u = display_unit()) || u->deaths == lt.display_deaths))
+        return false;
+    if (lt.killed[K_INPUT] && input_starts() == lt.input_starts)
+        return false;
+    if (lt.killed[K_POWER] && power.ups == lt.power_ups)
+        return false;
+    return lt.other == 0 && gpu_unit() != nullptr;
+}
+
+bool gpu_load_test(void)
+{
+    struct hw_line l = { 0 };
+    int s;
+
+    if (lt.over)
+        return true;
+    if (!lt.started) {
+        int64_t p;
+
+        if (!gt.ok) {
+            say(gpu_unit() ? "V5.7 load: not exercised: the GPU's own test didn't pass"
+                           : "V5.7 load: not exercised: no GPU here");
+            lt.over = true;
+            return true;
+        }
+        if ((p = CreateProcess("gputest", 3 | LOAD_SECONDS << 8, SIG_DEAD, 0)) < 0) {
+            load_fail("gputest couldn't be started");
+            return true;
+        }
+        lt.load = (Handle)p;
+        lt.at = hwdb.now;
+        lt.started = true;
+        return false;
+    }
+    if (lt.other && lt.next > K_CLIENT_KILL)
+        state_of(&lt.other);
+    if ((s = state_of(&lt.load)) == 0) {
+        if (lt.next < K_ALL && hwdb.now - lt.at >= when[lt.next] * 1000 * MS)
+            kill_next();
+        else if (hwdb.now - lt.at > (LOAD_SECONDS + 40) * 1000 * MS)
+            load_fail("gputest's load didn't end");
+        return lt.over;
+    }
+    if (s != 1) {
+        load_fail("gputest's jobs under load failed");
+        return true;
+    }
+    if (lt.next < K_ALL) {
+        load_fail("gputest's load ended before every kill");
+        return true;
+    }
+    if (!all_back()) {
+        if (hwdb.now - lt.at > (LOAD_SECONDS + 20) * 1000 * MS)
+            load_fail("something killed under load didn't come back");
+        return lt.over;
+    }
+    hw_put(&l, "V5.7 load ok: an app's GPU jobs went on while ");
+    hw_put(&l, lt.killed[K_DISPLAY] ? "display, " : "");
+    hw_put(&l, "input, ");
+    hw_put(&l, lt.killed[K_POWER] ? "power, " : "");
+    hw_put(&l, "and another GPU client with jobs in flight were killed, and after the GPU server was");
+    say(l.text);
+    lt.over = true;
     return true;
 }

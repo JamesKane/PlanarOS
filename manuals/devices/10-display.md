@@ -71,6 +71,11 @@ To flip, draw the next frame in a second buffer and commit it to the same plane.
 
 **QEMU** (`fb.c`): edk2's GOP on `ramfb`. The console draws in a copy of the screen, and the screen is that copy with the planes over it, written out where something changed, at 60 frames a second.
 
+**Flips, measured** by `displaytest`: 60 flips, each committed just after a vblank, timed by omega's method from the latching vblank's `ds_Time`.
+- **The RV2** (2026-10-22, 59.9 Hz): commit to latch 16.63–16.65 ms, vblank to latch 16.65–16.67 ms. Every flip latched at the next vblank: none missed.
+- **The CIX** (2026-10-22, 60 Hz): commit to latch and vblank to latch both 33.33 ms. Every flip latched a vblank late, at the second after its commit. Whether the DPU takes `GCU_CONFIG_VALID0` a frame late or display sees the latch a vblank late isn't known yet.
+- **QEMU** (TCG): none missed, at 16.6–24.9 ms, as its 60 Hz ticks come late.
+
 ## Functions used
 
 - [ConnectPort](../autodocs/msg.md#execconnectport), [DoMsg](../autodocs/msg.md#execdomsg), [WaitAddr](../autodocs/exec.md#execwaitaddr): the client's side.

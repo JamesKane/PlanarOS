@@ -1,6 +1,6 @@
 # V5 plan: queue leases, native scanout, power and input
 
-**Status: proposed (2026-10-20).** Scoped from the V4 exit and from three surveys of the reference trees: Linux's and FreeBSD's panthor, komeda and SCMI on the CIX, and the vendor kernel's `img-rogue` and `ky` drivers on the RV2 ([vendor-kernel branches](#sources)). The four scope decisions at the end are made.
+**Status: steps 1–7 done (2026-10-22), with two findings of step 7 open: a `dos` stall on the RV2 and the CIX's late flips.** Proposed 2026-10-20. Scoped from the V4 exit and from three surveys of the reference trees: Linux's and FreeBSD's panthor, komeda and SCMI on the CIX, and the vendor kernel's `img-rogue` and `ky` drivers on the RV2 ([vendor-kernel branches](#sources)). The four scope decisions at the end are made.
 
 **Goal (§8):** the first coprocessor in user space, and the hardware the Workbench phase (V6) needs under it. An app on the CIX submits GPU work and waits for it with no kernel or server in the data path (§5.1). The RV2 does the same through a server queue, with the same API. Both boards scan out natively from the display controller the firmware left running, take keyboard and mouse from USB, and power devices through a `power` server.
 
@@ -322,10 +322,32 @@ The BXE-2-32 is Rogue core **36.29.52.182**, with a MIPS firmware processor. The
 
 ## 7. Costs and the exit
 
-- **Calls per job:** 0 on the CIX between doorbell and completion, and the server's crossings on the RV2.
-- **Latency** from submit to the sync object's update, spinning and with `WaitAddr`.
-- **Flips:** from commit to latch, on both boards, against the vblank interval (omega's `selftest.c` method).
-- **The kill tests** kill `gpu-*`, `display`, `input`, `power` and the GPU clients, under load.
+**Done (2026-10-22), on both boards.** The costs are measured by the tests that already ran each step, and the kills under load are a new phase of the kill test.
+
+- **Calls per job** (`gputest`): over its 1,000 jobs, the kernel calls, task switches, crossings and interrupts each costs, machine-wide. The loop makes no calls of its own: one deadline for the batch, and `spin` doesn't read the clock at its first look.
+- **Latency:** the first job, the 1,000 spun on, and now 100 waited for with `WaitAddr` (the mean and the worst), not one.
+- **Flips** (`displaytest`): after its 30 flips, 60 more by omega's method, each committed just after a vblank (`WaitAddr` on `ds_Vblank`). It gives commit to latch and vblank to latch, from the latching vblank's `ds_Time`, and the vblanks missed: those after the next.
+- **The kills under load** (`T_LOAD`, `servers/hwdb/gpu.c`): `gputest` in a new mode runs jobs without a pause for 30 s. A few seconds apart, hwdb kills `display`, `input` and `power`, then starts a second `gputest`, kills it with its jobs in flight, and last kills the GPU server. No job of the first may take a second unless the server has died. It then connects to the restarted server, takes a new queue and goes on, and must have run jobs after that. hwdb checks that everything it killed came back. `V5.7 done` closes the transcript, and the kernel waits 120 s for hwdb's test, not 40.
+
+**Measured on the RV2:**
+- Each job costs, machine-wide, 7.1 kernel calls, 2.1 task switches, 2.0 crossings and 2.1 interrupts. The crossings are the client's `GPU_KICK` to `gpu-rogue` and its reply; the interrupt is the firmware's after the update.
+- A job spun on: 53–54 µs. Waited for: 55–56 µs on average, 70–72 µs at worst.
+- Under load: 510,000–527,000 jobs in 30 s. Between two jobs, apart from the server's death, at most 781–865 µs, while display, input, power and another GPU client were killed.
+- Flips: commit to latch 16.63–16.65 ms, vblank to latch 16.65–16.67 ms. All 60 latched at the next vblank, none missed (59.9 Hz).
+- QEMU (TCG) misses none either, at 16.6–24.9 ms, and says the load phase is "not exercised: no GPU here".
+
+**Measured on the CIX:**
+- Between the doorbell and the update, no kernel call but the test's own `QuerySystem`: the exit's count.
+- But each job costs, machine-wide, 5.8–6.1 kernel calls, 2.0 task switches, 2.0 crossings and 1.0 interrupts, off its path. `gpu-panthor` takes the firmware's `CSG_SYNC_UPDATE` interrupt after every job, to wake the sync object in case someone sleeps on it. A flag in the sync object's page saying someone does, as connection rings have `cr_Waiting`, would save it for an app that spins.
+- A job spun on: 11 µs. Waited for: 22–23 µs on average, 24–25 µs at worst (16 µs for the one job of step 5).
+- Under load: 2,315,511 jobs in 30 s, at most 60 µs between two but for the server's death.
+- **Flips latch a frame late:** commit to latch 33.33 ms, vblank to latch 33.33 ms, and every one of the 60 missed the next vblank (60 Hz). Step 3 saw "about two frames". Whether `GCU_CONFIG_VALID0` takes the commit a frame late, or the PL0 interrupt comes before the frame starts and display sees the latch a vblank late, is still to find. **Open**, for V6's `intuition`.
+
+**Found on the RV2: `dos` stalls, now and then, after the kill rounds.** In 2 runs of 4, the last `gpu-rogue` the kill rounds started never got its firmware: it printed its core and nothing more, so it was waiting inside a `dos` call, which has no deadline. It then answered no client, and the GPU test failed after 60 s. Each time, the `gpu-rogue` before it had been killed while reading the firmware, and `sdhci` had been restarted meanwhile. Not the cause: `lib/blk`'s retries and `sdhci`'s commands both have deadlines. `dos` now says when a transfer fails or takes over a second; it said nothing in the second stalled run, so `dos` wasn't waiting on the disk. It didn't stall in the 2 runs with a watchdog task added to `dos`, which may have changed the timing. **Open.**
+
+**Not yet:**
+- The `dos` stall on the RV2, and the CIX's late flips (above).
+- Waking a sync object only when someone sleeps on it.
 
 ## Sources
 

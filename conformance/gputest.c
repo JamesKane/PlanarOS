@@ -1,7 +1,7 @@
 /*
  * conformance/gputest.c -- a client of a GPU's queue (v5-plan step 5)
  *
- * Started by hwdb's GPU test (servers/hwdb/gpu.c) with one argument:
+ * Started by hwdb's GPU tests (servers/hwdb/gpu.c) with one argument:
  *
  * 0: one round. It lends the server a ring and a sync object, takes a
  *    queue, and runs jobs on it, each the smallest the GPU can be seen
@@ -10,11 +10,16 @@
  *    RV2): a NULL command and an UPDATE of the sync object to the next
  *    value (the DDK's kicksync), kicked by GPU_KICK. The first job's
  *    submit-to-update time and the kernel calls made meanwhile,
- *    machine-wide (QuerySystem), then JOBS more, spun on, then one
+ *    machine-wide (QuerySystem), then JOBS more, spun on, with the
+ *    calls, switches and crossings each cost (step 7), then WAITED each
  *    waited for with WaitAddr, which the server wakes.
  * 1: jobs, without end: hwdb kills it with work in flight.
  * 2: a round, then it waits for the server to die (hwdb kills it),
  *    connects to the restarted one and does a second round.
+ * 3 | seconds << 8: jobs without a pause for that long, while hwdb kills
+ *    other servers and another client around it (step 7's load test).
+ *    No job may take a second unless the GPU server has died, and then
+ *    it connects to the restarted one and goes on.
  *
  * It ends 0 if every round's jobs ran, 3 if there's no GPU up to run
  * them (its firmware never came), and otherwise with a failed check's
@@ -33,7 +38,7 @@ void *memset(void *dst, int c, size_t n);
 constexpr int64_t SIG_GPU = 20;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t RING = 64 * 1024;
-constexpr unsigned JOBS = 1000;
+constexpr unsigned JOBS = 1000, WAITED = 100;
 constexpr unsigned JOB = 8;                     /* instructions: one 64-byte line */
 
 static unsigned step;
@@ -223,16 +228,27 @@ static void submit(void)
 /* Spun on: true if it came by 'until'. */
 static bool spin(uint64_t until)
 {
-    for (unsigned n = 0; sync->gs_Seqno != seqno; n++)
+    /* Not at the first look: a job's calls are counted (round_). */
+    for (unsigned n = 1; sync->gs_Seqno != seqno; n++)
         if (n % 100000 == 0 && CurrentTime() > until)
             return false;
     return true;
 }
 
+/* n / d, said with one decimal. */
+static void log_tenths(struct logbuf *lb, uint64_t n, uint64_t d)
+{
+    uint64_t t = (n * 10 + d / 2) / d;
+
+    log_num(lb, t / 10);
+    log_str(lb, ".");
+    log_num(lb, t % 10);
+}
+
 static int round_(void)
 {
     struct SystemInfo a, b;
-    uint64_t t0, t1, total;
+    uint64_t t0, t1, total, until, waited = 0, worst = 0;
     struct logbuf lb = { 0 };
 
     if (queue() != 0)
@@ -263,13 +279,28 @@ static int round_(void)
     log_str(&lb, " kernel calls made meanwhile, machine-wide");
     KLog(lb.text);
 
-    /* JOBS more, each spun on. */
+    /* JOBS more, each spun on, with what they cost machine-wide: one
+     * deadline for them all, so the loop makes no calls of its own. */
     t0 = CurrentTime();
+    until = t0 + 10000 * MS;
+    QuerySystem(&a);
     for (unsigned i = 0; i < JOBS; i++) {
         submit();
-        CHECK(spin(CurrentTime() + 1000 * MS));
+        CHECK(spin(until));
     }
+    QuerySystem(&b);
     total = CurrentTime() - t0;
+    lb = (struct logbuf){ 0 };
+    log_str(&lb, "gputest: each job cost, machine-wide, ");
+    log_tenths(&lb, b.si_Calls - a.si_Calls, JOBS);
+    log_str(&lb, " kernel calls, ");
+    log_tenths(&lb, b.si_Switches - a.si_Switches, JOBS);
+    log_str(&lb, " task switches, ");
+    log_tenths(&lb, b.si_Crossings - a.si_Crossings, JOBS);
+    log_str(&lb, " crossings and ");
+    log_tenths(&lb, b.si_Interrupts - a.si_Interrupts, JOBS);
+    log_str(&lb, " interrupts");
+    KLog(lb.text);
     /* The firmware writes how far it has read when it gets to it, not at
      * each job: it has moved on, and never past what was written. */
     for (uint64_t until = CurrentTime() + 100 * MS;
@@ -286,13 +317,18 @@ static int round_(void)
         KLog(lb.text);
     }
 
-    /* One waited for: the server wakes the word. */
-    t0 = CurrentTime();
-    submit();
-    while (sync->gs_Seqno != seqno && CurrentTime() < t0 + 1000 * MS)
-        WaitAddr(&sync->gs_Seqno, seqno - 1, t0 + 1000 * MS);
-    t1 = CurrentTime();
-    CHECK(sync->gs_Seqno == seqno);
+    /* WAITED waited for: the server wakes the word. */
+    for (unsigned i = 0; i < WAITED; i++) {
+        t0 = CurrentTime();
+        submit();
+        while (sync->gs_Seqno != seqno && CurrentTime() < t0 + 1000 * MS)
+            WaitAddr(&sync->gs_Seqno, seqno - 1, t0 + 1000 * MS);
+        t1 = CurrentTime();
+        CHECK(sync->gs_Seqno == seqno);
+        waited += t1 - t0;
+        if (t1 - t0 > worst)
+            worst = t1 - t0;
+    }
     CHECK(ask(GPU_STATUS) == 0 && m->gm_Faults == 0);
 
     lb = (struct logbuf){ 0 };
@@ -302,9 +338,66 @@ static int round_(void)
     log_num(&lb, total / 1000);
     log_str(&lb, " us (");
     log_num(&lb, total / JOBS / 1000);
-    log_str(&lb, " us each, submit to update); one waited for in ");
-    log_num(&lb, (t1 - t0) / 1000);
-    log_str(&lb, " us");
+    log_str(&lb, " us each, submit to update); ");
+    log_num(&lb, WAITED);
+    log_str(&lb, " waited for, ");
+    log_num(&lb, waited / WAITED / 1000);
+    log_str(&lb, " us each (worst ");
+    log_num(&lb, worst / 1000);
+    log_str(&lb, " us)");
+    KLog(lb.text);
+    return 0;
+}
+
+/* Mode 3: jobs for 'seconds' under hwdb's kills. */
+static int load(uint64_t seconds)
+{
+    uint64_t start = CurrentTime(), end = start + seconds * 1000 * MS, last, now, gap = 0;
+    uint64_t jobs = 0, since = 0;
+    unsigned deaths = 0;
+    struct logbuf lb = { 0 };
+    int r;
+
+    if ((r = queue()) != 0)
+        return r;
+    KLog("gputest: running jobs under load");
+    last = CurrentTime();
+    while ((now = CurrentTime()) < end) {
+        /* A dead server's doorbell faults: none rung once it's gone. A
+         * death between this look and the ring kills us too, but that's
+         * a few instructions in a job's 10 us and more. */
+        if (!PortGone(&mp)) {
+            submit();
+            if (spin(now + 1000 * MS)) {
+                now = CurrentTime();
+                if (now - last > gap)
+                    gap = now - last;
+                last = now;
+                jobs++;
+                since++;
+                continue;
+            }
+        }
+        /* A second and no update: only the server's death may do that. */
+        CHECK(PortGone(&mp));
+        ClosePort(&mp);
+        CHECK(take() == 0);
+        if ((r = queue()) != 0)
+            return r;
+        deaths++;
+        since = 0;
+        last = CurrentTime();
+    }
+    CHECK(since > 0);                   /* jobs ran after the last death */
+    log_str(&lb, "gputest: ");
+    log_num(&lb, jobs);
+    log_str(&lb, " jobs in ");
+    log_num(&lb, seconds);
+    log_str(&lb, " s under load, the longest between two ");
+    log_num(&lb, gap / 1000);
+    log_str(&lb, " us, but for ");
+    log_num(&lb, deaths);
+    log_str(&lb, deaths == 1 ? " death of the GPU server" : " deaths of the GPU server");
     KLog(lb.text);
     return 0;
 }
@@ -319,6 +412,8 @@ int main(uint64_t mode)
         KLog("gputest: no GPU up to run jobs");
         return 3;
     }
+    if ((mode & 0xff) == 3)
+        return load(mode >> 8);
     if (mode == 1) {
         if ((r = queue()) != 0)
             return r;

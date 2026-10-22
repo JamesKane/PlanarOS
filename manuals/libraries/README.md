@@ -12,9 +12,9 @@
 | 4 | [Exec: ports, connections and messages](04-messages.md) | Written, V4 |
 | 5 | Exec: interrupts and driver tasks | Built in V4 as leases' lines (`BindIrq`, `AckWaitIrq`): see [Devices ch. 1](../devices/01-drivers.md) |
 | 6 | Exec: lending memory with a request (`IOF_LEND`) | **Planned** ([docs §4.2](../../docs/04-ipc.md)). Meanwhile the block class passes buffers in the connection's heap ([Devices ch. 2](../devices/02-block.md)) |
-| 7 | Exec: futexes (`WaitAddr`, `WakeAddr`) | **Planned** ([docs §4.1](../../docs/04-ipc.md)) |
+| 7 | [Exec: futexes](07-futexes.md) (`WaitAddr`, `WakeAddr`) | Written, V5 |
 | 8 | Libraries and interface tables (`IExec->PutMsg()`) | **Planned** ([docs §7.2](../../docs/07-language-toolchain.md)) |
-| 9 | Queue leases: GPU and NPU from user space | **Planned**, V5 ([docs §5](../../docs/05-coprocessors.md)) |
+| 9 | [Queue leases: GPU work from user space](09-queue-leases.md) | Written, V5. The NPU's is V7 |
 | 10 | The hardware database (`hwdb`) | Built in V4: see [Devices ch. 1](../devices/01-drivers.md) ([docs §9](../../docs/09-hardware-description.md)) |
 
 Where the RKM had chapters on Intuition, graphics and layers, Planar has none yet. They will be added here as those libraries are designed.

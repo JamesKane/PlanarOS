@@ -412,7 +412,7 @@ static bool late(uint64_t ms)
     return hwdb.now - pt.at > ms * MS;
 }
 
-static struct unit *power_unit(void)
+struct unit *power_unit(void)
 {
     for (uint32_t i = 0; i < hwdb.g.nleases; i++)
         if (hw_streq(unit_driver(&hwdb.units[i]), "power") && hwdb.units[i].state != U_DONE)

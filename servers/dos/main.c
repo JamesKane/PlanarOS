@@ -106,22 +106,43 @@ static bool same(const char *a, const char *b, unsigned n)
 
 /* --- Volumes. --- */
 
+/* A transfer that failed, or took more than a second (its driver
+ * restarting under it): said, so a stall shows whose it is. */
+static int64_t watched(struct volume *vol, const char *what, uint64_t t0, int64_t e)
+{
+    uint64_t ms = (CurrentTime() - t0) / 1000000;
+    char line[96] = "dos: ";
+
+    if (e == 0 && ms < 1000)
+        return e;
+    cat(line, sizeof line, vol->name);
+    cat(line, sizeof line, what);
+    cat_dec(line, sizeof line, ms);
+    cat(line, sizeof line, e ? " ms, and failed: error -" : " ms");
+    if (e)
+        cat_dec(line, sizeof line, (uint64_t)-e);
+    say(line);
+    return e;
+}
+
 static int64_t vol_read(void *ctx, uint64_t s, uint32_t n, void *buf)
 {
     struct volume *vol = ctx;
+    uint64_t t0 = CurrentTime();
 
     if (s >= vol->count || n > vol->count - s)
         return ERR_BADARG;
-    return blk_read(vol->dev, vol->first + s, n, buf);
+    return watched(vol, ": a read took ", t0, blk_read(vol->dev, vol->first + s, n, buf));
 }
 
 static int64_t vol_write(void *ctx, uint64_t s, uint32_t n, const void *buf)
 {
     struct volume *vol = ctx;
+    uint64_t t0 = CurrentTime();
 
     if (s >= vol->count || n > vol->count - s)
         return ERR_BADARG;
-    return blk_write(vol->dev, vol->first + s, n, buf);
+    return watched(vol, ": a write took ", t0, blk_write(vol->dev, vol->first + s, n, buf));
 }
 
 static void mount_all(void)

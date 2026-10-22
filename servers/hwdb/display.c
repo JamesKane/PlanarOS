@@ -162,7 +162,7 @@ static bool late(uint64_t ms)
     return hwdb.now - dt.at > ms * MS;
 }
 
-static struct unit *display_unit(void)
+struct unit *display_unit(void)
 {
     for (uint32_t i = 0; i < hwdb.g.nleases; i++)
         if (hw_streq(unit_driver(&hwdb.units[i]), "display") && hwdb.units[i].state == U_RUNNING)

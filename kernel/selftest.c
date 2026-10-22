@@ -1392,6 +1392,8 @@ void selftest_tasks(void *)
     kprintf("V5.4 done\n");
     kprintf("V5.5 done\n");
     kprintf("V5.6 done\n");
+    /* And of the kills under a GPU client's load (gpu.c's load test). */
+    kprintf("V5.7 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2717,11 +2719,12 @@ void selftest_hwdb(void)
     task_set_signal(0, SIGF_DEAD);
     if (!(p = process_create_root("hwdb", 5, 1, task_self(), SIGF_DEAD)))
         fail("V4.3 hwdb", "process_create failed");
-    /* The boards take most of 15 s for the kill test alone. */
-    for (uint64_t end = time_now() + time_us(40000000); !atomic_load(&p->dead) && time_now() < end;)
+    /* The boards take most of 15 s for the kill test alone, and the GPU's
+     * load test (V5 step 7) 30 s more. */
+    for (uint64_t end = time_now() + time_us(120000000); !atomic_load(&p->dead) && time_now() < end;)
         wait_test_dead();
     if (!atomic_load(&p->dead)) {
-        kprintf("hwdb: still running after 40 s\n");
+        kprintf("hwdb: still running after 120 s\n");
         fail("V4.3 hwdb", "hwdb failed");
     }
     if (p->fault != FAULT_NONE || p->exit_code != 0) {

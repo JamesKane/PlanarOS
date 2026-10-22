@@ -117,7 +117,7 @@ For a wait with a timeout, arm the alarm, `Wait` for both bits, and disarm it wi
 | `Signal(struct Task *, …)` to any task | `Signal(Handle, …)`, only to a task in the caller's own process; across processes, `SignalConn` to a connection's peer |
 | `AllocSignal` returns -1 when none is free | The same |
 | `timer.device`, with an `IORequest` per delay | `ArmTimer`, one alarm per task, which sets a signal bit |
-| `SetTaskPri`, `Forbid`, `Disable` | None. There is no way to stop other tasks running: use a message or, when it comes, a futex. |
+| `SetTaskPri`, `Forbid`, `Disable` | None. There is no way to stop other tasks running: use a message, or wait on a sequence number (chapter 7). |
 
 ## Functions used
 

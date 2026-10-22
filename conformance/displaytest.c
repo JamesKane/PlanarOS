@@ -6,7 +6,10 @@
  *
  * 0: checks the refusals, then flips an overlay between two buffers 30
  *    times with the cursor moving over it, each commit waited for in
- *    the sync page, and says how long they took. Then it shows them,
+ *    the sync page, and says how long they took. Then PACED flips, each
+ *    committed just after a vblank, timed as omega did (v5-plan step 7):
+ *    commit to latch, vblank to latch, and the vblanks missed, which
+ *    should be none: each latched at the next. Then it shows them,
  *    allocates a fourth buffer to say so, and waits to be killed: hwdb
  *    checks display freed its buffers.
  * 1: shows an overlay and the cursor, allocates a third buffer to say
@@ -27,7 +30,7 @@ void *memset(void *dst, int c, size_t n);
 
 constexpr int64_t SIG_DISPLAY = 20, SIG_TIMER = 21;
 constexpr uint64_t MS = 1000000;
-constexpr unsigned FLIPS = 30;
+constexpr unsigned FLIPS = 30, PACED = 60;
 
 static unsigned step;
 
@@ -127,8 +130,74 @@ static bool shown(uint64_t seq)
     return true;
 }
 
+/* The last vblank: its number and its time, read together. */
+static uint64_t last_vblank(uint64_t *at)
+{
+    uint64_t v;
+
+    do {
+        v = sync_page->ds_Vblank;
+        *at = sync_page->ds_Time;
+    } while (sync_page->ds_Vblank != v);
+    return v;
+}
+
+static void log_range(struct logbuf *l, const char *what, uint64_t lo, uint64_t hi)
+{
+    log_str(l, what);
+    log_num(l, lo / 1000);
+    log_str(l, "-");
+    log_num(l, hi / 1000);
+    log_str(l, " us");
+}
+
+/* PACED flips, each committed just after a vblank: when each latched. */
+static int paced(const struct buf *a, const struct buf *b, const struct buf *c)
+{
+    uint64_t commit_lo = UINT64_MAX, commit_hi = 0, vsync_lo = UINT64_MAX, vsync_hi = 0;
+    uint64_t missed = 0;
+    struct logbuf l = { 0 };
+
+    for (unsigned i = 0; i < PACED; i++) {
+        uint64_t v0, t0, v1, t1, t_commit, seq, until = CurrentTime() + 250 * MS;
+
+        /* A vblank, just now. */
+        v0 = sync_page->ds_Vblank;
+        while (sync_page->ds_Vblank == v0)
+            CHECK(WaitAddr(&sync_page->ds_Vblank, v0, until) != ERR_TIMEOUT ||
+                  sync_page->ds_Vblank != v0);
+        v0 = last_vblank(&t0);
+        CHECK((seq = commit(1, i & 1 ? b->id : a->id, 40, 40, c->id, (int32_t)(i * 4), 80)) != 0);
+        t_commit = CurrentTime();
+        CHECK(shown(seq));
+        v1 = last_vblank(&t1);
+        CHECK(v1 > v0);                 /* latched at a vblank after the commit */
+        if (t1 - t_commit < commit_lo)
+            commit_lo = t1 - t_commit;
+        if (t1 - t_commit > commit_hi)
+            commit_hi = t1 - t_commit;
+        if (t1 - t0 < vsync_lo)
+            vsync_lo = t1 - t0;
+        if (t1 - t0 > vsync_hi)
+            vsync_hi = t1 - t0;
+        missed += v1 - v0 - 1;
+    }
+    log_str(&l, "displaytest: ");
+    log_num(&l, PACED);
+    log_str(&l, " flips paced by the vblank: ");
+    log_range(&l, "commit to latch ", commit_lo, commit_hi);
+    log_range(&l, ", vblank to latch ", vsync_lo, vsync_hi);
+    log_str(&l, ", ");
+    log_num(&l, missed);
+    log_str(&l, " vblanks missed");
+    KLog(l.text);
+    return 0;
+}
+
 static int flips(void)
 {
+    int r;
+
     struct buf a, b, c, d;
     uint64_t seq, worst = 0, total = 0, vb0;
     struct logbuf l = { 0 };
@@ -206,6 +275,8 @@ static int flips(void)
         log_num(&l, m->dm_Height);
     }
     KLog(l.text);
+    if ((r = paced(&a, &b, &c)) != 0)
+        return r;
     /* A fourth buffer says we're done (hwdb counts them); shown until
      * hwdb kills us. */
     CHECK(alloc(&d, 16, 16, DISPLAY_XRGB8888) == 0);
