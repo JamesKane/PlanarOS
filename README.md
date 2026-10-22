@@ -86,7 +86,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
 17. [C23 runtime, `libc`, and Commodore V36–V40 libraries](docs/17-c-runtime-and-libraries.md): scaling up `exec.library` (`CreatePool`, `AllocVec`, `RawDoFmt`), `utility.library` (`TagItem`, `Hook`, 64-bit `Span`/`Str` slices), and `dos.library` (`ReadArgs`) to replace PDP-11 `libc` assumptions, with opt-in `lib/clib` and vendored `compiler-rt` 128-bit builtins (proposed).
-18. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers, storage, the Shell), [V5](docs/v5-plan.md) (GPU queue leases, scanout, power, input).
+18. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers, storage, the Shell), [V5](docs/v5-plan.md) (GPU queue leases, scanout, power, input); [V6](docs/v6-plan.md) proposed.
 19. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
 20. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
 21. [Open questions](docs/questions.md): the question register.
@@ -113,4 +113,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V6, foundations ([roadmap](docs/08-roadmap.md#replanned-after-v5)): §17's C runtime and libraries, interface tables and the shared library region, and the supervision the design set asks for (`init`, ports that survive a restart, deadlines, a graceful `STOP`), with the RV2's `dos` stall carried from V5. Then the Workbench in two phases, V7 (windows) and V8 (type and the desktop).
+Next: V6, foundations ([plan](docs/v6-plan.md), proposed): §17's C runtime and libraries, interface tables and the shared library region, and the supervision the design set asks for (`init`, ports that survive a restart, deadlines, a graceful `STOP`), with the RV2's `dos` stall carried from V5. Then the Workbench in two phases, V7 (windows) and V8 (type and the desktop).
