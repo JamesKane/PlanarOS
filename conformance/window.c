@@ -22,6 +22,12 @@
  *    buffer was free cost none), the vblanks the screen missed meanwhile,
  *    and the machine's kernel calls a frame. Then frames presented one at
  *    a time, from PresentWindow to is_DispTime.
+ *    Then PACED frames each presented just after a vblank, of the first
+ *    window and of one the screen's size, timed as displaytest times its
+ *    flips: present to latch, vblank to latch, and the vblanks missed,
+ *    which must be none on a board (v7-plan step 6). PACED_READ of each
+ *    on QEMU, said but not checked: its display composes the planes in
+ *    software as it latches, the whole screen for intuition's plane.
  * 4. Both closed, and the backdrop read back where they were.
  * 5. The mouse and keys, which it asks for ("window: send ..."), as
  *    inputtest does: on QEMU the boot check sends them through QMP.
@@ -70,10 +76,12 @@ void *memset(void *dst, int c, size_t n);
 constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23;     /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FRAMES = 120, TIMED = 10;
+constexpr unsigned PACED = 600, PACED_READ = 30;     /* a board's, 10 s at 60 Hz; QEMU's */
 constexpr uint32_t BACKDROP = 0x182038;     /* intuition's (compose.h's IC_BACKDROP) */
 constexpr uint32_t CHROME = 0x00c0ffee;     /* the model's: a pixel of the chrome, not read; clear, so no pixel drawn */
 constexpr int NO_INPUT = 1000;
 enum : uint64_t { FIRST, STOPPED, KILLED, SURVIVE, SURVIVE_MOUSE = 4 };     /* the argument's low byte */
+constexpr uint64_t LOOK = 1u << 8;          /* hwdb's WINDOW_LOOK: hold the first windows on the screen */
 
 /* The stopped client's window, and the killed one's two, which both ends know. */
 constexpr int32_t HUNG_X = 420, HUNG_Y = 80;
@@ -532,6 +540,94 @@ static int frames(bool readable)
             calls / FRAMES, calls * 100 / FRAMES % 100);
     KPrintF("window: present to latch %lu-%lu us, over %lu frames one at a time", lat_lo / 1000,
             lat_hi / 1000, (uint64_t)TIMED);
+    return 0;
+}
+
+static uint64_t last_vblank(uint64_t *at)
+{
+    uint64_t v;
+
+    do {
+        v = dsync->ds_Vblank;
+        *at = dsync->ds_Time;
+    } while (dsync->ds_Vblank != v);
+    return v;
+}
+
+/* n frames of 'w', each presented whole just after a vblank: when each
+ * latched (is_DispTime, the vblank's ds_Time), and the vblanks missed,
+ * by the vblanks' period over the run. None may be on a board. */
+static int paced(struct Window *w, unsigned n, bool readable, const char *what)
+{
+    static uint64_t late[PACED];        /* vblank to latch */
+    uint64_t present_lo = UINT64_MAX, present_hi = 0, vblank_lo = UINT64_MAX, vblank_hi = 0, missed = 0;
+    uint64_t v_first = 0, t_first = 0, v0 = 0, t0 = 0, period;
+
+    for (unsigned f = 0; f < n; f++) {
+        uint64_t t, t1, until = CurrentTime() + 250 * MS;
+
+        CHECK(IIntuition->WaitSafe(w, CurrentTime() + 1000 * MS) == 0);
+        tick(&w->w_RPort, w->w_Frame + 1);
+        v0 = dsync->ds_Vblank;
+        while (dsync->ds_Vblank == v0)
+            CHECK(WaitAddr(&dsync->ds_Vblank, v0, until) != ERR_TIMEOUT || dsync->ds_Vblank != v0);
+        v0 = last_vblank(&t0);
+        if (f == 0) {
+            v_first = v0;
+            t_first = t0;
+        }
+        t = CurrentTime();
+        CHECK(IIntuition->PresentWindow(w, nullptr, 0) == 0);
+        CHECK(on_screen(w, w->w_Frame));
+        t1 = w->w_Sync->is_DispTime;
+        CHECK(t1 > t0);                 /* latched at a vblank after the present */
+        late[f] = t1 - t0;
+        present_lo = t1 - t < present_lo ? t1 - t : present_lo;
+        present_hi = t1 - t > present_hi ? t1 - t : present_hi;
+        vblank_lo = late[f] < vblank_lo ? late[f] : vblank_lo;
+        vblank_hi = late[f] > vblank_hi ? late[f] : vblank_hi;
+    }
+    CHECK(v0 > v_first);
+    period = (t0 - t_first) / (v0 - v_first);
+    for (unsigned f = 0; f < n; f++) {
+        uint64_t k = (late[f] + period / 2) / period;
+
+        missed += k > 1 ? k - 1 : 0;
+    }
+    KPrintF("window: %lu frames of %s paced by the vblank: present to latch %lu-%lu us, vblank to latch "
+            "%lu-%lu us, %lu vblanks missed",
+            (uint64_t)n, what, present_lo / 1000, present_hi / 1000, vblank_lo / 1000, vblank_hi / 1000, missed);
+    CHECK(readable || missed == 0);     /* QEMU's display composes plane 1 in software as it latches */
+    return 0;
+}
+
+/* The first window's, then one the screen's size, two-buffered, over
+ * everything until it's closed. */
+static int paced_both(bool readable)
+{
+    unsigned n = readable ? PACED_READ : PACED;
+    struct BitMap *fb[2] = { nullptr, nullptr };
+    struct Window wf;
+    int r;
+
+    if ((r = paced(&wa, n, readable, "a 200x120 window")))
+        return r;
+    CHECK((fb[0] = IGfx->AllocBitMap(in.in_Width, in.in_Height, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (fb[1] = IGfx->AllocBitMap(in.in_Width, in.in_Height, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &wf, { WA_Left, 0 }, { WA_Top, 0 }, { WA_Flags, WFLG_BORDERLESS },
+                         { WA_BitMap, (uint64_t)fb[0] }, { WA_BackBitMap, (uint64_t)fb[1] }) == 0);
+    for (unsigned b = 0; b < 2; b++) {
+        struct RastPort rp;
+
+        IGfx->InitRastPort(&rp, fb[b]);
+        picture(&rp, in.in_Width, in.in_Height, 0x5b88c2, "the whole screen");
+    }
+    if ((r = paced(&wf, n, readable, "a window the screen's size")))
+        return r;
+    CHECK(IIntuition->CloseWindow(&wf) == 0);
+    CHECK(IIntuition->WaitSafe(&wa, CurrentTime() + 1000 * MS) == 0);
+    IGfx->FreeBitMap(fb[0]);
+    IGfx->FreeBitMap(fb[1]);
     return 0;
 }
 
@@ -1202,7 +1298,15 @@ int main(uint64_t arg)
     CHECK(in.in_Width >= 640 && in.in_Height >= 480);
     CHECK(display_up(0) == 0);
     CHECK(info(in.in_Call) == 0);
-    if ((r = two_windows(&readable, bm)) || (r = refusals(bm)) || (r = frames(readable)))
+    if ((r = two_windows(&readable, bm)))
+        return r;
+    if (arg & LOOK) {
+        KPrintF("window: look: for 20 s, over a dark navy backdrop (#182038) where the console was, "
+                "a blue window 200x120 at (64, 48) saying \"window a\", a grey one 160x100 at (180, 100) "
+                "over it saying \"window b\", and the pointer at (%ld, %ld)", (int64_t)ptr_x, (int64_t)ptr_y);
+        nap(20000);
+    }
+    if ((r = refusals(bm)) || (r = frames(readable)) || (r = paced_both(readable)))
         return r;
 
     /* 4: closed, and the backdrop where they were; intuition maps their

@@ -2918,18 +2918,23 @@ void selftest_hwdb(void)
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
     uint64_t msi_before = intc_msi_pages();
     struct process *p;
+    bool look;
 
     if (!user_images[0].name) {
         kprintf("V4.3 hwdb skipped: no user programs\n");
         return;
     }
     task_set_signal(0, SIGF_DEAD);
-    /* init, which starts hwdb and ends with its exit (V6 step 7). */
-    if (!(p = process_create_root("init", 5, 1, task_self(), SIGF_DEAD)))
+    /* init, which starts hwdb and ends with its exit (V6 step 7); with
+     * "look", hwdb's (servers/hwdb/server.h's HWDB_LOOK) window test
+     * holds its windows on the screen for someone to look at. */
+    look = bootargs_has("look");
+    if (!(p = process_create_root("init", 5, look ? 1 | 8 : 1, task_self(), SIGF_DEAD)))
         fail("V4.3 hwdb", "process_create failed");
     /* The boards take most of 15 s for the kill test alone, and the GPU's
-     * load test (V5 step 7) 30 s more. */
-    for (uint64_t end = time_now() + time_us(120000000); !atomic_load(&p->dead) && time_now() < end;)
+     * load test (V5 step 7) 30 s more, intuition's paced frames (V7 step 6)
+     * 20 s; "look" holds the screen 20 s. */
+    for (uint64_t end = time_now() + time_us(look ? 180000000 : 150000000); !atomic_load(&p->dead) && time_now() < end;)
         wait_test_dead();
     if (!atomic_load(&p->dead)) {
         kprintf("hwdb: still running after 120 s\n");

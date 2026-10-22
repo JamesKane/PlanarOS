@@ -39,6 +39,8 @@ void *memset(void *dst, int c, size_t n);
 
 /* --- intuition, kept going while it's wanted. --- */
 
+constexpr uint64_t INTUITION_COSTS = 1;   /* servers/intuition/main.c's */
+
 static struct {
     bool wanted;
     Handle proc;
@@ -67,7 +69,9 @@ void intuition_keep(void)
     }
     if (!ik.wanted || hwdb.stopping || ik.proc || hwdb.now < ik.due)
         return;
-    if ((p = CreateProcess("intuition", 0, SIG_DEAD, 0)) < 0) {
+    /* Its costs (v7-plan step 6) said once a test, on a controller. */
+    if ((p = CreateProcess("intuition", hwdb.test && !ik.starts && display_native() ? INTUITION_COSTS : 0,
+                           SIG_DEAD, 0)) < 0) {
         say("hwdb: intuition couldn't be started");
         ik.due = hwdb.now + 1000 * MS;
         return;
@@ -158,6 +162,7 @@ enum : uint8_t { W_START, W_UP, W_RUN, W_COUNTS, W_CUE, W_WITH, W_I_BACK, W_I_FR
 
 constexpr int64_t NO_INPUT = 1000;     /* window.c's: its windows ok, and nobody at the mouse */
 constexpr uint64_t SURVIVE = 3, SURVIVE_MOUSE = 4;  /* window.c's second round, and with the mouse */
+constexpr uint64_t WINDOW_LOOK = 1u << 8;   /* window.c's LOOK: HWDB_LOOK, passed on */
 
 static struct {
     uint8_t step;
@@ -208,7 +213,7 @@ static bool ended(int64_t *code)
 
 static bool start(uint64_t arg)
 {
-    int64_t p = CreateProcess("window", arg, SIG_DEAD, 0);
+    int64_t p = CreateProcess("window", arg | (hwdb.look ? WINDOW_LOOK : 0), SIG_DEAD, 0);
 
     if (p < 0) {
         test_fail("window couldn't be started");

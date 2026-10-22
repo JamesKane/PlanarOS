@@ -53,6 +53,12 @@ enum : uint32_t {
     DISPLAY_READ = 0x104,       /* dm_Set[0]'s dp_X, dp_Y, dm_Width, dm_Height in; dm_Crc out */
 };
 
+/* DisplayMsg.dm_Flags for DISPLAY_ALLOC. CACHED: a buffer the CPU's
+ * caches keep, not NC, where a controller reads past them; its client
+ * cleans what it wrote (drv_dma_clean) before committing it. Where
+ * display composes the screen itself, buffers are cached anyway. */
+constexpr uint32_t DISPLAYA_CACHED = 1u << 0;
+
 /* Formats: 32 bits a pixel, blue in the low byte. */
 enum : uint32_t {
     DISPLAY_XRGB8888 = 1,       /* opaque */
@@ -91,7 +97,7 @@ struct DisplayMsg {
     uint32_t dm_Count;                  /* planes: of the output, or in dm_Set */
     uint32_t dm_Buffers;                /* DISPLAY_INFO: buffers allocated, every client's */
     uint32_t dm_Crc;                    /* DISPLAY_READ */
-    uint32_t dm_Pad;
+    uint32_t dm_Flags;                  /* DISPLAY_ALLOC: DISPLAYA_* */
     union {
         struct DisplayPlaneInfo dm_Plane[DISPLAY_PLANES];   /* DISPLAY_INFO */
         struct DisplayPlane dm_Set[DISPLAY_PLANES];         /* DISPLAY_COMMIT */

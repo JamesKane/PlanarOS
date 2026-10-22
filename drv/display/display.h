@@ -99,7 +99,7 @@ struct dp_out {
 };
 
 /* The services core.c needs (main.c's; test.c's on the host). */
-int64_t dp_alloc(struct dp_out *o, uint64_t size, bool dma, Handle *area, uint64_t *addr);
+int64_t dp_alloc(struct dp_out *o, uint64_t size, bool dma, bool cached, Handle *area, uint64_t *addr);
 void dp_free(Handle area);
 int64_t dp_share(Handle area, Handle task, bool writable);
 void dp_unshare(Handle area, Handle task);

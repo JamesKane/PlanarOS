@@ -95,7 +95,7 @@ bool dp_start(struct dp_out *o, const struct dp_backend *be, bool again)
 
     o->be = be;
     o->refresh_mhz = 0;
-    if (!be->take(o, again) || dp_alloc(o, 4096, false, &o->sync_area, &page) != 0)
+    if (!be->take(o, again) || dp_alloc(o, 4096, false, false, &o->sync_area, &page) != 0)
         return false;
     o->sync = (struct DisplaySync *)page;
     o->measure = o->refresh_mhz == 0;
@@ -129,7 +129,8 @@ static int64_t alloc(struct dp_out *o, unsigned client, struct DisplayMsg *m)
 
     if (m->dm_Width == 0 || m->dm_Height == 0 || m->dm_Width > DP_MAX_SIZE ||
         m->dm_Height > DP_MAX_SIZE ||
-        (m->dm_Format != DISPLAY_XRGB8888 && m->dm_Format != DISPLAY_ARGB8888))
+        (m->dm_Format != DISPLAY_XRGB8888 && m->dm_Format != DISPLAY_ARGB8888) ||
+        m->dm_Flags & ~DISPLAYA_CACHED)
         return ERR_BADARG;
     for (unsigned i = 0; i < DP_BUFFERS && !b; i++)
         if (!o->buf[i].used)
@@ -138,7 +139,7 @@ static int64_t alloc(struct dp_out *o, unsigned client, struct DisplayMsg *m)
         return ERR_FULL;
     stride = (m->dm_Width * 4 + 63) & ~63u;     /* both controllers' lines start 64-aligned */
     size = ((uint64_t)stride * m->dm_Height + 4095) & ~4095ull;
-    if ((e = dp_alloc(o, size, o->be->dma, &area, &addr)) != 0)
+    if ((e = dp_alloc(o, size, o->be->dma, m->dm_Flags & DISPLAYA_CACHED, &area, &addr)) != 0)
         return e;
     if ((e = dp_share(area, m->dm_Task, true)) != 0) {
         dp_free(area);

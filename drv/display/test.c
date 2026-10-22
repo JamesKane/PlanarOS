@@ -42,7 +42,7 @@ static unsigned checks, failures;
 static uint64_t now_ns;
 static unsigned live_areas, shares;
 
-int64_t dp_alloc(struct dp_out *, uint64_t size, bool, Handle *area, uint64_t *addr)
+int64_t dp_alloc(struct dp_out *, uint64_t size, bool, bool, Handle *area, uint64_t *addr)
 {
     void *p = aligned_alloc(4096, size);
 

@@ -245,6 +245,11 @@ static void lines(void)
                     "as the reference draws it");
 }
 
+bool display_native(void)
+{
+    return dt.native;
+}
+
 bool display_test(void)
 {
     struct unit *u;

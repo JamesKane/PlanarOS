@@ -28,11 +28,13 @@ static struct dp_out out;
 static struct drv_dev *fb_dev, *ctl_dev;
 static bool started;
 
-/* A controller reads its planes past the caches; fb.c, the CPU. */
-int64_t dp_alloc(struct dp_out *o, uint64_t size, bool dma, Handle *area, uint64_t *addr)
+/* A controller reads its planes past the caches, so they're NC unless
+ * the client asked for them cached (and cleans what it writes); fb.c's
+ * are read by the CPU. */
+int64_t dp_alloc(struct dp_out *o, uint64_t size, bool dma, bool cached, Handle *area, uint64_t *addr)
 {
     void *at;
-    int64_t h = dma ? AllocDmaArea(drv_lease(drv), size, o->be == &dp_fb ? 0 : AREAF_NC, &at)
+    int64_t h = dma ? AllocDmaArea(drv_lease(drv), size, o->be == &dp_fb || cached ? 0 : AREAF_NC, &at)
                     : AllocArea(size, AREAF_CLEAR, &at);
 
     if (h < 0)

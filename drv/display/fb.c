@@ -92,7 +92,7 @@ static bool take(struct dp_out *o, bool)
         (uint64_t)o->fb_cells[2] * o->height * 4 > o->fb_size)
         return false;
     size = ((uint64_t)o->width * o->height * 4 + 4095) & ~4095ull;
-    if ((e = dp_alloc(o, size, false, &copy_area, &addr)) != 0)
+    if ((e = dp_alloc(o, size, false, false, &copy_area, &addr)) != 0)
         return false;
     c = (volatile uint32_t *)addr;
     for (uint32_t y = 0; y < o->height; y++)

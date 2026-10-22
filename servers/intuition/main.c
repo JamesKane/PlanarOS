@@ -250,7 +250,7 @@ static int64_t display(uint32_t op)
     return e ? e : it.dm->dm_Msg.mn_Error;
 }
 
-static int64_t alloc(uint32_t w, uint32_t h, uint32_t format, uint32_t *id, struct BitMap *bm)
+static int64_t alloc(uint32_t w, uint32_t h, uint32_t format, uint32_t flags, uint32_t *id, struct BitMap *bm)
 {
     int64_t e;
 
@@ -258,6 +258,7 @@ static int64_t alloc(uint32_t w, uint32_t h, uint32_t format, uint32_t *id, stru
     it.dm->dm_Width = w;
     it.dm->dm_Height = h;
     it.dm->dm_Format = format;
+    it.dm->dm_Flags = flags;
     if ((e = display(DISPLAY_ALLOC)) != 0)
         return e;
     *id = it.dm->dm_Buffer;
@@ -312,9 +313,9 @@ static int64_t screen_up(uint64_t deadline)
         !(it.dm->dm_Plane[2].di_Formats & 1u << DISPLAY_ARGB8888))
         return ERR_NOSYS;
     for (unsigned b = 0; b < 2; b++)
-        if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, &it.buf[b], &it.sbm[b])) != 0)
+        if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, 0, &it.buf[b], &it.sbm[b])) != 0)
             return e;
-    if ((e = alloc(POINTER_SIZE, POINTER_SIZE, DISPLAY_ARGB8888, &it.pointer, &it.pbm)) != 0)
+    if ((e = alloc(POINTER_SIZE, POINTER_SIZE, DISPLAY_ARGB8888, 0, &it.pointer, &it.pbm)) != 0)
         return e;
     for (uint32_t y = 0; y < POINTER_SIZE; y++)
         for (uint32_t x = 0; x < POINTER_SIZE; x++)
@@ -1122,7 +1123,127 @@ static void input_events(void)
     }
 }
 
-int main(uint64_t)
+/* --- Costs (v7-plan step 6): hwdb's argument on a board. --- */
+
+constexpr uint64_t INTUITION_COSTS = 1;
+constexpr unsigned COST_FRAMES = 60;
+
+void drv_dma_clean(const void *p, uint64_t n);
+
+/* COST_FRAMES frames of 's' composed into 'b[0]' and 'b[1]' in turn, 'w'
+ * damaged whole or dragged 8 right and 4 down each: the ns a frame, and
+ * the pixels. 'clean': each frame's damage, its bounds, cleaned after,
+ * as a cached screen buffer needs before its commit. */
+static uint64_t cost(struct ic_screen *s, struct BitMap *b, struct ic_window *w, bool drag, bool clean,
+                     uint64_t *px)
+{
+    uint64_t t, p0;
+
+    ic_damage(s, (struct GfxRect){ 0, 0, (int32_t)s->width - 1, (int32_t)s->height - 1 });
+    ic_compose(s, &b[0]);
+    ic_compose(s, &b[1]);
+    t = CurrentTime();
+    p0 = s->painted;
+    for (unsigned f = 0; f < COST_FRAMES; f++) {
+        struct GfxRect r = { INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN };
+        struct ic_damage d[2] = { s->last, s->now };
+        struct BitMap *to = &b[f & 1];
+
+        if (drag)
+            ic_move(s, w, w->x + 8, w->y + 4);
+        else
+            ic_damage_window(s, w, (struct GfxRect){ 0, 0, (int32_t)w->w - 1, (int32_t)w->h - 1 });
+        d[1] = s->now;
+        ic_compose(s, to);
+        if (!clean)
+            continue;
+        for (unsigned k = 0; k < 2; k++)
+            for (unsigned i = 0; i < d[k].n; i++) {
+                r.MinX = d[k].r[i].MinX < r.MinX ? d[k].r[i].MinX : r.MinX;
+                r.MinY = d[k].r[i].MinY < r.MinY ? d[k].r[i].MinY : r.MinY;
+                r.MaxX = d[k].r[i].MaxX > r.MaxX ? d[k].r[i].MaxX : r.MaxX;
+                r.MaxY = d[k].r[i].MaxY > r.MaxY ? d[k].r[i].MaxY : r.MaxY;
+            }
+        for (int32_t y = r.MinY; y <= r.MaxY; y++)
+            drv_dma_clean((uint8_t *)to->bm_BaseAddr + (uint64_t)y * to->bm_BytesPerRow + (uint64_t)r.MinX * 4,
+                          (uint64_t)(r.MaxX - r.MinX + 1) * 4);
+    }
+    *px = (s->painted - p0) / COST_FRAMES;
+    return (CurrentTime() - t) / COST_FRAMES;
+}
+
+/* Composing's costs on display's NC screen buffers and on two cached
+ * ones (decision 3): the whole screen, and a 640x480 window dragged,
+ * each from a bitmap of the screen's size. Then the pointer alone,
+ * which composes nothing: its commit, call to answer. Said, not checked. */
+static void costs(void)
+{
+    static struct ic_screen s;
+    struct ic_window full = { 0 }, small = { 0 };
+    struct BitMap cached[2] = { 0 };
+    struct BitMap *src;
+    struct RastPort rp;
+    uint32_t id[2] = { 0 };
+    uint64_t c[4], px[4], commit = 0, t;
+    bool ok = true;
+
+    if (!(src = it.gfx->AllocBitMap(it.width, it.height, PIXFMT_XRGB8888, 0, nullptr))) {
+        say("intuition: costs: no bitmap");
+        return;
+    }
+    it.gfx->InitRastPort(&rp, src);
+    for (uint32_t y = 0; y < it.height; y += 8) {
+        rp.rp_FgPen = 0xff000000 | y * 0x10203u;
+        it.gfx->RectFill(&rp, 0, (int32_t)y, (int32_t)it.width - 1, (int32_t)y + 7);
+    }
+    for (unsigned b = 0; b < 2; b++)
+        ok &= alloc(it.width, it.height, DISPLAY_XRGB8888, DISPLAYA_CACHED, &id[b], &cached[b]) == 0;
+    full = (struct ic_window){ .x = 0, .y = 0, .w = it.width, .h = it.height, .nparts = 1,
+                               .part[0] = { { 0, 0, (int32_t)it.width - 1, (int32_t)it.height - 1 }, src, 0, 0 } };
+    small = (struct ic_window){ .w = 640, .h = 480, .nparts = 1, .part[0] = { { 0, 0, 639, 479 }, src, 0, 0 } };
+    for (unsigned k = 0; ok && k < 4; k++) {
+        struct ic_window *w = k & 2 ? &small : &full;
+
+        ic_init(&s, it.gfx, it.width, it.height);
+        small.x = small.y = 0;
+        ic_add(&s, w);
+        c[k] = cost(&s, k & 1 ? cached : it.sbm, w, k & 2, k & 1, &px[k]);
+    }
+    for (unsigned b = 0; b < 2; b++)
+        if (id[b]) {
+            memset(it.dm, 0, sizeof *it.dm);
+            it.dm->dm_Buffer = id[b];
+            display(DISPLAY_FREE);
+            ReleaseArea(cached[b].bm_BaseAddr);
+        }
+    it.gfx->FreeBitMap(src);
+    for (unsigned i = 0; ok && i < 10; i++) {
+        uint64_t seq;
+
+        memset(it.dm, 0, sizeof *it.dm);
+        it.dm->dm_Set[0] = (struct DisplayPlane){ 2, it.pointer, it.px + (int32_t)i * 4, it.py };
+        it.dm->dm_Count = 1;
+        t = CurrentTime();
+        if (display(DISPLAY_COMMIT) != 0) {
+            ok = false;
+            break;
+        }
+        commit += CurrentTime() - t;
+        for (seq = it.dm->dm_Seq; it.ds->ds_Disp < seq;)
+            WaitAddr(&it.ds->ds_Disp, it.ds->ds_Disp, CurrentTime() + 100 * MS);
+    }
+    if (!ok) {
+        say("intuition: costs: display wouldn't give cached buffers, or a commit");
+        return;
+    }
+    KPrintF("intuition: costs, %lu frames each: the whole screen %lu us into NC, %lu us into cached and "
+            "cleaned", (uint64_t)COST_FRAMES, c[0] / 1000, c[1] / 1000);
+    KPrintF("intuition: costs: a 640x480 window dragged %lu us into NC, %lu us cached and cleaned (%lu "
+            "pixels a frame); the pointer alone composes nothing, its commit %lu us",
+            c[2] / 1000, c[3] / 1000, px[2], commit / 10 / 1000);
+}
+
+int main(uint64_t arg)
 {
     struct Library *lib = IExec->OpenLibrary("gfx.library", 7);
     int64_t h;
@@ -1143,6 +1264,8 @@ int main(uint64_t)
         return 2;
     }
     input_up(CurrentTime() + 1000 * MS);
+    if (arg & INTUITION_COSTS)
+        costs();
     if ((h = CreatePort("intuition", SIG_ACCEPT)) < 0) {
         say("intuition: \"intuition\" couldn't be published");
         return 1;
