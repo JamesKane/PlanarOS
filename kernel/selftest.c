@@ -135,7 +135,9 @@ void selftest_pmm(void)
         if (pmm_alloc_contig(largest + 1))
             fail("V1.1 pmm", "a run longer than the largest was found");
         steps = pmm_contig_steps() - steps;
-        if (steps > pmm_total() / 16)
+        /* At most a run of each kind a word: a page a step would be one
+         * a free page, more than this wherever most of RAM is free. */
+        if (steps > pmm_span_pages() / 32 + 64)
             fail("V1.1 pmm", "the contiguous scan went a page at a time");
         kprintf("V1.1 pmm ok: %llu pages (%llu MiB) managed, %llu free, largest run %llu, "
                 "scanned for one longer in %llu steps\n",

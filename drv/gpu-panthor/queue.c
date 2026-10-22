@@ -17,6 +17,7 @@
  */
 #include <stddef.h>
 
+#include <planar/devices/gpu.h>
 #include <planar/lease.h>
 #include <planar/syscalls.h>
 
@@ -203,7 +204,9 @@ int64_t queue_start(struct drv *d, struct client *c, uint64_t ring, uint64_t siz
     gi->config = s + 1;
     gi->suspend_buf = suspend ? sl->suspend_va : 0;
     gi->protm_suspend_buf = 0;
-    gi->ack_irq_mask = ~0u;
+    /* Its sync updates interrupt only while someone sleeps on the sync
+     * object (queue_arm): a client that spins costs the server nothing. */
+    gi->ack_irq_mask = ~CSG_SYNC_UPDATE;
     gi->doorbell_req = ((csg_out(s)->doorbell_ack ^ 1u) & 1u) | (gi->doorbell_req & ~1u);
     if (!csg_ask(s, CSG_STATE_START | ((csg_out(s)->ack ^ CSG_ENDPOINT_CONFIG) & CSG_ENDPOINT_CONFIG),
                  CSG_STATE_MASK | CSG_ENDPOINT_CONFIG)) {
@@ -239,6 +242,17 @@ void queue_stop(struct drv *d, struct client *c)
     slot_free(d, s);
 }
 
+/* Someone will sleep on the sync object until it reaches 'seqno': its
+ * group's sync updates interrupt until then. One already there needs
+ * nothing: the sleeper looks before it sleeps. */
+void queue_arm(struct client *c, uint64_t seqno)
+{
+    if (c->slot < 0 || !c->sync || ((volatile struct GpuSync *)c->sync)->gs_Seqno >= seqno)
+        return;
+    c->armed = seqno;
+    csg_in((unsigned)c->slot)->ack_irq_mask |= CSG_SYNC_UPDATE;
+}
+
 /* --- The job line: the firmware's events. --- */
 
 static void csg_events(unsigned s)
@@ -272,8 +286,13 @@ static void csg_events(unsigned s)
         c->faults++;
         say("group slot ", s, 10, " made no progress");
     }
-    if (events & CSG_SYNC_UPDATE && c && c->sync)
+    if (events & CSG_SYNC_UPDATE && c && c->sync && c->armed) {
         WakeAddr((void *)c->sync, ~0u);
+        if (((volatile struct GpuSync *)c->sync)->gs_Seqno >= c->armed) {
+            c->armed = 0;
+            in->ack_irq_mask &= ~CSG_SYNC_UPDATE;
+        }
+    }
     gpu.gin->doorbell_req = ((gpu.gout->doorbell_ack ^ 1u << s) & 1u << s) |
                             (gpu.gin->doorbell_req & ~(1u << s));
     fw_ring(0);

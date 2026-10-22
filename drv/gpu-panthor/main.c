@@ -304,6 +304,22 @@ static bool mapped(const struct client *c, uint64_t addr, uint64_t size)
     return false;
 }
 
+/* A held GPU_EVENT answered, if a fault has come since the last. */
+static void tell(struct drv *d, struct client *c)
+{
+    struct GpuMsg *m = (struct GpuMsg *)c->event;
+
+    if (!m || c->faults == c->told)
+        return;
+    m->gm_Fault = c->fault;
+    m->gm_FaultAddress = c->fault_addr;
+    m->gm_Faults = c->faults;
+    m->gm_Msg.mn_Error = 0;
+    c->told = c->faults;
+    c->event = nullptr;
+    drv_reply(d, c->event_ci, &m->gm_Msg);
+}
+
 static void message(struct drv *d, struct drv_dev *, unsigned ci, struct Message *msg)
 {
     struct GpuMsg *m = (struct GpuMsg *)msg;
@@ -371,6 +387,18 @@ static void message(struct drv *d, struct drv_dev *, unsigned ci, struct Message
         m->gm_FaultAddress = c->fault_addr;
         m->gm_Faults = c->faults;
         break;
+    case GPU_WAIT:
+        queue_arm(c, m->gm_Seqno);
+        break;
+    case GPU_EVENT:
+        if (c->event) {
+            e = ERR_EXISTS;
+            break;
+        }
+        c->event = msg;                 /* answered by tell(), at a fault */
+        c->event_ci = ci;
+        tell(d, c);
+        return;
     default:
         e = ERR_BADARG;
     }
@@ -384,6 +412,10 @@ static void gone(struct drv *d, struct drv_dev *, unsigned ci)
 
     if (!c || !c->open)
         return;
+    if (c->event) {                     /* answered, to nobody: the library's count */
+        c->event->mn_Error = (int32_t)ERR_PORT_DIED;
+        drv_reply(d, c->event_ci, c->event);
+    }
     queue_stop(d, c);                   /* first: nothing runs on its memory */
     unmap_all(c);
     vm_free(&c->vm);
@@ -416,10 +448,13 @@ static bool poll(struct drv *d)
         fw_ping();
         gpu.next_ping = CurrentTime() + PING;
     }
-    /* A queue that faulted is stopped: its group may be stuck. */
+    /* A queue that faulted is stopped: its group may be stuck. Its
+     * client hears of it, if it's listening. */
     for (unsigned i = 0; i < GPU_CLIENTS; i++) {
         struct client *c = &gpu.clients[i];
 
+        if (c->open)
+            tell(d, c);
         if (c->open && c->fault && c->slot >= 0)
             queue_stop(d, c);
     }

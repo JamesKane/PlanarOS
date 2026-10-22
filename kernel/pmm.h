@@ -49,6 +49,8 @@ unsigned pmm_bad_frees(void);
 
 /* Steps pmm_alloc_contig's scan has taken (a run of the bitmap each). */
 uint64_t pmm_contig_steps(void);
+/* Pages the bitmap covers, holes between RAM's ranges included. */
+uint64_t pmm_span_pages(void);
 uint64_t pmm_free_pages(void);
 
 /* The longest run of free pages: how fragmented memory is (VQ3). */

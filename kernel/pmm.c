@@ -197,6 +197,11 @@ uint64_t pmm_contig_steps(void)
     return contig_steps;
 }
 
+uint64_t pmm_span_pages(void)
+{
+    return npages;
+}
+
 /*
  * First fit, a run of the bitmap at a time: a taken run or a free one is
  * one step, found with ctz, not one step a page, so a fragmented span

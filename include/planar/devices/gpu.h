@@ -8,9 +8,16 @@
  * doorbell page of its own. To run work it writes commands into the
  * ring, moves gq_Insert on, and writes 1 to its doorbell: no kernel
  * call and no message. The work says when it's done by adding to a
- * sync object in the client's memory, which the client spins on or
- * waits on with WaitAddr: the server wakes that word when the GPU says
- * a sync object moved.
+ * sync object in the client's memory, which the client spins on, or
+ * waits on with WaitAddr after GPU_WAIT: the server wakes that word when
+ * the GPU says it moved, until it reaches gm_Seqno. Without GPU_WAIT the
+ * server isn't told of its updates at all, so a client that spins costs
+ * it no interrupt (V6 step 8). To sleep: GPU_WAIT, then look at
+ * gs_Seqno, then WaitAddr on what was there.
+ *
+ * A fault in the client's queue is a message: GPU_EVENT, left with the
+ * server, is answered when one comes (V6 step 8). GPU_STATUS still says
+ * the last.
  *
  * A GPU with no doorbell for the app (the RV2's Rogue: gm_Doorbell is
  * 0) is a server queue (v5-plan step 6): the client asks GPU_KICK
@@ -46,6 +53,8 @@ enum : uint32_t {
     GPU_QUEUE = 4,          /* gm_Ring, gm_RingSize, gm_Sync in; gm_Input, gm_Output, gm_Doorbell out */
     GPU_STATUS = 5,         /* gm_Fault, gm_Faults, gm_Jobs out: the client's queue */
     GPU_KICK = 6,           /* no doorbell: run what's in the ring up to gq_Insert */
+    GPU_WAIT = 7,           /* gm_Seqno: wake the sync object as it moves, until it gets there */
+    GPU_EVENT = 8,          /* answered when the queue faults: gm_Fault, gm_FaultAddress, gm_Faults */
 };
 
 /* GpuMsg.gm_Kind: what the ring's commands are. */
@@ -76,6 +85,7 @@ struct GpuMsg {
     uint32_t gm_Faults;             /* how many */
     uint32_t gm_Regs;               /* GPU_OPEN: a stream's registers; the last 4 are the app's */
     uint64_t gm_Device;             /* GPU_MAP: where the GPU sees the Area */
+    uint64_t gm_Seqno;              /* GPU_WAIT: the value the sleeper waits for */
 };
 
 /* The pages GPU_QUEUE gives: the CSF's ring-buffer interfaces. */

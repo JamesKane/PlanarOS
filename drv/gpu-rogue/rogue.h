@@ -154,6 +154,9 @@ struct client {
     uint32_t seen;                  /* its value then */
     uint32_t fault, faults;
     uint64_t fault_addr;
+    struct Message *event;          /* GPU_EVENT, held until a context reset */
+    unsigned event_ci;              /* its client number, for drv_reply */
+    uint32_t told;                  /* faults GPU_EVENT has answered for */
 };
 
 struct gpu {

@@ -162,9 +162,13 @@ struct client {
     struct vm vm;
     struct map maps[GPU_MAPS];
     int slot;                       /* its group's; -1 none */
-    uint64_t sync;                  /* woken at each sync update */
+    uint64_t sync;                  /* woken at its updates while armed */
+    uint64_t armed;                 /* GPU_WAIT's seqno: woken until it's there; 0 not */
     uint32_t fault, faults;
     uint64_t fault_addr;
+    struct Message *event;          /* GPU_EVENT, held until a fault */
+    unsigned event_ci;              /* its client number, for drv_reply */
+    uint32_t told;                  /* faults GPU_EVENT has answered for */
 };
 
 /* A group slot (queue.c), with its one stream. */
@@ -242,6 +246,7 @@ void mmu_interrupt(void);
 int64_t queue_start(struct drv *d, struct client *c, uint64_t ring, uint64_t size,
                     uint64_t *input, uint64_t *output, uint64_t *doorbell);
 void queue_stop(struct drv *d, struct client *c);
+void queue_arm(struct client *c, uint64_t seqno);   /* GPU_WAIT */
 void queue_events(void);                          /* the job line */
 
 #endif /* DRV_GPU_PANTHOR_H */

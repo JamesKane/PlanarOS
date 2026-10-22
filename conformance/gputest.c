@@ -12,7 +12,9 @@
  *    submit-to-update time and the kernel calls made meanwhile,
  *    machine-wide (QuerySystem), then JOBS more, spun on, with the
  *    calls, switches and crossings each cost (step 7), then WAITED each
- *    waited for with WaitAddr, which the server wakes.
+ *    waited for with WaitAddr, which the server wakes once told by
+ *    GPU_WAIT. Then, on a CSF, a job that faults, heard of as GPU_EVENT's
+ *    answer (V6 step 8).
  * 1: jobs, without end: hwdb kills it with work in flight.
  * 2: a round, then it waits for the server to die (hwdb kills it),
  *    connects to the restarted one and does a second round.
@@ -192,17 +194,13 @@ static void submit_rogue(void)
 }
 
 /* One job written and rung: add 1 to the sync object. */
-static void submit(void)
+/* A job adding 1 at 'at': the sync object, or for the fault, nothing. */
+static void submit_at(uint64_t at)
 {
     uint64_t a = regs - 4, v = regs - 2;        /* the app's registers, pairs */
     uint64_t *j = &ring[qin->gq_Insert % RING / 8];
 
-    if (kind == GPU_ROGUE) {
-        submit_rogue();
-        return;
-    }
-
-    j[0] = 1ull << 56 | a << 48 | (uint64_t)sync;               /* MOV48 ra, sync */
+    j[0] = 1ull << 56 | a << 48 | at;                           /* MOV48 ra, at */
     j[1] = 1ull << 56 | v << 48 | 1;                            /* MOV48 rv, 1 */
     j[2] = 51ull << 56 | a << 40 | v << 32 | 1;                 /* SYNC_ADD64 [ra], rv */
     j[3] = 47ull << 56;                                         /* ERROR_BARRIER */
@@ -212,6 +210,14 @@ static void submit(void)
     qin->gq_Insert += JOB * 8;
     drv_io_barrier();
     *doorbell = 1;
+}
+
+static void submit(void)
+{
+    if (kind == GPU_ROGUE)
+        submit_rogue();
+    else
+        submit_at((uint64_t)sync);
     seqno++;
 }
 
@@ -278,6 +284,10 @@ static int round_(void)
             "%lu.%lu crossings and %lu.%lu interrupts",
             t4[0] / 10, t4[0] % 10, t4[1] / 10, t4[1] % 10,
             t4[2] / 10, t4[2] % 10, t4[3] / 10, t4[3] % 10);
+    /* Spun on, not told of by GPU_WAIT: the CSF's server takes no
+     * interrupt for them (V6 step 8; it took one a job before). Rogue's
+     * firmware interrupts at every update. */
+    CHECK(kind != GPU_CSF || t4[3] < 5);
     /* The firmware writes how far it has read when it gets to it, not at
      * each job: it has moved on, and never past what was written. */
     for (uint64_t until = CurrentTime() + 100 * MS;
@@ -289,10 +299,13 @@ static int round_(void)
                 (uint64_t)qout->gq_Extract, (uint64_t)qin->gq_Insert);
     }
 
-    /* WAITED waited for: the server wakes the word. */
+    /* WAITED waited for: told it will be (GPU_WAIT), the server wakes the
+     * word; spun on, above, it wasn't told and took no interrupt. */
     for (unsigned i = 0; i < WAITED; i++) {
         t0 = CurrentTime();
         submit();
+        m->gm_Seqno = seqno;
+        CHECK(ask(GPU_WAIT) == 0);
         while (sync->gs_Seqno != seqno && CurrentTime() < t0 + 1000 * MS)
             WaitAddr(&sync->gs_Seqno, seqno - 1, t0 + 1000 * MS);
         t1 = CurrentTime();
@@ -307,6 +320,32 @@ static int round_(void)
             "%lu us each (worst %lu us)",
             (uint64_t)JOBS, (uint64_t)(total / 1000), (uint64_t)(total / JOBS / 1000),
             (uint64_t)WAITED, (uint64_t)(waited / WAITED / 1000), (uint64_t)(worst / 1000));
+    return 0;
+}
+
+/* On a CSF, a job that writes where nothing is mapped: the fault must
+ * come as GPU_EVENT's answer, held by the server until it does, or at
+ * once if it came first (V6 step 8). The server stops the queue after. */
+static int fault(void)
+{
+    constexpr uint64_t NOWHERE = 0x10000;   /* in the client's GPU space, unmapped */
+    struct GpuMsg *ev;
+    uint64_t t0;
+
+    if (kind != GPU_CSF)
+        return 0;
+    CHECK((ev = AllocMsg(&mp, sizeof *ev)));
+    memset(ev, 0, sizeof *ev);
+    ev->gm_Msg.mn_Length = sizeof *ev;
+    ev->gm_Op = GPU_EVENT;
+    t0 = CurrentTime();
+    submit_at(NOWHERE);
+    CHECK(DoMsgUntil(&mp, &ev->gm_Msg, t0 + 2000 * MS) == 0);
+    CHECK(ev->gm_Msg.mn_Error == 0 && ev->gm_Fault != 0);
+    CHECK(ev->gm_FaultAddress >> 12 == NOWHERE >> 12 && ev->gm_Faults == 1);
+    KPrintF("gputest: a job's fault at %#lx came as a message in %lu us (status %#lx)",
+            ev->gm_FaultAddress, (uint64_t)((CurrentTime() - t0) / 1000),
+            (uint64_t)ev->gm_Fault);
     return 0;
 }
 
@@ -377,6 +416,8 @@ int main(uint64_t mode)
         }
     }
     if ((r = round_()) != 0)
+        return r;
+    if (mode == 0 && (r = fault()) != 0)
         return r;
     if (mode == 2) {
         /* The server dies under us: hwdb kills it. */

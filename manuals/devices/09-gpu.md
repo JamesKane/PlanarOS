@@ -4,7 +4,7 @@
 
 ## What it's for
 
-Work for a coprocessor, run from a queue the app holds itself ([docs §5.1](../../docs/05-coprocessors.md)). A GPU server publishes `gpu.0`. A client lends it memory, takes a queue, and from then on submits work with no kernel call and no message: it writes commands into its ring, moves the ring's insert pointer on, and writes 1 to a doorbell page of its own. The GPU says it's done by adding to a **sync object** in the client's memory, which the client spins on or waits on with `WaitAddr`.
+Work for a coprocessor, run from a queue the app holds itself ([docs §5.1](../../docs/05-coprocessors.md)). A GPU server publishes `gpu.0`. A client lends it memory, takes a queue, and from then on submits work with no kernel call and no message: it writes commands into its ring, moves the ring's insert pointer on, and writes 1 to a doorbell page of its own. The GPU says it's done by adding to a **sync object** in the client's memory, which the client spins on, or waits on with `WaitAddr` once it has told the server it will (`GPU_WAIT`).
 
 Two servers give it:
 - `gpu-panthor` (`drv/gpu-panthor`) is the CIX's: its Mali-G720, through the CSF (command stream frontend) firmware. Linux's panthor writes the ring and rings the doorbell for every job, in the kernel; Planar gives the app the queue.
@@ -25,8 +25,8 @@ V5's jobs are the smallest each GPU can be seen to run: add 1 to a sync object (
   - `gm_Doorbell`: the page to write 1 to; 0 on Rogue, where the client asks `GPU_KICK` instead.
 - **The ring** is the client's own memory, in a mapped Area: a power of two from 4 KiB to 1 MiB, aligned to its size (an Area is only page aligned: allocate twice the size and align inside it). On the CSF, commands are 64-bit CSF instructions, a 64-byte line at a time. On Rogue they're client CCB commands, each a 40-byte header (type, then size) and its data, 8-byte aligned; one never runs past the ring's end, so where it would, a `PADDING` command fills to the end first.
 - **Registers.** A CSF stream has `gm_Regs` work registers (from `GPU_OPEN`); the last 4 are free for the app's instructions, as panthor uses them. Rogue has none (0).
-- **Waking.** `gm_Sync` names a sync object: when the firmware says a sync object of the queue moved (`CSG_SYNC_UPDATE` on the CSF; on Rogue, its interrupt after an update), the server wakes that word with `WakeAddr`. Spinning needs no server at all. Rogue's update (a UFO) writes 32 bits, so there it's `gs_Seqno`'s low half that moves.
-- **Faults.** An MMU fault, or a stream's fault or fatal error, stops the client's queue (its group terminated) and is kept: `GPU_STATUS` gives the last (`gm_Fault`, `gm_FaultAddress`) and the count. On Rogue, the firmware's reset of a context does the same. The firmware's own faults give the GPU up until the server restarts.
+- **Waking.** `gm_Sync` names a sync object. A client that will sleep on it asks `GPU_WAIT` first, with the value it waits for in `gm_Seqno`, then looks at `gs_Seqno`, then calls `WaitAddr` on what it saw. Until the object gets there, each time the firmware says it moved, the server wakes that word with `WakeAddr`. On the CSF the group's `CSG_SYNC_UPDATE` interrupts only then: a client that spins, and never asks, costs the server no interrupt and no call (V6 step 8). Rogue's firmware interrupts after every update, so there `GPU_WAIT` changes nothing and the word is always woken. Rogue's update (a UFO) writes 32 bits, so there it's `gs_Seqno`'s low half that moves.
+- **Faults.** An MMU fault, or a stream's fault or fatal error, stops the client's queue (its group terminated) and is kept: `GPU_STATUS` gives the last (`gm_Fault`, `gm_FaultAddress`) and the count. A client hears of one as a message by leaving `GPU_EVENT` with the server: it's answered with the same three fields when a fault comes, or at once if one has come since the last answer (V6 step 8). Wait for it with `DoMsgUntil`, or keep it in flight beside other requests; one at a time (`ERR_EXISTS`). On Rogue, the firmware's reset of a context counts as a fault. The firmware's own faults give the GPU up until the server restarts.
 - **Going.** When the client's connection goes, dead or not, its group is terminated (on Rogue, its context cleaned up by the firmware, retried while it's busy), its address space or heap mappings taken down, and what it lent released, in that order. When the server dies, hwdb stops the GPU (the CSF: the MCU off and a soft reset; Rogue: a soft reset, which holds the MIPS) before the server's DMA Areas, and what clients lent it, leave quarantine.
 
 ## Using it
@@ -78,9 +78,18 @@ in->gq_Insert += 64;
 drv_io_barrier();
 *(volatile uint32_t *)m->gm_Doorbell = 1;
 while (((struct GpuSync *)sync)->gs_Seqno != seqno)
-    ;                                           /* or WaitAddr on it */
+    ;                                           /* or sleep, below */
 ```
 The encodings are panthor's job epilogue (`panthor_sched.c`, `prepare_job_instrs`).
+
+To sleep instead of spinning, tell the server, then look, then wait on what was there:
+```c
+m->gm_Op = GPU_WAIT;
+m->gm_Seqno = seqno;
+DoMsg(&mp, &m->gm_Msg);
+for (uint64_t seen; (seen = sync->gs_Seqno) != seqno;)
+    WaitAddr(&sync->gs_Seqno, seen, deadline);
+```
 
 On Rogue (`gm_Kind == GPU_ROGUE`), the same job is a NULL command and an `UPDATE` of the sync object, whose UFO names it where the GPU sees it (`gm_Device` from its `GPU_MAP`), then a kick:
 ```c
@@ -139,8 +148,9 @@ A kick is a kernel CCB `KICK` with the ring's write offset, then a write to `MTS
 
 **The CIX** (2026-10-21): `GPU_ID 0xc8700008` (arch 12), 10 shader cores (`0x550555`), 8 address spaces, 48-bit VA. The firmware's global interface is version 1.1, with 8 group slots: 7 queues for clients. Measured by `gputest`, three rounds a boot:
 - the first job, doorbell to the sync object's update: 25–50 µs, with 2 kernel calls made meanwhile machine-wide, both the test's own (`QuerySystem` and `CurrentTime`);
-- 1,000 jobs, each spun on: about 11 µs each. None makes a kernel call on its path, but each costs, machine-wide, about 6 kernel calls, 2 crossings and 1 interrupt off it: the server takes the firmware's sync update to wake the word, whether anyone waits on it or not;
-- 100 jobs waited for with `WaitAddr`, woken by the server: 22–23 µs each, 25 µs at worst (step 5's one job: 16 µs);
+- 1,000 jobs, each spun on: 8 µs each (V6 step 8), and machine-wide 0.1 kernel calls and no interrupt a job. Before `GPU_WAIT` (V5) they took 11 µs, and each cost about 6 kernel calls, 2 crossings and 1 interrupt off its path: the server took every sync update, whether anyone waited or not;
+- 100 jobs waited for with `GPU_WAIT` and `WaitAddr`, woken by the server: 21–23 µs each, 34 µs at worst (step 5's one job: 16 µs);
+- a job that writes where nothing is mapped: the fault comes as `GPU_EVENT`'s answer about 1 ms after the doorbell;
 - under load (the kill test's `T_LOAD`), 2,315,511 jobs in 30 s, with at most 60 µs between two while display, input, power and another GPU client were killed, and going on after `gpu-panthor` was.
 
 **QEMU** has no GPU: the test says "not exercised".
