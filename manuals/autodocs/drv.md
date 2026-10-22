@@ -1,6 +1,6 @@
 # drv: drv.library
 
-*Checked against V4, with V5 step 2's additions (the `gone` callback, `drv_publish_as`, devices with no registers) step 3's (two ports a device, `DRVF_AGAIN`), step 4's (`drv_io_barrier`) and step 5's (`every_line`).*
+*Checked against V5.*
 
 What a driver links to do its job, in alphabetical order. The header is `planar/drv.h`; the code is `lib/drv/drv.c`, linked into every program under `drv/` (`mk/user.mk`). None is a kernel call. How a driver is written with them is [Devices ch. 1](../devices/01-drivers.md).
 

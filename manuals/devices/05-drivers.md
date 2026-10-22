@@ -1,6 +1,6 @@
 # The drivers
 
-*Checked against V4; display against V5 step 3, xhci against step 4.*
+*Checked against V5.*
 
 The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`). Their match tables are in `servers/hwdb/drivers.c`; their stop methods in `servers/hwdb/server.c`.
 
@@ -13,6 +13,9 @@ The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`
 | [virtio-mmio](#virtio-mmio) | `virtio,mmio`, `LNRO0005` | `rng.N` | Its line | Status register to 0 |
 | [rtc-pl031](#rtcs), [rtc-goldfish](#rtcs) | `arm,pl031`, `ARMH0031`; `google,goldfish-rtc` | `rtc.N` | None | None needed |
 | [xhci](#xhci) | `pciclass,0c0330`, `ky,x1-dwc3`, `CIXH2031` | None: a client of `input` | Its line or MSI-X, else polled | USBCMD.R/S to 0, until halted |
+| [power](#power) | `ky,x1-pm-domain`, `ky,x1-ccu`, `ky,x1-reset`, `CIXHA004`, `planar,power-model` | `power` | SCMI's mailbox, else none | None needed: it keeps no DMA |
+| [gpu-panthor](#gpu-panthor) | `CIXH5000` | `gpu.0` | The job's, MMU's and GPU's lines | The MCU off and a soft reset, unless unpowered or in reset |
+| [gpu-rogue](#gpu-rogue) | `img,rgx` (a quirk adds the node) | `gpu.0` | Its line (75) | A soft reset of everything, the MIPS with it |
 
 ## nvme
 
@@ -39,6 +42,18 @@ Its stop method is in `servers/hwdb/display.c`, since a reset would blank the sc
 ## xhci
 
 `drv/xhci`: USB host controllers (xHCI 1.2), their hubs, and the boot keyboards and mice behind them, whose reports it sends to `input` ([chapter 7](07-input.md)). It publishes nothing. QEMU's is found by `pci`; the K1's DWC3 it makes a host first, with its USB 2 PHY; the CIX's ten UEFI left in host mode. Its stop method, in `servers/hwdb/input.c`, halts each controller.
+
+## power
+
+`drv/power`: the clocks, resets and power domains, on the K1 (its APMU and PMU) and the CIX (SCMI to the system control processor, and power domains through TF-A), and QEMU's model in hwdb's test mode. hwdb votes for a driver's resources before it grants the lease, and drops the vote only after the driver's stop method has run. A restarted `power` keeps on what it finds on ([chapter 8](08-power.md)).
+
+## gpu-panthor
+
+`drv/gpu-panthor`: the CIX's Mali-G720, through its CSF firmware (`DEVS/mali_csffw.bin`, read through `dos`). It gives each client a CSF group pinned to a slot, with the slot's doorbell mapped into the client: a hardware queue ([chapter 9](09-gpu.md)). Its stop method, in `servers/hwdb/gpu.c`, touches no register of a GPU that isn't powered or is held in reset: the access would wedge the board.
+
+## gpu-rogue
+
+`drv/gpu-rogue`: the RV2's BXE-2-32, a Rogue core with a MIPS firmware processor, running mainline's open firmware (`DEVS/rogue.fw`). U-Boot's tree has no node for it, so a quirk (`HW_Q_NODE`) adds one. Each client's ring is a firmware context's client CCB, and `GPU_KICK` asks the server to kick it: a server queue ([chapter 9](09-gpu.md)). Its stop method, in `servers/hwdb/gpu.c`, puts the GPU back in soft reset, which holds the MIPS.
 
 ## virtio-mmio
 

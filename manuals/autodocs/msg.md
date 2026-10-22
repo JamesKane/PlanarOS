@@ -1,6 +1,6 @@
 # exec: messages (`lib/exec`)
 
-*Checked against V4.*
+*Checked against V5.*
 
 Exec's message-port calls, built on connections by `lib/exec/msg.c`, which is linked into every user program. The header is `planar/msg.h`. These are library functions: they trap only where an entry says so. The concepts are in [Libraries ch. 4](../libraries/04-messages.md).
 

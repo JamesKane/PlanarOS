@@ -14,14 +14,14 @@ The RKM was split into volumes by what the reader is doing. Planar keeps the spl
 
 | Volume | RKM equivalent | What it covers | State |
 |---|---|---|---|
-| [**Libraries**](libraries/README.md) | *Libraries* | How to program Planar. Concepts, worked examples, rules. Exec first: tasks, signals, Areas, ports and messages. | Exec chapters started |
-| [**Devices**](devices/README.md) | *Devices* | Drivers as processes, hwdb, and the classes: block, console; PCI; each driver. | Written (V4) |
-| [**Autodocs**](autodocs/README.md) | *Includes and Autodocs* | One entry per call, in the RKM's NAME / SYNOPSIS / FUNCTION / … format. The reference, not the tutorial. | Every call documented (V4) |
+| [**Libraries**](libraries/README.md) | *Libraries* | How to program Planar. Concepts, worked examples, rules. Exec first: tasks, signals, Areas, ports and messages; then futexes and queue leases. | Exec chapters and queue leases written (V5) |
+| [**Devices**](devices/README.md) | *Devices* | Drivers as processes, hwdb, and the classes: block, console, input, power, GPU, display; PCI; each driver. | Written (V5) |
+| [**Autodocs**](autodocs/README.md) | *Includes and Autodocs* | One entry per call, in the RKM's NAME / SYNOPSIS / FUNCTION / … format. The reference, not the tutorial. | Every call documented (V5) |
 | [**Includes**](includes/README.md) | *Includes and Autodocs* | Each public header in `include/planar/`: its structures, constants and ABI promises. | Index and ABI rules |
 | [**Hardware**](hardware/README.md) | *Hardware Reference Manual* | The machines Planar runs on, and the `arch_*`/`plat_*` contract a port implements. | Outline only |
-| [**DOS**](dos/README.md) | *AmigaDOS Manual* | Volumes, paths and files, programs on disk, the Shell and its commands. | Written (V4) |
+| [**DOS**](dos/README.md) | *AmigaDOS Manual* | Volumes, paths and files, programs on disk, the Shell and its commands. | Written (V5) |
 
-A *User Interface Style Guide* comes with a windowing system (V5 and later).
+A *User Interface Style Guide* comes with a windowing system (V6 and later).
 
 ## Reading order
 

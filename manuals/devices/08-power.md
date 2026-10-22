@@ -1,6 +1,6 @@
 # The power class
 
-*Checked against V5 step 2; the K1's `"usb"` set against step 4.*
+*Checked against V5.*
 
 ## What it's for
 

@@ -1,6 +1,6 @@
 # Drivers: hwdb, leases, drv.library, supervision
 
-*Checked against V4.*
+*Checked against V5.*
 
 ## What it's for
 
@@ -66,14 +66,16 @@ A class that moves real data uses `message`, so requests can be outstanding at o
 
 hwdb sees every death. The teardown is the kernel's and hwdb's, never the dead driver's:
 1. The kernel masks the driver's level-triggered lines at once, quarantines the DMA Areas it didn't free, and holds the memory clients lent it, their connection arenas (`li_LentPages`).
-2. hwdb runs the unit's **stop method**, which makes the device stop touching memory: virtio's status register to 0, NVMe's `CC.EN` to 0, SDHCI's Software Reset For All ([chapter 5](05-drivers.md)). A unit with no stop method is safe only if it kept no DMA; one that did stays quarantined and isn't restarted.
+2. hwdb runs the unit's **stop method**, which makes the device stop touching memory: virtio's status register to 0, NVMe's `CC.EN` to 0, SDHCI's Software Reset For All, a GPU's soft reset, every display plane off but the console's ([chapter 5](05-drivers.md)). A unit with no stop method is safe only if it kept no DMA; one that did stays quarantined and isn't restarted.
 3. hwdb calls `RevokeLease`, which frees the quarantine and the held memory, and starts the driver again.
+
+**Power before the lease** ([chapter 8](08-power.md)). A driver whose device needs power has it voted on by hwdb before its lease is granted, so a driver never touches a device that's off. hwdb, not the driver, holds the vote, and lets it go only after the stop method has run: a stop method must touch a powered device, and on the CIX an access to an unpowered GPU wedges the board.
 
 **Supervision** (`servers/hwdb/server.c`): a death hwdb asked for is restarted at once. Any other is restarted after 10 ms, then twice as long each time, and given up on at 5 failures within 10 s. A driver that hasn't said it started within 2 s has failed.
 
 Clients see a death as `ERR_PORT_DIED` on their connection. A class's library reconnects once the port is back ([chapter 2](02-block.md#restarts)).
 
-**The kill test** (hwdb's test mode, `servers/hwdb/killtest.c`) kills every driver with a client, a dozen times each, some while binding, most under I/O, and checks each teardown and that every client recovered.
+**The kill test** (hwdb's test mode, `servers/hwdb/killtest.c`) kills every driver with a client, a dozen times each, some while binding, most under I/O, and checks each teardown and that every client recovered. Then V5's phases, one class each: `power` killed and every driver voted for again (`power.c`); a display client killed, and display killed under its planes (`display.c`); `xhci` and `input` killed under an input client (`input.c`); a GPU client killed with jobs in flight, and the GPU server killed under one (`gpu.c`). Last, the load phase: one GPU client runs jobs without a pause while display, input, power, another GPU client and the GPU server are killed around it (`gpu.c`, `T_LOAD`).
 
 ## Rules
 

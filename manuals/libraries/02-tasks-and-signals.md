@@ -1,6 +1,6 @@
 # 2. Exec: tasks and signals
 
-*Checked against V4.*
+*Checked against V5.*
 
 Tasks are how a Planar program does several things at once. Signals are how a task sleeps until something happens, and how other tasks, the kernel and the IPC library wake it. Every way of blocking in Planar comes down to `Wait()` on a signal mask.
 

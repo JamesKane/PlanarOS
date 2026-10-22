@@ -1,6 +1,6 @@
 # V5 plan: queue leases, native scanout, power and input
 
-**Status: steps 1–7 done (2026-10-22), with one finding of step 7 open: a `dos` stall on the RV2.** Proposed 2026-10-20. Scoped from the V4 exit and from three surveys of the reference trees: Linux's and FreeBSD's panthor, komeda and SCMI on the CIX, and the vendor kernel's `img-rogue` and `ky` drivers on the RV2 ([vendor-kernel branches](#sources)). The four scope decisions at the end are made.
+**Status: done (2026-10-22).** All seven steps, and the exit below, are met on QEMU, the CIX and the RV2. One finding is carried forward: an intermittent `dos` stall after the RV2's kill rounds (§7), to debug the next time the RV2 is on the bench. The manuals are current at V5. Proposed 2026-10-20. Scoped from the V4 exit and from three surveys of the reference trees: Linux's and FreeBSD's panthor, komeda and SCMI on the CIX, and the vendor kernel's `img-rogue` and `ky` drivers on the RV2 ([vendor-kernel branches](#sources)). The four scope decisions at the end are made.
 
 **Goal (§8):** the first coprocessor in user space, and the hardware the Workbench phase (V6) needs under it. An app on the CIX submits GPU work and waits for it with no kernel or server in the data path (§5.1). The RV2 does the same through a server queue, with the same API. Both boards scan out natively from the display controller the firmware left running, take keyboard and mouse from USB, and power devices through a `power` server.
 

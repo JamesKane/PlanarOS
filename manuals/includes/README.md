@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 4.* The public headers, `include/planar/`. They are the system's C ABI ([docs §7.2](../../docs/07-language-toolchain.md)): any other language binds to Planar through them.
 
-*Checked against V4.*
+*Checked against V5.*
 
 | Header | Contents | Used by |
 |---|---|---|
@@ -10,12 +10,16 @@
 | `planar/ipc.h` | Ports and connections: the kernel calls, `struct ConnArena`, `struct ConnRing`, `struct Message`, `struct MinNode`, `CONN_*`, `CONNF_*` | `lib/exec`; servers that manage rings themselves |
 | `planar/lease.h` | Device leases: the lease, interrupt, DMA Area and firmware calls; MSIs (`AllocMsi`, `struct MsiInfo`); the console's input (`GrantConsole`, `ReadConsole`); `LEASE_IRQS`, `LEASES_*`; `struct LeaseInfo` (with `li_LentPages`), `struct FirmwareInfo` (with the framebuffer) | Drivers, `hwdb`, the Shell |
 | `planar/drv.h` | hwdb's protocol with drivers: `HWDB_BIND`, `HWDB_STARTED`, and the bus driver's `HWDB_PCI_HOST` and `HWDB_PCI_FUNCTION`; `struct HwdbMsg`, `struct DrvDevice` (registers, line, MSI-X, cells), `struct DrvRange`, `struct PciHost`, `struct PciFunction`, `struct PciWindow`, `struct PciBar`; `struct DrvRequest` (`DRV_READ`, `DRV_WRITE`); drv.library: `struct drv_ops`, `drv_main` and its helpers | Drivers, `hwdb`; console clients |
+| `planar/devices/power.h` | The power class: `struct PowerMsg`, `struct PowerRef`, `POWER_ON`, `POWER_OFF`, `POWER_QUERY`, `POWER_DOMAIN` to `POWER_SUPPLY` ([Devices ch. 8](../devices/08-power.md)) | `hwdb`, `power`, drivers that vote |
+| `planar/devices/display.h` | The display class: `struct DisplayMsg`, `struct DisplayPlane`, `struct DisplayPlaneInfo`, `struct DisplaySync`, `DISPLAY_*` ([Devices ch. 10](../devices/10-display.md)) | `display`, its clients |
+| `planar/devices/input.h` | The input class: `struct InputMsg`, `struct InputRing`, `struct InputEvent`, `INPUT_*` ([Devices ch. 7](../devices/07-input.md)) | `input`, `xhci`, the Shell |
+| `planar/devices/gpu.h` | The GPU class: `struct GpuMsg`, `struct GpuQueueIn`, `struct GpuQueueOut`, `struct GpuSync`, `GPU_*`, `GPU_CSF` and `GPU_ROGUE` ([Devices ch. 9](../devices/09-gpu.md)) | `gpu-panthor`, `gpu-rogue`, their clients |
 | `planar/devices/block.h` | The block class's protocol: `struct BlkMsg`, `struct BlkReq`, `BLK_INFO`, `BLK_IO`, `BLK_READ`, `BLK_WRITE`, `BLK_FLUSH`, `BLK_EIO`, `BLK_BATCH`, `BLK_VERSION` | Block drivers, `lib/blk` |
 | `planar/blk.h` | The block class's client library: `struct blk`, `blk_*`, `BLK_MSGS`, `BLK_GONE_MS` | Block clients: `dos`, `blkbench`, hwdb's kill test |
 | `planar/dos.h` | The dos server's protocol (`struct DosMsg`, `struct DosEntry`, `DOS_*`, `DOSF_*`) and dos.library: files, the loader (`dos_run`), command lines (`dos_args`, `dos_path`), the console (`struct con`, `con_*`) | Commands, the Shell, hwdb |
 | `planar/acpid.h` | hwdb's protocol with `acpid`: `struct AcpidDevice`, `struct AcpidRes`, `ACPID_*` | `acpid`, hwdb |
 | `planar/msg.h` | `struct MsgPort`, `MSGPORT_STASH` and Exec's message calls | Every program that sends or serves messages |
-| `planar/syscalls.h` | Kernel call numbers (`SYS_*`) and errors (`ERR_NOSYS` to `ERR_BUSY`) | Stubs; any program that tests an error |
+| `planar/syscalls.h` | Kernel call numbers (`SYS_*`) and errors (`ERR_NOSYS` to `ERR_TIMEOUT`) | Stubs; any program that tests an error |
 | `planar/endian.h` | `get_be32`, `get_le64` and friends, for firmware formats | Drivers, `hwdb` |
 
 ## What the headers promise

@@ -9,7 +9,7 @@ Planar is an operating system for one person and one machine. It turns a modern 
 - **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
 - **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
 
-Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its drivers run in user mode: hwdb starts them in its device graph's order and restarts them when they're killed, and under ACPI, acpid runs ACPICA in user mode to describe the namespace, so the same drivers bind as through the device tree. Each board boots from its own storage (NVMe on the CIX, the SD card on the RV2) through FAT32 to a Shell on its screen ([V4](docs/v4-plan.md)).
+Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its drivers run in user mode: hwdb starts them in its device graph's order and restarts them when they're killed, and under ACPI, acpid runs ACPICA in user mode to describe the namespace, so the same drivers bind as through the device tree. Each board boots from its own storage (NVMe on the CIX, the SD card on the RV2) through FAT32 to a Shell on its screen ([V4](docs/v4-plan.md)). Apps run GPU work from queues of their own: on the CIX's Mali-G720 with no kernel call or server on a job's path, and on the RV2's BXE-2-32 through a server queue with the same API. Both boards scan out natively with planes and flips at vblank, take USB keyboards and mice, and power their devices through a `power` server ([V5](docs/v5-plan.md)).
 
 The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
@@ -86,7 +86,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
 17. [C23 runtime, `libc`, and Commodore V36–V40 libraries](docs/17-c-runtime-and-libraries.md): scaling up `exec.library` (`CreatePool`, `AllocVec`, `RawDoFmt`), `utility.library` (`TagItem`, `Hook`, 64-bit `Span`/`Str` slices), and `dos.library` (`ReadArgs`) to replace PDP-11 `libc` assumptions, with opt-in `lib/clib` and vendored `compiler-rt` 128-bit builtins (proposed).
-18. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers, storage, the Shell).
+18. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers, storage, the Shell), [V5](docs/v5-plan.md) (GPU queue leases, scanout, power, input).
 19. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
 20. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
 21. [Open questions](docs/questions.md): the question register.
@@ -100,6 +100,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 | V2. IPC: connections, rings, `DoMsg`, death notices; then hardening (V2.5) | 2026-10-20 |
 | V3. The CIX P1 through UEFI and ACPI, 12 cores in two classes, Arm costs, VQ3 | 2026-10-20 |
 | V4. User-mode drivers under hwdb and acpid, the kill test, NVMe and SD, FAT32, a Shell on the framebuffer | 2026-10-20 |
+| V5. GPU queue leases on both boards, native scanout, `power`, USB input, futexes | 2026-10-22 |
 
 Decided so far (the full register is [questions.md](docs/questions.md)):
 - Copy what we can from omega (VQ1).
@@ -112,4 +113,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V5 ([plan](docs/v5-plan.md), proposed): GPU queue leases (a CSF job on the CIX's G720 with no kernel or server in the data path, and the RV2's BXE-2-32 through a server queue), native scanout, `power` and USB input. Then V6, the Workbench ([roadmap](docs/08-roadmap.md)).
+Next: V6, the Workbench ([roadmap](docs/08-roadmap.md)): RTG on V5's planes and GPU queues, `intuition` and `font.library`. Carried from V5: an intermittent `dos` stall after the RV2's kill rounds ([v5-plan](docs/v5-plan.md) §7).

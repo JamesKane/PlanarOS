@@ -1,6 +1,6 @@
 # exec: kernel calls
 
-*Checked against V4, with V5 step 1's calls (WaitAddr, WakeAddr, `AREAF_NC`) and step 5's (ReleaseArea).*
+*Checked against V5.*
 
 The kernel calls, in alphabetical order. Each is one stub in `arch/<isa>/user/syscalls.S` and traps on every call. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 

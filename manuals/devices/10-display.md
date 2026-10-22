@@ -1,6 +1,6 @@
 # The display class
 
-*Checked against V5 step 3.*
+*Checked against V5.*
 
 ## What it's for
 

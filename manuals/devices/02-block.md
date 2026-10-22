@@ -1,6 +1,6 @@
 # The block class: NVMe, SD and lib/blk
 
-*Checked against V4.*
+*Checked against V5.*
 
 ## What it's for
 

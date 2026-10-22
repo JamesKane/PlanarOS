@@ -1,6 +1,6 @@
 # The input class
 
-*Checked against V5 step 4.*
+*Checked against V5.*
 
 ## What it's for
 

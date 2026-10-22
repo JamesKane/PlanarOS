@@ -1,6 +1,6 @@
 # blk: the block class's client library
 
-*Checked against V4.*
+*Checked against V5.*
 
 The calls a program uses to read and write a block device, in alphabetical order. The header is `planar/blk.h`; the code is `lib/blk/blk.c`, linked into the programs that need it (hwdb, `dos`, `blk*` conformance programs: `mk/user.mk`). None is a kernel call, but each one that talks to the driver sends messages, which trap when the driver is asleep. The protocol is in [Devices ch. 2](../devices/02-block.md).
 

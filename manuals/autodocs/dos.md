@@ -1,6 +1,6 @@
 # dos: dos.library
 
-*Checked against V4.*
+*Checked against V5.*
 
 The file calls, the loader and the console, in alphabetical order. The header is `planar/dos.h`; the code is `lib/dos/dos.c`, linked into the commands (`cmd/`), hwdb, and `dos*` conformance programs (`mk/user.mk`). None is a kernel call. The file calls each send one message to the `dos` server and wait (a trap when the server's asleep). The volume is [DOS](../dos/README.md).
 

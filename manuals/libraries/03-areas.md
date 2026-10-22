@@ -1,6 +1,6 @@
 # 3. Exec: memory and Areas
 
-*Checked against V4, with V5 step 1's `AREAF_NC`.*
+*Checked against V5.*
 
 An **Area** is Planar's unit of memory a program can ask for, give to another process, or make executable. Areas are page-rounded and fairly expensive to make, so a program allocates a few large ones and divides them up itself. (A `malloc`-style allocator over Areas is **planned** as part of the C runtime.)
 
@@ -11,7 +11,7 @@ An **Area** is Planar's unit of memory a program can ask for, give to another pr
 - **Sharing.** `ShareArea(area, task, rights)` maps the Area into the process that `task` belongs to, at the **same address**, with the rights given. A pointer into the Area means the same thing in both processes. The other process must be one the caller has an open, accepted connection with (chapter 4); any other gets `ERR_RIGHTS`.
 - **Rights.** Each process that maps an Area has its own rights to it: read, write, execute. Write and execute need read. Execute needs the Area to have been allocated with `AREAF_EXEC`; write *and* execute at once need `AREAF_RWX`.
 - **W^X across processes.** Unless the Area is `AREAF_RWX`, it is never writable in one process while executable in another. `ShareArea` or `ProtectArea` that would make it so fails with `ERR_RIGHTS`.
-- **Lifetime.** `FreeArea` gives up the owner's handle and its mapping. The memory itself lasts until every process sharing it has dropped it (by `UnshareArea`, or by ending).
+- **Lifetime.** `FreeArea` gives up the owner's handle and its mapping. The memory itself lasts until every process sharing it has dropped it: the owner by `UnshareArea`, the process it was shared with by `ReleaseArea(address)`, or either by ending. A server that was lent an Area by a client lets go of it with `ReleaseArea` when the client is done ([chapter 9](09-queue-leases.md)).
 - **Asking.** `QueryArea(address, &info)` says which Area of the caller's an address lies in, and what the caller may do with it.
 
 ### Flags
