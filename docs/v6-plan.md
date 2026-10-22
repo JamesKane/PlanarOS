@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: in progress (2026-10-22): steps 1 to 7 done, step 8 done but for the RV2; decisions 1 to 7 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are all taken.
+**Status: done (2026-10-22): all eight steps, on QEMU, the CIX and the RV2; decisions 1 to 7 taken as they leaned.** The exit's kill test passed 10 runs in a row on each board (step 8). Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are all taken.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -292,7 +292,7 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 
 ## 8. Debts, and the boards
 
-**In progress (2026-10-22): QEMU's and the CIX's half done; the RV2's to come** (`a9b82fc`, `7c20ed3`).
+**Done (2026-10-22)** on QEMU, the CIX and the RV2 (`a9b82fc` to `e42517d`).
 
 - **§10.8's open findings:**
   - `time_to_us` overflowing (`kernel/ktime.c`);
@@ -340,7 +340,17 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 
 **The CIX's 10 runs** (2026-10-22, `9b9ba67`): the kill test passed 10 boots in a row, each 36 kills (3–9 while binding) of 3 drivers, the GPU's load test, the stop of all 17 drivers, and every test to `V6.8 done`. The transcripts are in [`boards/cix-p1/v6-kill-test`](boards/cix-p1/v6-kill-test). A first attempt stopped at run 5: `V3.4 placement` found the big core it wanted idle running the log's drainer, which now runs on the boot CPU.
 
-**Still to do:** the RV2's half: the `dos` stall (hwdb now says what `dos`'s tasks were doing when it's reported: `QueryTasks`), `gpu-rogue`'s `GPU_EVENT`, and its 10 runs.
+**The RV2's 10 runs** (2026-10-22, `e42517d`): the kill test passed 10 boots in a row, each 36 kills (5–10 while binding), the GPU's three rounds and its load test, the stop of all 5 drivers, and every test to `V6.8 done`. The transcripts are in [`boards/orangepi-rv2/v6-kill-test`](boards/orangepi-rv2/v6-kill-test). A job on `gpu-rogue` is 53–54 µs, spun on or slept on, 7.1–7.3 kernel calls and 2.1 interrupts machine-wide: `GPU_WAIT` changes nothing there, as expected.
+
+**Found on the RV2:**
+- **`boot-check` passed a failed run.** It gave a run one more second after a FAIL line, and passed it if the expected line came in that second. The RV2's `reboot` resets the board within it, so "the board reset itself" passed a run whose hwdb test had failed (the CIX comes back too slowly to be caught so). Any FAIL or meditation now fails the run. RV2 results from before can't be taken as green on `boot-check`'s word alone.
+- **`gputest` counted a Rogue job twice**, after its split for the fault job: fixed.
+
+**The `dos` stall** didn't come back in 11 runs (the first good one and the 10), where V5 saw it in 2 of 4. It isn't proven found. What changed under it:
+- `AcceptPort` no longer stops at a client whose arena it can't use, which stranded the clients queued behind it with the port signalled once. dos's accept loop was one of the five §10.8 found with that pattern. V5's stalled `gpu-rogue` came just after one killed reading its firmware, the shape that would leave a broken connection in dos's queue.
+- Every `dos` call has a deadline (step 7), so a stall now comes back as an error and a report. hwdb then says what `dos`'s tasks were doing (`QueryTasks`) and restarts it: if it stalls again, the transcript says where.
+
+**Not exercised:** `gpu-rogue`'s `GPU_EVENT`. No job that a Rogue context resets on is known without its compiler.
 
 ## Sources
 

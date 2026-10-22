@@ -11,6 +11,7 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 | `acpi-expect.txt` | The lines the kernel must print when it reads those tables, hosted: `make PLATFORM=hosted ACPI_BOARD=cix-p1 test` (part of `make test-all`). |
 | `firmware-boot.log` | UART2 from power-on to FreeBSD's loader: TF-A, OP-TEE, UEFI. Escape sequences stripped. |
 | `freebsd-dmesg.txt` | FreeBSD's boot messages: devices found through ACPI, the CPU feature registers. |
+| `v6-kill-test/run-*.log.gz` | V6's exit: 10 boots in a row of `make PLATFORM=uefi-a64 test` at `9b9ba67` (2026-10-22), each through `V6.8 done` with the kill test (docs/v6-plan.md step 8). |
 
 ## Facts
 

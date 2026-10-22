@@ -6,6 +6,7 @@ Taken on 2026-10-20 from the board, for hwdb's tests (docs/v4-plan.md step 2).
 |---|---|
 | `u-boot.dtb` | The tree the stock U-Boot (2022.10, in SPI flash) passes the kernel, 52,706 bytes: printed by the boot argument `dumpdtb` (`make PLATFORM=ky-x1 BOOTARGS=dumpdtb test`) and rebuilt from `build/ky-x1/serial-boot.log` with `tools/dtb-from-log.py`. |
 | `hwdb.txt` | The report hwdb's graph must give from it (`make hwdb-test`). |
+| `v6-kill-test/run-*.log.gz` | V6's exit: 10 boots in a row of `make PLATFORM=ky-x1 test` at `e42517d` (2026-10-22), each through `V6.8 done` with the kill test (docs/v6-plan.md step 8). |
 
 ## Facts
 
