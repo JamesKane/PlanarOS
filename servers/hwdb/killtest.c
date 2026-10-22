@@ -524,6 +524,7 @@ static void kill_rounds(void)
 
 static struct unit *stopped[CLIENTS];
 static unsigned nstopped, stopped_deaths[CLIENTS], stops_before, unresponsive_before;
+static uint64_t marks_before;
 static struct unit *reported;
 static unsigned reported_deaths;
 static Handle reporter;
@@ -610,6 +611,7 @@ static void report_step(void)
             }
         reported_deaths = reported->deaths;
         unresponsive_before = hwdb.unresponsive;
+        marks_before = hwdb.marks;
         phase_at = hwdb.now;
         return;
     }
@@ -625,12 +627,16 @@ static void report_step(void)
         fail("the unit reported unresponsive wasn't restarted");
     } else if (hwdb.unresponsive != unresponsive_before + 1) {
         fail("a report restarted more or less than its unit");
+    } else if (hwdb.marks == marks_before) {
+        fail("what the reported unit's tasks were doing wasn't said");
     } else {
         struct hw_line l = { 0 };
 
         hw_put(&l, "V6.7 report ok: a client said ");
         hw_put(&l, unit_driver(reported));
-        hw_put(&l, " missed its deadline, and hwdb restarted it");
+        hw_put(&l, " missed its deadline, and hwdb said what its ");
+        hw_put_dec(&l, hwdb.marks - marks_before);
+        hw_put(&l, " tasks were doing and restarted it");
         say(l.text);
     }
     if (reporter) {

@@ -65,6 +65,7 @@
 #define SYS_GRANT_ROOT      55
 #define SYS_COLD_REBOOT     56
 #define SYS_READ_LOG        57
+#define SYS_QUERY_TASKS     58
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

@@ -169,6 +169,7 @@ static struct process *create_from(struct area *image, uint64_t etext, uint64_t 
         image = nullptr;            /* mapped: it goes with the process */
     if (image && new_stack(p, &stack)) {
         p->stack_base = area_base(stack);
+        p->image_base = area_base(image);
         t = new_user_task(p, area_base(image) + entry, stack, arg, 0);
     }
     if (!t) {
@@ -536,6 +537,40 @@ int64_t process_query_call(uint32_t h, uint64_t info_out)
     info.pi_Pages = area_process_pages(p, &info.pi_LibraryPages);
     process_put(p);
     return arch_copy_to_user(info_out, &info, sizeof info) ? 0 : ERR_BADADDR;
+}
+
+int64_t process_tasks_call(uint32_t h, uint64_t marks_out, uint32_t n)
+{
+    constexpr unsigned MAX = 16;
+    struct process *p = process_child(h);
+    struct TaskMark marks[MAX];
+    unsigned count = 0, copied;
+    unsigned long was;
+
+    if (!p)
+        return ERR_BADHANDLE;
+    was = spin_lock_irqsave(&p->lock);
+    for (struct task *t = p->tasks; t; t = t->next_in_proc, count++) {
+        if (count >= MAX)
+            continue;
+        marks[count] = (struct TaskMark){
+            .tm_State = t->state == TASK_WAITING ? TASKS_WAITING : TASKS_RUNNING,
+            .tm_Call = t->call,
+            .tm_InCall = __atomic_load_n(&t->in_call, __ATOMIC_ACQUIRE),
+            .tm_PC = t->call_pc - p->image_base,
+            .tm_Caller = t->call_lr - p->image_base,
+            .tm_Image = p->image_base,
+            .tm_Waiting = t->state == TASK_WAITING ? t->sig_waiting : 0,
+        };
+    }
+    spin_unlock_irqrestore(&p->lock, was);
+    process_put(p);
+    copied = count < MAX ? count : MAX;
+    if (copied > n)
+        copied = n;
+    if (copied && !arch_copy_to_user(marks_out, marks, copied * sizeof marks[0]))
+        return ERR_BADADDR;
+    return count;
 }
 
 void user_return(void)

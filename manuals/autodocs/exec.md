@@ -1414,6 +1414,56 @@ None known.
 
 ---
 
+## exec/QueryTasks
+
+**NAME**
+QueryTasks -- say what a child process's tasks are doing
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+int64_t QueryTasks(Handle process, struct TaskMark *marks, uint32_t n);
+```
+
+**FUNCTION**
+Fills in a `struct TaskMark` for each of the first `n` tasks of `process`, one the caller made, and returns how many tasks it has. For a supervisor to say where a server stalled before it restarts it, without a task watching the server: hwdb logs them for a server a client reported unresponsive (V6 step 8).
+
+| Field | |
+|---|---|
+| `tm_State` | `TASKS_WAITING`, or `TASKS_RUNNING`: on a CPU or ready for one |
+| `tm_Call` | The kernel call it's in, or made last (`SYS_*`, `planar/syscalls.h`) |
+| `tm_InCall` | Nonzero: it's in `tm_Call` now |
+| `tm_PC` | Where it made the call, as bytes from `tm_Image`: in the call's stub |
+| `tm_Caller` | The stub's return address, from `tm_Image`: where in the program the call came from |
+| `tm_Image` | Where the process's image is |
+| `tm_Waiting` | The signals a waiting task waits for |
+
+`tm_PC` and `tm_Caller`, as offsets, go straight to `llvm-addr2line -e` with the program's `.elf`.
+
+A kernel call. Recording a call costs the kernel three stores on every call.
+
+**INPUTS**
+- `process` -- a process the calling process created.
+- `marks` -- room for `n`.
+- `n` -- at most this many are filled in; the kernel gives 16 at most.
+
+**RESULT**
+The number of tasks the process has (more than `n`, maybe), or:
+- `ERR_BADHANDLE` -- `process` isn't one the caller holds.
+- `ERR_BADADDR` -- `marks` isn't writable.
+
+**NOTES**
+- A task that has made no call yet has `tm_Call` 0 and `tm_PC` the image's start less its own.
+- What a task is doing changes as the call returns: the marks are a moment's.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[QueryProcess](#execqueryprocess), [ReportUnresponsive](msg.md#execreportunresponsive)
+
+---
+
 ## exec/QuerySystem
 
 **NAME**

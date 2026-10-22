@@ -76,7 +76,7 @@ static void user_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
     if (scause == CAUSE_ECALL_U) {
         f->sepc += 4;
         arch_irq_enable();
-        f->x[10] = (uint64_t)syscall_dispatch(f->x[17], &f->x[10]);
+        f->x[10] = (uint64_t)syscall_dispatch(f->x[17], &f->x[10], f->sepc - 4, f->x[1]);
         arch_irq_disable();
         return;
     }

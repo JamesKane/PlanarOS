@@ -147,6 +147,31 @@ int64_t CreateProcessImage(const struct ProcessImage *image, uint64_t arg, int64
 int64_t StartProcess(Handle process);
 int64_t KillProcess(Handle process);
 int64_t QueryProcess(Handle process, struct ProcessInfo *info);
+
+/*
+ * What each task of a process this one made is doing (V6 step 8): for a
+ * supervisor to say where a server stalled before it restarts it, with
+ * no task watching it. tm_Call is the kernel call it's in (tm_InCall) or
+ * made last, tm_PC where and tm_Caller who called its stub, as bytes from
+ * tm_Image, the process's image.
+ * Up to 'n'; returns how many tasks it has, or ERR_BADHANDLE.
+ */
+struct TaskMark {
+    uint32_t tm_State;              /* TASKS_* */
+    uint32_t tm_Call;               /* SYS_* (planar/syscalls.h) */
+    uint32_t tm_InCall;
+    uint32_t tm_Pad;
+    uint64_t tm_PC;                 /* from tm_Image */
+    uint64_t tm_Caller;             /* the call's stub's return address, from tm_Image */
+    uint64_t tm_Image;
+    uint64_t tm_Waiting;            /* the signals it waits for, if it waits */
+};
+
+/* TaskMark.tm_State */
+#define TASKS_RUNNING   0           /* on a CPU, or ready for one */
+#define TASKS_WAITING   1
+
+int64_t QueryTasks(Handle process, struct TaskMark *marks, uint32_t n);
 int64_t CloseHandle(Handle handle);
 
 /*

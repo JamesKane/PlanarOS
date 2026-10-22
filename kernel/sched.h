@@ -93,6 +93,9 @@ struct task {
     uint64_t user_pc, user_sp, user_arg[3];
     uint64_t sig_alloc;             /* AllocSignal's bits */
     _Atomic uint64_t calls;         /* kernel calls it made (cpu_count) */
+    uint32_t call;                  /* the kernel call it's in, or made last (QueryTasks) */
+    bool in_call;                   /* in it now */
+    uint64_t call_pc, call_lr;      /* where it made it, and its stub's return address */
     bool stack_test;                /* a selftest's: an overflow is counted, not fatal */
 
     /* Last, so it's the first word a stack overflowing into the struct

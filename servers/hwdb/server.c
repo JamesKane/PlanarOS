@@ -453,7 +453,40 @@ static void stop_step(void)
     }
 }
 
-/* A server that missed a deadline: restarted, once a second at most. */
+/* What a server's tasks were doing when it was reported, before it's
+ * restarted (V6 step 8: the RV2's dos stall): each one's kernel call, in
+ * it or last made, and where, from its image. How many were said. */
+unsigned say_tasks(Handle proc, const char *who)
+{
+    struct TaskMark marks[8];
+    int64_t n = QueryTasks(proc, marks, 8);
+
+    for (int64_t i = 0; i < n && i < 8; i++) {
+        struct hw_line l = { 0 };
+
+        hw_put(&l, "hwdb:   ");
+        hw_put(&l, who);
+        hw_put(&l, "'s task ");
+        hw_put_dec(&l, (uint64_t)i);
+        hw_put(&l, marks[i].tm_State == TASKS_WAITING ? ": waiting" : ": running");
+        hw_put(&l, marks[i].tm_InCall ? " in kernel call " : ", its last kernel call ");
+        hw_put_dec(&l, marks[i].tm_Call);
+        hw_put(&l, " at +");
+        hw_put_hex(&l, marks[i].tm_PC);
+        hw_put(&l, ", from +");
+        hw_put_hex(&l, marks[i].tm_Caller);
+        if (marks[i].tm_State == TASKS_WAITING) {
+            hw_put(&l, ", for signals ");
+            hw_put_hex(&l, marks[i].tm_Waiting);
+        }
+        say(l.text);
+    }
+    hwdb.marks += n > 0 ? (uint64_t)n : 0;
+    return n > 0 ? (unsigned)n : 0;
+}
+
+/* A server that missed a deadline: what it was doing said, then it's
+ * restarted, once a second at most. */
 static void restart_unresponsive(struct unit *u, const char *why)
 {
     if (!u->proc || u->state != U_RUNNING || u->killing || u->stopping ||
@@ -462,6 +495,7 @@ static void restart_unresponsive(struct unit *u, const char *why)
     u->reported = hwdb.now;
     hwdb.unresponsive++;
     say_unit(u, why);
+    say_tasks(u->proc, unit_driver(u));
     unit_kill(u);
 }
 
@@ -478,6 +512,7 @@ static void unresponsive(const struct HwdbMsg *m)
             dos_reported = hwdb.now;
             hwdb.unresponsive++;
             say("hwdb: dos missed a client's deadline: restarting it");
+            say_tasks(hwdb.dos, "dos");
             KillProcess(hwdb.dos);
         }
         return;

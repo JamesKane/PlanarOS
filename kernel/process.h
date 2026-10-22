@@ -84,6 +84,7 @@ struct process {
     bool names;                     /* may make named ports (PROCF_NAMES) */
     atomic_bool killed;             /* ended by process_kill */
     uint64_t stack_base;            /* the first task's stack, for the overrun test */
+    uint64_t image_base;            /* where its image is, for QueryTasks */
     atomic_uint_fast64_t calls_done;    /* kernel calls made by tasks that have left */
 };
 
@@ -143,6 +144,7 @@ int64_t process_create_image_call(uint64_t image, uint64_t arg, int64_t sigbit, 
 int64_t process_start_call(uint32_t process);
 int64_t process_kill_call(uint32_t process);
 int64_t process_query_call(uint32_t process, uint64_t info_out);
+int64_t process_tasks_call(uint32_t process, uint64_t marks_out, uint32_t n);
 
 /* Last thing on every return to user mode: a killed task stops here. */
 void user_return(void);

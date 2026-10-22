@@ -288,6 +288,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return process_kill_call((uint32_t)a[0]);
     case SYS_QUERY_PROCESS:
         return process_query_call((uint32_t)a[0], a[1]);
+    case SYS_QUERY_TASKS:
+        return process_tasks_call((uint32_t)a[0], a[1], (uint32_t)a[2]);
     case SYS_CLOSE_HANDLE:
         return sys_close_handle(self, (Handle)a[0]);
     case SYS_CURRENT_TIME:
@@ -354,9 +356,19 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
     }
 }
 
-int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6])
+int64_t syscall_dispatch(uint64_t nr, const uint64_t a[6], uint64_t pc, uint64_t lr)
 {
-    int64_t r = dispatch(nr, a);
+    struct task *self = task_self();
+    int64_t r;
+
+    /* What it's doing, for its parent's QueryTasks: a few stores, so a
+     * stalled server can be seen without a task watching it. */
+    self->call = (uint32_t)nr;
+    self->call_pc = pc;
+    self->call_lr = lr;
+    __atomic_store_n(&self->in_call, true, __ATOMIC_RELEASE);
+    r = dispatch(nr, a);
+    __atomic_store_n(&self->in_call, false, __ATOMIC_RELEASE);
 
     prof_mark(P_SYSCALL_OUT);
     return r;

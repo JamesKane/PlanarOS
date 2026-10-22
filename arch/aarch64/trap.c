@@ -133,7 +133,7 @@ void trap_el0_svc(struct trap_frame *f)
 {
     prof_mark(P_TRAP_IN);
     arch_irq_enable();
-    f->x[0] = (uint64_t)syscall_dispatch(f->x[8], &f->x[0]);
+    f->x[0] = (uint64_t)syscall_dispatch(f->x[8], &f->x[0], f->elr - 4, f->x[30]);
     arch_irq_disable();
     user_return();          /* a killed task stops here */
     aarch64_lazy_return(&task_self()->ctx);

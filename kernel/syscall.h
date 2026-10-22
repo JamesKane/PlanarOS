@@ -9,7 +9,9 @@
 /* Run kernel call 'nr' with its six argument registers; returns the
  * result, negative for an error (planar/syscalls.h). Called by the
  * architecture's trap code with interrupts on. */
-int64_t syscall_dispatch(uint64_t nr, const uint64_t args[6]);
+/* 'pc' and 'lr': where the task made the call, and the stub's return
+ * address, for QueryTasks. */
+int64_t syscall_dispatch(uint64_t nr, const uint64_t args[6], uint64_t pc, uint64_t lr);
 
 /* Copy a NUL-terminated string of at most 'size' bytes, NUL included,
  * from user memory. False if it faults or doesn't fit. */

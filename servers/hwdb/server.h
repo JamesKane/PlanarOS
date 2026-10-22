@@ -82,6 +82,7 @@ struct hwdb {
     Handle dos;                 /* the dos server, the kill test's or the system's */
     unsigned stops, stops_clean, stops_late;    /* units asked to stop; that did; killed */
     unsigned unresponsive;      /* servers restarted on a client's report */
+    uint64_t marks;             /* their tasks said first (say_tasks) */
     uint64_t stopped_pages;     /* DMA pages quarantined from units that stopped as asked */
     unsigned stop_deps;         /* while stopping: dependencies whose consumer ended first */
 };
@@ -105,6 +106,7 @@ void say(const char *text);
 void hwdb_report(void);      /* the lines worth the console */
 void hwdb_facts(void);       /* what the drivers bound, failed and declined: "hw: " lines */
 void say_unit(const struct unit *u, const char *text);
+unsigned say_tasks(Handle proc, const char *who);
 void check_failed(const struct unit *u, const char *what);
 
 /* --- acpid (acpid.c). --- */

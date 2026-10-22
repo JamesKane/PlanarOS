@@ -107,6 +107,7 @@
 | QueryLease | [lease](lease.md#leasequerylease) | kernel |
 | QueryProcess | [exec](exec.md#execqueryprocess) | kernel |
 | QuerySystem | [exec](exec.md#execquerysystem) | kernel |
+| QueryTasks | [exec](exec.md#execquerytasks) | kernel |
 | RawDoFmt | [exec](exec.md#execrawdofmt) | library |
 | ReadArgs, FreeArgs | [dos](dos.md#dosreadargs) | library |
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
