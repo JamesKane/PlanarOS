@@ -15,7 +15,7 @@
 #include <planar/syscalls.h>
 
 #include "display.h"
-#include "font8x8.h"
+#include "../../lib/gfx/font8x8.h"
 
 constexpr uint32_t FG = 0xe8e8e8;           /* light grey on dark slate blue, omega's */
 constexpr uint32_t BG = 0x203050;

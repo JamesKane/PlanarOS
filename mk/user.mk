@@ -37,6 +37,12 @@ EXECLIB_OBJS := $(BUILD)/user/exec/pool.o $(BUILD)/user/exec/fmt.o $(BUILD)/user
 USER_UTILLIB := $(BUILD)/user/libutility.a
 UTILLIB_OBJS := $(patsubst lib/utility/%.c,$(BUILD)/user/utility/%.o,\
 	$(filter-out %/test.c,$(wildcard lib/utility/*.c)))
+# gfx.library's own code (lib/gfx, and the vector unit's kernels) the
+# same way: display's console takes the 8x8 font from it, and the tests
+# its scalar entries, to hold the library's against.
+USER_GFXLIB := $(BUILD)/user/libgfx.a
+GFXLIB_OBJS := $(patsubst lib/gfx/%.c,$(BUILD)/user/gfx/%.o,$(filter-out %/test.c,$(wildcard lib/gfx/*.c))) \
+	$(BUILD)/user/gfx/vector.o
 # lib/clib, C's library, for a program that asks for it: acpid. Its
 # headers are include/clib, which nothing else sees.
 USER_CLIB := $(BUILD)/user/libclib.a
@@ -88,6 +94,10 @@ $(USER_UTILLIB): $(UTILLIB_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
+$(USER_GFXLIB): $(GFXLIB_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
+
 $(USER_BUILTINS): $(BUILTINS_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
@@ -101,6 +111,14 @@ $(BUILD)/user/exec/%.o: lib/exec/%.c
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/user/utility/%.o: lib/utility/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/user/gfx/%.o: lib/gfx/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/user/gfx/vector.o: arch/$(ARCH)/lib/gfx.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -143,11 +161,11 @@ $(BUILD)/user/%.o: conformance/%.c
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/user/%.o \
-		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_CLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) \
-		arch/$(ARCH)/user/user.ld
+		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_CLIB) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) \
+		$(USER_BUILTINS) arch/$(ARCH)/user/user.ld
 	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) \
 	  $(if $(filter dos%,$*),$(USER_DOS)) $(if $(filter clib clib%,$*),$(USER_CLIB)) \
-	  $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
+	  $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
 	$(check_tls)
 
 # thread_local's segment, if a program has one, must be aligned to the
@@ -163,8 +181,9 @@ $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA) $(USER_CLIB)) \
 	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) \
 	$(if $(filter servers/hwdb drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
-$(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
-	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $$@
+$(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) \
+		arch/$(ARCH)/user/user.ld
+	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $$@
 	$$(check_tls)
 -include $$(patsubst %.o,%.d,$$(filter %.o,$$($(1)_OBJS)))
 endef
@@ -175,7 +194,7 @@ $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 
 # Every user object's dependencies: programs, runtime, stubs (a call
 # renumbered in planar/syscalls.h must rebuild the stubs too).
--include $(USER_RT:.o=.d) $(EXECLIB_OBJS:.o=.d) $(UTILLIB_OBJS:.o=.d) $(CLIB_OBJS:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
+-include $(USER_RT:.o=.d) $(EXECLIB_OBJS:.o=.d) $(UTILLIB_OBJS:.o=.d) $(GFXLIB_OBJS:.o=.d) $(CLIB_OBJS:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 
@@ -185,7 +204,7 @@ USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 # ISA's base, so a RISC-V hart without V runs it: the vector unit's
 # memory functions are string.S's, renamed, which the kernel picks at
 # boot where the hart has V.
-USER_LIBS := exec utility
+USER_LIBS := exec utility gfx
 LIB_CFLAGS := $(subst rv64gcv,rv64gc,$(USER_CFLAGS))
 LIB_LDFLAGS := $(subst /user.ld,/lib.ld,$(USER_LDFLAGS)) -Wl,-z,norelro
 LIB_exec_SRCS := libs/exec/base.c lib/exec/pool.c lib/exec/fmt.c lib/exec/task.c \
@@ -193,6 +212,11 @@ LIB_exec_SRCS := libs/exec/base.c lib/exec/pool.c lib/exec/fmt.c lib/exec/task.c
 	lib/rt/string.c arch/$(ARCH)/user/syscalls.S
 LIB_utility_SRCS := libs/utility/base.c $(filter-out %/test.c,$(wildcard lib/utility/*.c)) \
 	lib/exec/fmt.c lib/rt/string.c
+# gfx.library's: lib/gfx, the stubs for its Areas, and the vector unit's
+# kernels, built for it (V on RISC-V), which only a hart with it runs.
+LIB_gfx_SRCS := libs/gfx/base.c $(filter-out %/test.c,$(wildcard lib/gfx/*.c)) \
+	arch/$(ARCH)/lib/gfx.c lib/rt/string.c arch/$(ARCH)/user/syscalls.S
+$(BUILD)/libs/arch/$(ARCH)/lib/gfx.o: LIB_CFLAGS := $(USER_CFLAGS)
 LIB_VEC := $(BUILD)/libs/vec-string.o
 LIB_HEAD := $(BUILD)/libs/lib/libhead.o
 LIB_BINS := $(patsubst %,$(BUILD)/libs/%.library.bin,$(USER_LIBS))

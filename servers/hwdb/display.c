@@ -224,6 +224,11 @@ static void lines(void)
     hw_put(&l, dt.native ? " on its controller, whose scanout isn't read back"
                          : " on QEMU's framebuffer, a client's overlay read back from it as drawn");
     say(l.text);
+    /* And drew one with gfx.library (v7-plan step 2), read back the same way. */
+    say(dt.native ? "V7.2 screen ok: gfx.library drew a client's overlay on the controller's plane 1, "
+                    "not read back"
+                  : "V7.2 screen ok: gfx.library drew a client's overlay, read back from the screen "
+                    "as the reference draws it");
 }
 
 bool display_test(void)
@@ -236,6 +241,7 @@ bool display_test(void)
         if (!(u = display_unit())) {
             say("V5.3 display: not exercised: no screen here");
             say("V7.1 screen: not exercised: no screen here");
+            say("V7.2 screen: not exercised: no screen here");
             return true;
         }
         if (!dc.up) {

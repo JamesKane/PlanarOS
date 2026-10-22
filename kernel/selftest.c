@@ -1493,6 +1493,8 @@ void selftest_tasks(void *)
     kprintf("V6.8 done\n");
     /* hwdb's display test said what it read of the screen (display.c). */
     kprintf("V7.1 done\n");
+    selftest_gfx();
+    kprintf("V7.2 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -3097,6 +3099,28 @@ void selftest_libraries(void)
             "processes, the tables read-only\n", library_count(),
             (unsigned long long)library_pages(),
             library_vector() ? "by the vector unit" : "by words: no vector unit");
+}
+
+/*
+ * V7 step 2: gfx.library (conformance/gfx.c): every operation through
+ * IGfx against conformance/gfxcheck.h's reference, to the bit, by the
+ * vector unit where there is one; a bitmap shared read-only with a
+ * second process. What it costs is the program's own line; gfx.library
+ * on the screen is hwdb's display test's (V7.2 screen).
+ */
+void selftest_gfx(void)
+{
+    static const char *const tests[] = { "gfx" };
+
+    if (!user_images[0].name) {
+        kprintf("V7.2 gfx skipped: no user programs\n");
+        return;
+    }
+    run_each("V7.2 gfx", tests, 1);
+    kprintf("V7.2 gfx ok: RectFill, BltBitMap (SRC, SRC_OVER), DrawBevel and Text through IGfx as "
+            "the reference draws them, every width to 130, clipped each way, %s; AllocBitMap's "
+            "bitmap shared read-only\n",
+            library_vector() ? "by the vector unit" : "scalar: no vector unit");
 }
 
 /*

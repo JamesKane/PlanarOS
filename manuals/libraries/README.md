@@ -17,10 +17,11 @@
 | 9 | [Queue leases: GPU work from user space](09-queue-leases.md) | Written, V5. The NPU's is V9 |
 | 10 | The hardware database (`hwdb`) | Built in V4: see [Devices ch. 1](../devices/01-drivers.md) ([docs §9](../../docs/09-hardware-description.md)) |
 | 11 | [C's library](11-clib.md) (`lib/clib`): `malloc`, the string functions, `strtol`, `qsort`, `snprintf`, `stdbit.h`, for code written for other systems | Written, V6 |
+| 12 | [gfx.library](12-gfx.md): bitmaps, rastports, `RectFill`, `BltBitMap`, bevels and text, on the CPU | Written, V7 |
 
 The RKM's Exec chapter on interrupts has no counterpart here: a driver's interrupts are its lease's lines (`BindIrq`, `AckWaitIrq`), in [Devices ch. 1](../devices/01-drivers.md).
 
-Where the RKM had chapters on Intuition, graphics and layers, Planar has none yet. They will be added here as those libraries are designed.
+Where the RKM had chapters on graphics, chapter 12 is gfx.library's. Intuition's comes with V7's intuition. Layers have no counterpart: intuition composes windows, so none draws over another's.
 
 ## Where Planar's Exec stands
 

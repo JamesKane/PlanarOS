@@ -1,5 +1,5 @@
 /*
- * drv/display/font8x8.c -- 8x8 console font, U+0020 to U+007E (from omega)
+ * lib/gfx/font8x8.c -- the 8x8 font, U+0020 to U+007E (from omega)
  *
  * From Daniel Hepper's font8x8 (font8x8_basic.h), public domain, itself
  * based on the public-domain IBM VGA fonts. Each glyph is 8 rows, top

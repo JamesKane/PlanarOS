@@ -11,6 +11,7 @@
 | [blk.md](blk.md) | The block class's client library (`planar/blk.h`, `lib/blk`) |
 | [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
+| [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing (`planar/gfx.h`, `lib/gfx`) |
 
 ## All calls
 
@@ -21,6 +22,7 @@
 | AckWaitIrq | [lease](lease.md#leaseackwaitirq) | kernel |
 | AddPart, FilePart, PathPart | [dos](dos.md#dosaddpart) | library |
 | AllocArea | [exec](exec.md#execallocarea) | kernel |
+| AllocBitMap | [gfx](gfx.md#gfxallocbitmap) | library, through `IGfx` |
 | AllocDmaArea | [lease](lease.md#leaseallocdmaarea) | kernel |
 | AllocMsg | [msg](msg.md#execallocmsg) | library |
 | AllocMsi | [lease](lease.md#leaseallocmsi) | kernel |
@@ -29,6 +31,7 @@
 | AllocVec | [exec](exec.md#execallocvec) | library |
 | ArmPort | [msg](msg.md#execarmport) | library |
 | ArmTimer | [exec](exec.md#execarmtimer) | kernel |
+| BltBitMap | [gfx](gfx.md#gfxbltbitmap) | library, through `IGfx` |
 | BindIrq | [lease](lease.md#leasebindirq) | kernel |
 | blk_alloc | [blk](blk.md#blkblk_alloc) | library |
 | blk_close | [blk](blk.md#blkblk_close) | library |
@@ -61,6 +64,7 @@
 | DoMsg | [msg](msg.md#execdomsg) | library |
 | DoMsgUntil | [msg](msg.md#execdomsguntil) | library |
 | DropInterface | [exec](exec.md#execdropinterface) | library, through `IExec` |
+| DrawBevel | [gfx](gfx.md#gfxdrawbevel) | library, through `IGfx` |
 | drv_dma_clean, drv_dma_flush | [drv](drv.md#drvdrv_dma_clean) | library |
 | drv_hwdb_msg, drv_hwdb | [drv](drv.md#drvdrv_hwdb) | library |
 | drv_in_heap | [drv](drv.md#drvdrv_in_heap) | library |
@@ -77,9 +81,11 @@
 | FindTask | [exec](exec.md#execfindtask) | kernel |
 | FlushPort | [msg](msg.md#execflushport) | library |
 | FreeArea | [exec](exec.md#execfreearea) | kernel |
+| FreeBitMap | [gfx](gfx.md#gfxfreebitmap) | library, through `IGfx` |
 | FreePooled | [exec](exec.md#execfreepooled) | library |
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
 | FreeVec | [exec](exec.md#execfreevec) | library |
+| GetBitMapAttr | [gfx](gfx.md#gfxgetbitmapattr) | library, through `IGfx` |
 | GetInterface | [exec](exec.md#execgetinterface) | library, through `IExec` |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
@@ -88,6 +94,8 @@
 | GrantFirmware | [lease](lease.md#leasegrantfirmware) | kernel |
 | GrantLease | [lease](lease.md#leasegrantlease) | kernel |
 | GrantRoot | [lease](lease.md#leasegrantroot) | kernel |
+| InitBitMap | [gfx](gfx.md#gfxinitbitmap) | library, through `IGfx` |
+| InitRastPort | [gfx](gfx.md#gfxinitrastport) | library, through `IGfx` |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
@@ -109,6 +117,7 @@
 | QuerySystem | [exec](exec.md#execquerysystem) | kernel |
 | QueryTasks | [exec](exec.md#execquerytasks) | kernel |
 | RawDoFmt | [exec](exec.md#execrawdofmt) | library |
+| RectFill | [gfx](gfx.md#gfxrectfill) | library, through `IGfx` |
 | ReadArgs, FreeArgs | [dos](dos.md#dosreadargs) | library |
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
 | ReadFile, WriteFile | [dos](dos.md#dosreadfile) | library |
@@ -138,6 +147,7 @@
 | StrToU64 | [utility](utility.md#utilitystrtou64) | library |
 | StrTrim | [utility](utility.md#utilitystrtrim) | library |
 | TagInArray | [utility](utility.md#utilitytaginarray) | library |
+| Text | [gfx](gfx.md#gfxtext) | library, through `IGfx` |
 | ToUpper, ToLower | [utility](utility.md#utilitytoupper) | library |
 | UnshareArea | [exec](exec.md#execunsharearea) | kernel |
 | Wait | [exec](exec.md#execwait) | kernel |

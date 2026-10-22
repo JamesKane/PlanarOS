@@ -1,12 +1,12 @@
 # 8. Libraries and interfaces
 
-*Written, V6.*
+*Written, V6; gfx.library, V7.*
 
-A **shared library** is code that every process uses but none carries: one copy in memory, mapped into each process at the same address. Planar's are exec.library and utility.library. A program reaches one through an **interface**, a table of its functions: `IExec->AllocVec(64, 0)` is a call through exec.library's. This is AmigaOS 4's model, with Exec's names ([docs §7.2](../../docs/07-language-toolchain.md)).
+A **shared library** is code that every process uses but none carries: one copy in memory, mapped into each process at the same address. Planar's are exec.library, utility.library and gfx.library ([chapter 12](12-gfx.md)). A program reaches one through an **interface**, a table of its functions: `IExec->AllocVec(64, 0)` is a call through exec.library's. This is AmigaOS 4's model, with Exec's names ([docs §7.2](../../docs/07-language-toolchain.md)).
 
 ## Concepts
 
-- **The shared library region.** At boot the kernel copies every library in the boot image into one Area, a page apart, and relocates each there once. Every process maps the whole region from its start, read and execute, and global, so the TLB keeps one entry per page whichever process runs. Nothing in it is written after boot, and it's never freed. On QEMU it's 5 pages on RV64 and 7 on AArch64.
+- **The shared library region.** At boot the kernel copies every library in the boot image into one Area, a page apart, and relocates each there once. Every process maps the whole region from its start, read and execute, and global, so the TLB keeps one entry per page whichever process runs. Nothing in it is written after boot, and it's never freed. On QEMU it's 7 pages on RV64 and 10 on AArch64, with gfx.library.
 - **A library is code and constants.** It has no data of its own and no `.bss`: the build refuses one that does (`arch/<isa>/user/lib.ld`). What it needs per process is the program's (below).
 - **Its base** is a `struct Library`: its name, version and revision, an ID string, and its interfaces. `IExec->OpenLibrary(name, version)` returns it.
 - **An interface** is a `struct Interface` header, its name, version, size and library, followed by function pointers in an order fixed for that name and version. A later version only adds at the end, so a program built against version 1 runs against any later one. Every library has one called `"main"`. `IExec->GetInterface(base, "main", version)` returns it.
@@ -46,7 +46,7 @@ AmigaOS 4 passes each interface function its interface as a first argument, `Sel
 
 ## Chosen at boot
 
-As the kernel relocates exec.library, it points `CopyMem`, `CopyMemQuick` and `SetMem` at the vector unit's versions (`arch/<isa>/user/string.S`) where the CPU has one: RVV 1.0 on RISC-V, and NEON, always, on Arm. Otherwise they stay word loops. The libraries are built for the ISA's base, without V, so the same image runs on a hart with V or without it. SVE2 isn't used yet: the kernel doesn't save SVE's registers, so user code can't use them.
+As the kernel relocates exec.library, it points `CopyMem`, `CopyMemQuick` and `SetMem` at the vector unit's versions (`arch/<isa>/user/string.S`) where the CPU has one: RVV 1.0 on RISC-V, and NEON, always, on Arm. Otherwise they stay word loops. gfx.library's `RectFill`, `BltBitMap` and `DrawBevel` are chosen the same way (`arch/<isa>/lib/gfx.c`, built with V for the library). The libraries are built for the ISA's base, without V, so the same image runs on a hart with V or without it. SVE2 isn't used yet: the kernel doesn't save SVE's registers, so user code can't use them.
 
 ## Costs
 

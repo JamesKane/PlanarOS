@@ -11,9 +11,11 @@
  *    commit to latch, vblank to latch, and the vblanks missed, which
  *    should be none: each latched at the next. Between the two, the
  *    last flip's overlay read back from the screen (DISPLAY_READ, v7-plan
- *    step 1) where display composes it: its CRC-32 as drawn. Then it shows them,
- *    allocates a fourth buffer to say so, and waits to be killed: hwdb
- *    checks display freed its buffers.
+ *    step 1) where display composes it: its CRC-32 as drawn. Then the
+ *    other overlay drawn by gfx.library (v7-plan step 2) and shown, read
+ *    back the same way against gfxref.h's drawing of it. Then it shows
+ *    them, allocates a fourth buffer to say so, and waits to be killed:
+ *    hwdb checks display freed its buffers.
  * 1: shows an overlay and the cursor, allocates a third buffer to say
  *    so, and waits for display to die under them (hwdb kills it). Its buffers stay mapped and writable,
  *    held until the DPU has let go of them; it connects to the restarted
@@ -24,8 +26,10 @@
 #include <stddef.h>
 
 #include <planar/devices/display.h>
+#include <planar/gfx.h>
 #include <planar/syscalls.h>
 
+#include "gfxref.h"
 #include "log.h"
 
 void *memset(void *dst, int c, size_t n);
@@ -155,6 +159,73 @@ static uint32_t bars_crc(uint32_t rgb, uint32_t w, uint32_t h)
     return ~crc;
 }
 
+/* gfx.library's overlay: a panel, its bevel, a label, and a translucent
+ * badge blitted over them; by IGfx, or by the reference, the same. */
+static void panel(const struct GfxIFace *g, struct RastPort *rp, const struct BitMap *badge)
+{
+    rp->rp_FgPen = 0x203040;
+    g->RectFill(rp, 0, 0, 255, 127);
+    g->DrawBevel(rp, 4, 4, 120, 27, 0xe0e0e0, 0x404040);
+    rp->rp_FgPen = 0xffff80;
+    rp->rp_BgPen = 0x203040;
+    g->Text(rp, 10, 10, "Planar gfx", 10);
+    g->BltBitMap(badge, 0, 0, rp, 90, 6, 32, 20, BLEND_SRC_OVER);
+}
+
+/* The CRC-32 DISPLAY_READ gives of (0, 0, w, h) of a bitmap: the top
+ * byte as 0. */
+static uint32_t bitmap_crc(const struct BitMap *bm, uint32_t w, uint32_t h)
+{
+    uint32_t crc = ~0u;
+
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++) {
+            uint32_t px = *gr_px(bm, x, y) & 0xffffff;
+
+            for (unsigned k = 0; k < 32; k += 8) {
+                crc ^= px >> k & 0xff;
+                for (unsigned i = 0; i < 8; i++)
+                    crc = crc >> 1 ^ (0xedb88320u & -(crc & 1));
+            }
+        }
+    return ~crc;
+}
+
+/* Buffer a, drawn by gfx.library and shown on plane 1 at (40, 40): what
+ * the screen shows of it where display composes it is what the
+ * reference draws. */
+static int gfx_on_screen(const struct buf *a, bool readable)
+{
+    static uint32_t want[32 * 128];
+    struct Library *lib = IExec->OpenLibrary("gfx.library", 7);
+    struct GfxIFace *IGfx = lib ? (struct GfxIFace *)IExec->GetInterface(lib, "main", 1) : nullptr;
+    struct BitMap screen, ref, *badge;
+    struct RastPort rp;
+    uint64_t seq;
+    int64_t e;
+
+    CHECK(IGfx != nullptr);
+    CHECK((badge = IGfx->AllocBitMap(32, 20, PIXFMT_ARGB8888, 0, nullptr)) != nullptr);
+    IGfx->InitRastPort(&rp, badge);
+    for (int32_t y = 0; y < 20; y++) {
+        rp.rp_FgPen = (uint32_t)(y * 13) << 24 | 0xc02060;      /* alpha 0 to 247, down it */
+        IGfx->RectFill(&rp, 0, y, 31, y);
+    }
+    CHECK(IGfx->InitBitMap(&screen, (void *)a->px, a->width, a->height, a->stride, PIXFMT_XRGB8888));
+    IGfx->InitRastPort(&rp, &screen);
+    panel(IGfx, &rp, badge);
+    CHECK((seq = commit(1, a->id, 40, 40, 0, 0, 0)) != 0);
+    CHECK(shown(seq));
+    if (readable) {
+        CHECK(IGfx->InitBitMap(&ref, want, 128, 32, 128 * 4, PIXFMT_XRGB8888));
+        IGfx->InitRastPort(&rp, &ref);
+        panel(&gr_iface, &rp, badge);
+        CHECK(read_screen(40, 40, 128, 32, &e) == bitmap_crc(&ref, 128, 32) && e == 0);
+    }
+    IGfx->FreeBitMap(badge);
+    return 0;
+}
+
 /* The last vblank: its number and its time, read together. */
 static uint64_t last_vblank(uint64_t *at)
 {
@@ -219,6 +290,7 @@ static int flips(void)
     char mode[64] = "";
     int64_t e;
     uint32_t crc;
+    bool readable;
 
     /* What it is, and refusals. */
     CHECK(m->dm_Width > 0 && m->dm_Height > 0 && m->dm_Count >= 3 && m->dm_Count <= DISPLAY_PLANES);
@@ -267,7 +339,7 @@ static int flips(void)
      * refused where a controller scans it out. */
     crc = read_screen(40, 40, 128, 32, &e);
     CHECK(e == 0 || e == ERR_NOSYS);
-    if (e == 0) {
+    if ((readable = e == 0)) {
         CHECK(crc == bars_crc(0x40c040, 128, 32));
         CHECK(read_screen(40, 40, 128, 32, &e) == crc);
         CHECK(read_screen(41, 40, 128, 32, &e) != crc);
@@ -283,6 +355,8 @@ static int flips(void)
     m->dm_Buffer = d.id;
     CHECK(ask(DISPLAY_FREE) == 0);
     CHECK(ask(DISPLAY_FREE) == ERR_NOTFOUND);
+    if ((r = gfx_on_screen(&a, readable)) != 0)
+        return r;
 
     vblanks = sync_page->ds_Vblank - vb0;
     memset(m, 0, sizeof *m);

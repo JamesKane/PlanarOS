@@ -1,10 +1,10 @@
 # The display class
 
-*Checked against V7 step 1.*
+*Checked against V7 step 2.*
 
 ## What it's for
 
-The screen, without setting it up. The firmware lit one output on each board (UEFI's GOP on the CIX, U-Boot on the RV2), and `display` (`drv/display`) takes that over: the mode, the timing and the link stay as the firmware left them. Mode setting, EDID and a second monitor come later. What display adds is **planes**: buffers the controller shows over one another and composes as it scans out, each moved or flipped at a vblank without copying a pixel ([docs §16.3](../../docs/16-rtg-display-gpu.md), pillars 3 and 4). `intuition` will be its client (V6). Now the test is (`conformance/displaytest.c`).
+The screen, without setting it up. The firmware lit one output on each board (UEFI's GOP on the CIX, U-Boot on the RV2), and `display` (`drv/display`) takes that over: the mode, the timing and the link stay as the firmware left them. Mode setting, EDID and a second monitor come later. What display adds is **planes**: buffers the controller shows over one another and composes as it scans out, each moved or flipped at a vblank without copying a pixel ([docs §16.3](../../docs/16-rtg-display-gpu.md), pillars 3 and 4). `intuition` will be its client (V7 step 3). Now the test is (`conformance/displaytest.c`).
 
 It drives:
 - **the K1's HDMI DPU** (the RV2), "saturn" (`saturn.c`);
@@ -13,9 +13,9 @@ It drives:
 
 ## Concepts
 
-- **Two ports.** "con.0" is the text console ([chapter 3](03-console.md)). "display.0" is the planes, with `struct DisplayMsg` messages (`planar/devices/display.h`). Both are served by one process, on one output.
+- **Two ports.** "con.0" is the text console ([chapter 3](03-console.md)), in the 8×8 font gfx.library's `Text` draws too (`lib/gfx/font8x8.c`). "display.0" is the planes, with `struct DisplayMsg` messages (`planar/devices/display.h`). Both are served by one process, on one output.
 - **Planes** stack by number, 0 at the bottom. Plane 0 is the console's: the firmware's framebuffer, as the firmware scans it out (`DISPLAYP_CONSOLE`), and no client's. Above it are an overlay (1) and the cursor (2, `DISPLAYP_CURSOR`, on top). Each takes `DISPLAY_XRGB8888` (opaque) or `DISPLAY_ARGB8888` (blended over what's below, not premultiplied), up to the screen's size.
-- **Buffers are the server's.** `DISPLAY_ALLOC` makes one where the controller can reach it (a DMA Area of display's lease: below the K1's 2 GiB, uncached), and maps it into the client, readable and writable. Its lines are 64-byte aligned (`dm_Stride`). A client draws in it; it never has to clean a cache.
+- **Buffers are the server's.** `DISPLAY_ALLOC` makes one where the controller can reach it (a DMA Area of display's lease: below the K1's 2 GiB, uncached), and maps it into the client, readable and writable. Its lines are 64-byte aligned (`dm_Stride`). A client draws in it, by hand or with gfx.library (`InitBitMap` describes it: [Libraries ch. 12](../libraries/12-gfx.md#drawing-in-displays-buffers)); it never has to clean a cache.
 - **A commit** sets some planes at once (`dm_Set`, `dm_Count` of them): each a buffer (or 0, off) and where its top left goes on the screen. Part of a plane may be off the screen, and is clipped. The server answers at once with the commit's number (`dm_Seq`), and the controller takes it at the next latch, the start of a frame. Commits made before that latch go together.
 - **A plane is the client's** that first commits a buffer to it, until it commits it off, or goes.
 - **The sync page** (`dm_Sync`, `struct DisplaySync`), one page per output, mapped read-only into each client: `ds_Vblank` counts vblanks, at `ds_Time` (`CurrentTime`'s); `ds_Disp` is the last commit on the screen; `ds_Safe` the last whose predecessors' buffers the controller no longer reads. On these controllers they move together. Each is woken with `WakeAddr`: wait with `WaitAddr`.

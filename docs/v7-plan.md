@@ -83,6 +83,28 @@ QEMU's `ramfb` is a framebuffer in guest memory that the guest describes through
 - **`conformance/gfx.c`** on every QEMU boot: the same cases through `IGfx`, a bitmap shared with a second process, and the screen's checksum of a test pattern blitted to plane 1.
 - **`V7.2 gfx ok`**, with the costs.
 
+**Done (2026-10-22).** `include/planar/gfx.h`, `lib/gfx`, `libs/gfx` and `arch/<isa>/lib/gfx.c`: gfx.library 7.2, 6.5 KiB on RV64, the region's third library. `make gfx-test` passes 32,184 cases through the scalar table and through NEON's. In the guest, `conformance/gfx.c` passes the same cases through `IGfx` by RVV and by NEON. displaytest's gfx.library overlay is read back from the screen as the reference draws it (hwdb's `V7.2 screen ok`). Built so, not quite as planned:
+- **RVV is checked in the guest, not under `qemu-riscv64`.** QEMU's user mode is Linux's, and the host is macOS. The host test runs NEON natively, as the host is an Arm one. RVV's entries are checked by `conformance/gfx.c` on both RV64 boots, against the same cases (`conformance/gfxcheck.h`). Its reference (`conformance/gfxref.h`) shares nothing with lib/gfx: a pixel at a time, rounding its own way.
+- **`InitBitMap`**, which the plan didn't list, describes memory a program already has: a display buffer, and intuition's scanout buffers in step 3. `FreeBitMap` leaves such a bitmap alone.
+- **An allocated `BitMap` lives in its own Area**, after the last row. Sharing `bm_Area` shares the description, and there's nothing else to free.
+- **`Text` has no vector entry.** At 8 pixels to a row there's nothing for a vector unit to do. `RectFill`, `BltBitMap` and `DrawBevel` have one each, through one set of row kernels (fill, copy, blend) under one clipping driver (`lib/gfx/draw.c`).
+- **`BLEND_SRC_OVER` takes the destination as opaque**, blending alpha as a channel whose source is 255. Each channel is rounded to the nearest, exactly (`lib/gfx/rows.h`), which the vector kernels compute to the bit. Translucent destinations wait for V8 (VQ33).
+- **The screen's checksum is displaytest's**, not `conformance/gfx.c`'s: only hwdb's display test has a display to read.
+- **Mutation-tested**, on the host and in the guest. Each of these failed a check:
+  - the blend's rounding, in each of the three kernels;
+  - NEON's alpha weights;
+  - a vector kernel's tail left undone;
+  - each edge of the clip, and the source's edges;
+  - the order of rows for an overlap, and the cutting of a row for one;
+  - `JAM1`'s background;
+  - a glyph skipped at the left edge;
+  - a friend's stride and placement;
+  - the light drawn over the dark;
+  - RVV's blit copy reading one pixel off.
+  
+  Three mutants survived, and all were equivalent: a shorter `vl`, NEON's fill handing its eighth pixel to the tail loop, and the two dark edges in the other order.
+- **Costs under TCG** (a megapixel). On RV64, `RectFill` takes 1.07 ms scalar and 1.18 ms by RVV, and `SRC_OVER` 3.8 ms against 9.0 ms. On AArch64, `RectFill` takes 1.50 ms scalar and 0.37 ms by NEON, and `SRC_OVER` 3.9 ms against 5.9 ms. TCG runs most vector instructions an element at a time, so these say nothing of the hardware: step 6 measures the boards.
+
 ## 3. intuition I: the screen and presentation
 
 `servers/intuition`, a server hwdb keeps, as it keeps input. One screen (the Workbench's), on one output.

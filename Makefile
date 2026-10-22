@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V7.1 done
+EXPECT := V7.2 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -136,7 +136,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -192,6 +192,7 @@ test-all:
 	@$(MAKE) --no-print-directory span-fuzz
 	@$(MAKE) --no-print-directory clib-test
 	@$(MAKE) --no-print-directory dos-lib-test
+	@$(MAKE) --no-print-directory gfx-test
 
 # lib/rt/string.c's word loops, which the ISAs' own replace, on the host
 # with the sanitizers, renamed so as not to be the host's.
@@ -283,6 +284,22 @@ $(DOS_LIB_TEST): $(DOS_LIB_SRCS) lib/dos/test.c conformance/argscheck.h include/
 
 dos-lib-test: $(DOS_LIB_TEST)
 	@$(DOS_LIB_TEST)
+
+# gfx.library (lib/gfx) on the host with the sanitizers, against
+# conformance/gfxcheck.h's reference: its scalar entries, and on an Arm
+# host its NEON ones (arch/aarch64/lib/gfx.c). RVV's run in the guest.
+GFX_TEST := build/gfx/gfx-test
+GFX_SRCS := $(filter-out %/test.c,$(wildcard lib/gfx/*.c))
+GFX_NEON := $(if $(filter arm64 aarch64,$(shell uname -m)),arch/aarch64/lib/gfx.c)
+
+$(GFX_TEST): $(GFX_SRCS) $(GFX_NEON) lib/gfx/test.c lib/gfx/rows.h lib/gfx/font8x8.h \
+		conformance/gfxcheck.h conformance/gfxref.h include/planar/gfx.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) -Ilib/gfx $(if $(GFX_NEON),-DGFX_TEST_NEON) \
+	  $(GFX_SRCS) $(GFX_NEON) lib/gfx/test.c -o $@
+
+gfx-test: $(GFX_TEST)
+	@$(GFX_TEST)
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.
