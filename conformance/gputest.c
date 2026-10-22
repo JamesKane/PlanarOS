@@ -214,11 +214,12 @@ static void submit_at(uint64_t at)
 
 static void submit(void)
 {
-    if (kind == GPU_ROGUE)
-        submit_rogue();
-    else
+    if (kind == GPU_ROGUE) {
+        submit_rogue();             /* moves seqno on itself */
+    } else {
         submit_at((uint64_t)sync);
-    seqno++;
+        seqno++;
+    }
 }
 
 /* Spun on: true if it came by 'until'. */

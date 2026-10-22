@@ -176,7 +176,11 @@ def main() -> int:
             want = [w.rstrip("\n") for w in f if w.strip() and not w.startswith("#")]
         have = set(lines)
         missing = [w for w in want if w not in have]
-    if found and not bad and not missing:
+    # A test that failed fails the run even when the expected line came
+    # after: a board whose 'reboot' resets it within the second given to
+    # the rest of the story says "the board reset itself" either way.
+    failed = re.search(r" FAIL\b|Guru Meditation", text)
+    if found and not bad and not missing and not failed:
         print(f"\nboot-check: ok ('{args.expect}')")
         return 0
     if bad:
