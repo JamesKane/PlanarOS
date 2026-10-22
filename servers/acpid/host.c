@@ -34,16 +34,6 @@ static uint64_t rsdp;
 static uint64_t touched[TOUCHED];   /* pages refused, to list once */
 static unsigned ntouched;
 
-void *acpid_alloc(size_t n)
-{
-    return calloc(1, n ? n : 1);
-}
-
-void acpid_free(void *p)
-{
-    free(p);
-}
-
 uint64_t acpid_rsdp(void)
 {
     return rsdp;

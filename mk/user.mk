@@ -2,11 +2,13 @@
 # bundle. Included by mk/arch-<arch>.mk after it sets USER_FLAGS.
 #
 # - conformance/NAME.c: a test program, one file each; blk* ones link
-#   the block class's library (lib/blk), dos* ones dos.library (lib/dos).
+#   the block class's library (lib/blk), dos* ones dos.library (lib/dos),
+#   clib* ones C's library (lib/clib), with its headers.
 # - servers/NAME/ and drv/NAME/: a server or a driver, every .c in its
 #   directory but host.c and test.c (the host's harnesses). Drivers also
-#   link drv.library (lib/drv), acpid links ACPICA (mk/acpica.mk), and
-#   hwdb the block class's library (lib/blk) for its kill test.
+#   link drv.library (lib/drv), acpid links ACPICA (mk/acpica.mk) and
+#   C's library (lib/clib), and hwdb the block class's library (lib/blk)
+#   for its kill test.
 #
 # Each is linked at 0 as a position-independent executable with
 # arch/$(ARCH)/user/user.ld (it relocates itself: lib/rt/reloc.c) and
@@ -35,6 +37,10 @@ EXECLIB_OBJS := $(BUILD)/user/exec/pool.o $(BUILD)/user/exec/fmt.o
 USER_UTILLIB := $(BUILD)/user/libutility.a
 UTILLIB_OBJS := $(patsubst lib/utility/%.c,$(BUILD)/user/utility/%.o,\
 	$(filter-out %/test.c,$(wildcard lib/utility/*.c)))
+# lib/clib, C's library, for a program that asks for it: acpid. Its
+# headers are include/clib, which nothing else sees.
+USER_CLIB := $(BUILD)/user/libclib.a
+CLIB_OBJS := $(patsubst lib/clib/%.c,$(BUILD)/user/clib/%.o,$(filter-out %/test.c %/testhost.c,$(wildcard lib/clib/*.c)))
 # compiler-rt's 128-bit builtins (third_party/compiler-rt): an archive,
 # last on every link line, so a program takes only what it calls.
 USER_BUILTINS := $(BUILD)/user/libcompiler-rt.a
@@ -67,6 +73,10 @@ $(USER_EXECLIB): $(EXECLIB_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
+$(USER_CLIB): $(CLIB_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
+
 $(USER_UTILLIB): $(UTILLIB_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
@@ -74,6 +84,10 @@ $(USER_UTILLIB): $(UTILLIB_OBJS)
 $(USER_BUILTINS): $(BUILTINS_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
+
+$(BUILD)/user/clib/%.o: lib/clib/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -Iinclude/clib -MMD -MP -c $< -o $@
 
 $(BUILD)/user/exec/%.o: lib/exec/%.c
 	@mkdir -p $(dir $@)
@@ -98,14 +112,14 @@ $(BUILD)/user/drv-lib/%.o: lib/drv/%.c
 # ACPICA, and acpid's files, which see its headers.
 $(BUILD)/user/acpica/%.o: third_party/acpica/source/components/%.c servers/acpid/acplanar.h
 	@mkdir -p $(dir $@)
-	@$(CC) $(ACPICA_CFLAGS) $(USER_FLAGS) -ffreestanding -fno-builtin -fno-stack-protector -fPIE \
+	@$(CC) $(ACPICA_CFLAGS) -Iinclude/clib $(USER_FLAGS) -ffreestanding -fno-builtin -fno-stack-protector -fPIE \
 	  -c $< -o $@
 
 $(USER_ACPICA): $(ACPICA_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
-$(BUILD)/user/servers/acpid/%.o: USER_CFLAGS += $(ACPICA_INC)
+$(BUILD)/user/servers/acpid/%.o: USER_CFLAGS += $(ACPICA_INC) -Iinclude/clib
 
 $(BUILD)/user/servers/%.o: servers/%.c
 	@mkdir -p $(dir $@)
@@ -115,14 +129,18 @@ $(BUILD)/user/drv/%.o: drv/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
+$(BUILD)/user/clib.o $(BUILD)/user/clib%.o: USER_CFLAGS += -Iinclude/clib
+
 $(BUILD)/user/%.o: conformance/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/user/%.o \
-		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
+		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_CLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) \
+		arch/$(ARCH)/user/user.ld
 	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) \
-	  $(if $(filter dos%,$*),$(USER_DOS)) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
+	  $(if $(filter dos%,$*),$(USER_DOS)) $(if $(filter clib clib%,$*),$(USER_CLIB)) \
+	  $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
 	$(check_tls)
 
 # thread_local's segment, if a program has one, must be aligned to the
@@ -135,7 +153,7 @@ check_tls = @$(READELF) -lW $@ | awk '$$1 == "TLS" && $$NF != "0x40" { exit 1 }'
 # A program per directory: $(1) its name, $(2) the directory.
 define user_dir_prog
 $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$$(wildcard $(2)/*.c))) \
-	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA)) \
+	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA) $(USER_CLIB)) \
 	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) \
 	$(if $(filter servers/hwdb drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
 $(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) arch/$(ARCH)/user/user.ld
@@ -150,7 +168,7 @@ $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 
 # Every user object's dependencies: programs, runtime, stubs (a call
 # renumbered in planar/syscalls.h must rebuild the stubs too).
--include $(USER_RT:.o=.d) $(EXECLIB_OBJS:.o=.d) $(UTILLIB_OBJS:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
+-include $(USER_RT:.o=.d) $(EXECLIB_OBJS:.o=.d) $(UTILLIB_OBJS:.o=.d) $(CLIB_OBJS:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_CPROGS))
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 

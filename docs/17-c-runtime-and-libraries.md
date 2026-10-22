@@ -148,6 +148,7 @@ void  FreeVec(void *memoryBlock);
 
 - As built (V6 step 2, `lib/exec/pool.c`): the default pool has 64 KiB puddles and a 16 KiB threshold, and is `POOLF_LOCKED`. `AREAF_CLEAR` zeroes the block; `AREAF_DMA32` and `AREAF_NC` make it an Area of its own; any other flag fails.
 - `AllocVec` / `FreeVec` replaces `servers/acpid/heap.c` (`AcpiOsAllocate` $\rightarrow$ `AllocVec(size, 0)`, `AcpiOsFree` $\rightarrow$ `FreeVec(ptr)`) and backs `lib/clib`'s `malloc` and `free`.
+- As built (V6 step 5): acpid's `AcpiOsAllocate` is `malloc`, which is `AllocVec`, and `heap.c` is deleted. `realloc` needs a block's size, which lib/exec gives lib/clib through `_vec_size` (`lib/exec/vec.h`), not a public call.
 
 #### 3. `RawDoFmt` and `CopyMem` / `CopyMemQuick` / `SetMem`
 
@@ -319,6 +320,16 @@ include/clib/
   - `snprintf` and `vsnprintf` (calling `utility.library`'s `VSNPrintf`).
 - **`<stdbit.h>`**:
   - Wraps Clang 22's `__builtin_stdc_*` intrinsics for C23 bit and byte operations.
+
+As built (V6 step 5):
+- **`<stdbit.h>`** is on Clang's type-generic `__builtin_clzg`, `__builtin_ctzg` and `__builtin_popcountg`: Clang 22 has no `__builtin_stdc_*`, which are GCC 14's.
+- **`memexplicit`** is C23's `memset_explicit`.
+- **`<stdio.h>`'s `snprintf`** isn't acpid's: ACPICA brings its own (`utprint.c`), which the link takes first. lib/clib's is in its own archive member, so the two never meet.
+- **`<ctype.h>`'s tests are `static inline`**, so they're not functions a program can take the address of.
+- **`malloc(0)`** is a block of its own; **`realloc`** keeps a block big enough already; **`qsort`** is a heapsort; **`errno`** is `thread_local`; **`abort`** and a failed **`assert`** log a line and exit with `EXIT_FAILURE`.
+- **`<inttypes.h>`'s `PRI` macros** are the compiler's (`__INT64_FMTd__`), so they're right on the host's tests as well as on both ISAs. There are no `SCN` macros, since there's no scanf.
+- **Tested** by `conformance/clibcheck.h`'s cases, in the guest (`conformance/clib.c`) and on the host with the sanitizers (`make clib-test`), which also checks the `strtol` family, the string functions and `qsort` against the host's library on random input.
+- **The empty `.tdata`.** `errno` was the first `thread_local` with no first value, in a program with no other. The linker dropped the empty `.tdata` and its 64-byte alignment, so the TLS segment came out aligned to 4, which would have moved the variables from where crt0 puts them on Arm. `mk/user.mk`'s check refused the link; `user.ld` now aligns `.tbss` to 64 too.
 
 ---
 

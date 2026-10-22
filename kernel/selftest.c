@@ -1403,6 +1403,8 @@ void selftest_tasks(void *)
     kprintf("V6.3 done\n");
     selftest_libraries();
     kprintf("V6.4 done\n");
+    selftest_clib();
+    kprintf("V6.5 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2907,6 +2909,25 @@ void selftest_libraries(void)
             "processes, the tables read-only\n", library_count(),
             (unsigned long long)library_pages(),
             library_vector() ? "by the vector unit" : "by words: no vector unit");
+}
+
+/*
+ * V6 step 5: lib/clib (conformance/clib.c), C's library for third-party
+ * code: the string functions, ctype, the strtol family, malloc over
+ * AllocVec, qsort, snprintf and stdbit.h; errno each task's own.
+ */
+void selftest_clib(void)
+{
+    static const char *const tests[] = { "clib" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.5 clib skipped: no user programs\n");
+        return;
+    }
+    run_each("V6.5 clib", tests, 1);
+    kprintf("V6.5 clib ok: C's string functions, ctype, the strtol family, malloc over "
+            "AllocVec, qsort and bsearch, snprintf and stdbit.h as C says; errno each task's "
+            "own\n");
 }
 
 /*

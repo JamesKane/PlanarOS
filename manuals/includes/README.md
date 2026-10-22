@@ -21,6 +21,9 @@
 | `planar/msg.h` | `struct MsgPort`, `MSGPORT_STASH` and Exec's message calls | Every program that sends or serves messages |
 | `planar/syscalls.h` | Kernel call numbers (`SYS_*`) and errors (`ERR_NOSYS` to `ERR_TIMEOUT`) | Stubs; any program that tests an error |
 | `planar/endian.h` | `get_be32`, `get_le64` and friends, for firmware formats | Drivers, `hwdb` |
+| `planar/utility.h` | utility.library: `struct TagItem`, `TAG_*`, `struct Hook`, the case and comparison calls, `SNPrintf`, `struct Span`, `struct Str`, `STR()`, the checked readers; `struct UtilityIFace` ([Libraries ch. 5](../libraries/05-utility.md)) | Any program |
+
+C's headers, for code written for other systems, are apart from these, in `include/clib/`: `assert.h`, `ctype.h`, `errno.h`, `inttypes.h`, `stdbit.h`, `stdio.h`, `stdlib.h` and `string.h`, which lib/clib implements ([Libraries ch. 11](../libraries/11-clib.md)). Only a program built with `-Iinclude/clib` sees them, and they're C11 as well as C23.
 
 ## What the headers promise
 

@@ -10,7 +10,7 @@
  *
  * acpid is one task, so locks and semaphores never wait (osl.c). The C
  * library is the system's (ACPI_USE_SYSTEM_CLIBRARY): on the host, the
- * host's; on Planar, lib/rt's memory functions and clib.c's. ACPICA's
+ * host's; on Planar, lib/clib (V6 step 5). ACPICA's
  * object caches are its own (ACPI_USE_LOCAL_CACHE). No debugger, no
  * disassembler.
  */
@@ -53,31 +53,10 @@
 #define ACPI_FILE_OUT NULL
 #define ACPI_FILE_ERR NULL
 
-/* The C library functions ACPICA calls, declared as a system's headers
- * would (its acclib.h declares them only for its own library). */
-#include <stddef.h>
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-void *memmove(void *dst, const void *src, size_t n);
-int memcmp(const void *a, const void *b, size_t n);
-size_t strlen(const char *s);
-int strcmp(const char *a, const char *b);
-int strncmp(const char *a, const char *b, size_t n);
-char *strcpy(char *restrict dst, const char *restrict src);
-char *strncpy(char *restrict dst, const char *restrict src, size_t n);
-char *strcat(char *restrict dst, const char *restrict src);
-char *strncat(char *restrict dst, const char *restrict src, size_t n);
-char *strchr(const char *s, int c);
-char *strstr(const char *haystack, const char *needle);
-unsigned long strtoul(const char *restrict s, char **restrict end, int base);
-int toupper(int c);
-int tolower(int c);
-int isdigit(int c);
-int isspace(int c);
-int isxdigit(int c);
-int isupper(int c);
-int islower(int c);
-int isprint(int c);
-int isalpha(int c);
+/* The C library ACPICA calls: on Planar, lib/clib's (include/clib);
+ * on the host, the host's. ACPICA has its own snprintf (utprint.c). */
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
 
 #endif /* __ACENV_H__ */

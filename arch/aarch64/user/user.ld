@@ -30,13 +30,14 @@ SECTIONS
     _etext = .;
     /* thread_local's first values, then its zeroed ones: the template each
      * task's block is made from (lib/rt/tls.c). Aligned to 64, which
-     * lib/rt/tls.c and crt0 assume, and mk/user.mk checks. */
+     * lib/rt/tls.c and crt0 assume, and mk/user.mk checks. .tbss is too,
+     * since .tdata is dropped when it's empty, and its alignment with it. */
     .tdata : ALIGN(64) {
         __tdata_start = .;
         *(.tdata .tdata.*)
         __tdata_end = .;
     }
-    .tbss : {
+    .tbss : ALIGN(64) {
         *(.tbss .tbss.*)
         __tbss_end = .;
     }

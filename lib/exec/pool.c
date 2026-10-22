@@ -21,6 +21,7 @@
 #include <stdatomic.h>
 
 #include "procdata.h"
+#include "vec.h"
 
 constexpr uint64_t PAGE = 4096;
 constexpr unsigned SMALL_CLASSES = 16;          /* 16 to 256 bytes */
@@ -330,4 +331,9 @@ void FreeVec(void *memoryBlock)
     else
         FreePooled(atomic_load_explicit(&process_data()->pd_VecPool, memory_order_acquire), v,
                    v->size);
+}
+
+uint64_t _vec_size(const void *memoryBlock)
+{
+    return ((const struct vec *)memoryBlock - 1)->size - sizeof(struct vec);
 }

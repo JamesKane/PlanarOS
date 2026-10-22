@@ -73,13 +73,15 @@ FreeArea((Handle)a);
 
 ## What every program links
 
-There's no C library yet. Every program links the runtime instead (`lib/rt`, `lib/exec`, `third_party/compiler-rt`), which has what C compiled freestanding needs:
+Planar's programs don't use C's library. Every program links the runtime instead (`lib/rt`, `lib/exec`, `third_party/compiler-rt`), which has what C compiled freestanding needs:
 - **Start and end.** crt0 relocates the program, keeps exec.library's interface, which the kernel passes in the third argument register, in the program's `IExec`, makes its first task's `thread_local` variables, calls `main`, and passes its return value to `ExitProcess`.
 - **The memory functions** `memcpy`, `memmove`, `memset` and `memcmp`. The compiler calls them for struct copies and initialisers, and a program may too. Exec's names for them are `CopyMem`, `CopyMemQuick` and `SetMem` (`planar/exec.h`). On both ISAs the first three use the vector unit, RVV or NEON, 32 bytes or more a step; `memcmp` compares 8 bytes a step.
 - **128-bit arithmetic.** `__int128` and `_BitInt(128)` division and modulo call compiler-rt's builtins. A program links only the ones it uses.
 - **`thread_local`**, a copy for each task (chapter 2). A variable can be aligned to 64 bytes at most: the build refuses a program with more.
 
 Every process also maps the shared library region, where exec.library and utility.library are, reached through `IExec` and the interfaces it opens (chapter 8). A program can also link the same functions itself, as the tree's programs still do: exec's pools and `AllocVec` (chapter 3) and `RawDoFmt`, the formatter ([autodoc](../autodocs/exec.md#execrawdofmt)), and utility.library: tag lists, hooks, `SNPrintf`, `Span` and `Str` (chapter 5). They're in archives, `libexec.a` and `libutility.a`, so a program that doesn't call them doesn't carry them.
+
+Code written for other systems, which expects `malloc`, `strlen` and `strtoul`, can ask for C's library: `lib/clib`, with C's headers in `include/clib`, on top of exec.library and utility.library (chapter 11). acpid does, for ACPICA. Nothing else sees those headers.
 
 Measured by `conformance/memfns.c`, 64 KiB at a time, under QEMU:
 

@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: in progress (2026-10-22): steps 1 to 4 done; decisions 1 to 4 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
+**Status: in progress (2026-10-22): steps 1 to 5 done; decisions 1 to 4 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -218,6 +218,27 @@ The design says three things (§3.4, §7.2, VQ12): shared libraries live in a gl
 ## 5. `lib/clib`
 
 §17.4.5: `include/clib/` and `lib/clib/`, opt-in, never in a program that doesn't ask for it. `stdlib.h` (`malloc` and friends over `AllocVec`, `strto*`, `qsort`, `bsearch`, `abs`), `string.h`, `ctype.h`, `stdio.h`'s `snprintf` family only, and `stdbit.h`. acpid builds with `-Iinclude/clib` and `libclib.a`, and its `clib.c` and `heap.c` are deleted. Its tests (`make acpid-test`, the CIX's namespace) must give the same reports as before.
+
+**Done (2026-10-22), on QEMU.** `include/clib/` (`assert.h`, `ctype.h`, `errno.h`, `inttypes.h`, `stdbit.h`, `stdio.h`, `stdlib.h`, `string.h`) and `lib/clib/`, built into `libclib.a`, which a program's link line has before `libutility.a` only when it asks: acpid, and conformance programs named `clib*`.
+
+- **acpid** builds ACPICA and its own files with `-Iinclude/clib`. `acplanar.h` includes `<ctype.h>`, `<stdlib.h>` and `<string.h>` instead of declaring the functions, on Planar and the host alike. `AcpiOsAllocate` is `malloc`, so `acpid_alloc` is gone from `acpid.h` and `host.c`, and `clib.c` and `heap.c` are deleted. ACPICA keeps its own `snprintf` (`utprint.c`). The image is 4 KiB bigger on AArch64 and 8 bytes on RV64.
+- **The reports are the same:** `hwdb-test`'s acpid on the CIX's tables (271 devices, 217 present) and QEMU's (50), and acpid on the QEMU ACPI boot (53 devices, 53 present). Planar's acpid on the CIX's own tables waits for the board.
+- **`malloc`** is `AllocVec`; `realloc` reads a block's size through `_vec_size` (`lib/exec/vec.h`), lib/exec's, not exec.library's. `malloc(0)` is a block, `realloc` keeps a block big enough, `qsort` is a heapsort, `errno` is `thread_local`, the `strtol` family takes C23's `0b`.
+- **Not as §17.4.5 said:** `<stdbit.h>` is on `__builtin_clzg`, `_ctzg` and `_popcountg`, since Clang 22 has no `__builtin_stdc_*`; `memexplicit` is C23's `memset_explicit`. lib/clib calls the linked-in `AllocVec` and `VSNPrintf`, not `IExec`'s: the same pool either way.
+- **A linker fix:** `errno` was the first `thread_local` with no first value in a program with no other, and the linker dropped the empty `.tdata` with its alignment. The TLS segment came out aligned to 4, which on Arm would have put the variables where crt0 doesn't; `mk/user.mk`'s check refused the link. `user.ld` aligns `.tbss` to 64 too.
+
+**Tested by:**
+- `conformance/clibcheck.h`, 6220 cases: the string functions at their edges, ctype for every byte and EOF, 29 `strtol` cases at the prefixes and the ranges' ends, malloc's alignment, `realloc` grown a byte at a time and past the pool's threshold, `qsort` and `bsearch` on 0 to 300 elements of 1, 4 and 24 bytes, `snprintf` and the `PRI` macros, `stdbit.h` for every byte against loops.
+- `conformance/clib.c` runs them in the guest, then shows `errno` is each task's own and a block one task mallocs another frees. `V6.5 clib ok`, on every QEMU boot.
+- `make clib-test` runs them on the host with the sanitizers, then 900,000 checks against the host's library: random strings through both `strtol` families, the string functions, and `qsort`. It found `strstr` wrong for an empty needle. Mutations caught: the overflow check gone, the heap's sift one past the end, `strncpy` not padding, `realloc` keeping a block 16 bytes too small, and copying a byte short.
+
+**Costs**, under QEMU:
+
+| | RV64 | AArch64 |
+|---|---|---|
+| `malloc` and `free` of 64 bytes | 280 ns | 110 ns |
+| `strtoul` of 10 digits | 90 ns | 85 ns |
+| `qsort` of 1000 `int`s | 1.0 ms | 0.29 ms |
 
 ## 6. dos.library in RKM names
 

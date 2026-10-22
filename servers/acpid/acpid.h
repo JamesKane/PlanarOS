@@ -12,8 +12,8 @@
  *   regions in memory go through its own handler, which asks the
  *   platform for each window.
  *
- * The platform is the rest: main.c on Planar (hwdb's protocol, the heap,
- * time), host.c on the host (tables from files, for the CIX's count and
+ * The platform is the rest: main.c on Planar (hwdb's protocol and
+ * time; memory is lib/clib's malloc), host.c on the host (tables from files, for the CIX's count and
  * hwdb's tests). This header names what it gives, without ACPICA's.
  */
 #ifndef ACPID_H
@@ -30,8 +30,6 @@ int snprintf(char *restrict s, size_t n, const char *restrict format, ...);
 
 /* --- The platform's. --- */
 
-void *acpid_alloc(size_t n);            /* zeroed; nullptr when there's no room */
-void acpid_free(void *p);
 uint64_t acpid_rsdp(void);              /* physical */
 uint64_t acpid_now(void);               /* nanoseconds, from any start */
 void acpid_sleep(uint64_t ns);

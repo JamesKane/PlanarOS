@@ -85,7 +85,7 @@ ACPI_STATUS AcpiOsCreateSemaphore(UINT32 max, UINT32 initial, ACPI_SEMAPHORE *ou
 
     if (!out || initial > max)
         return AE_BAD_PARAMETER;
-    if (!(s = acpid_alloc(sizeof *s)))
+    if (!(s = malloc(sizeof *s)))
         return AE_NO_MEMORY;
     *s = (struct sem){ initial, max };
     *out = s;
@@ -96,7 +96,7 @@ ACPI_STATUS AcpiOsDeleteSemaphore(ACPI_SEMAPHORE h)
 {
     if (!h)
         return AE_BAD_PARAMETER;
-    acpid_free(h);
+    free(h);
     return AE_OK;
 }
 
@@ -126,12 +126,12 @@ ACPI_STATUS AcpiOsSignalSemaphore(ACPI_SEMAPHORE h, UINT32 units)
 
 void *AcpiOsAllocate(ACPI_SIZE size)
 {
-    return acpid_alloc(size);
+    return malloc(size);
 }
 
 void AcpiOsFree(void *p)
 {
-    acpid_free(p);
+    free(p);
 }
 
 void *AcpiOsMapMemory(ACPI_PHYSICAL_ADDRESS at, ACPI_SIZE len)
