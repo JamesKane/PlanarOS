@@ -18,7 +18,7 @@ void CloseIntuition(struct Intuition *in);
 ```
 
 **FUNCTION**
-Closes the connection `OpenIntuition` made. intuition closes every window still open on it, as it does when a client dies. The connection's page of events goes with it.
+Closes the connection `OpenIntuition` made. intuition closes every window still open on it, as it does when a client dies. The connection's page of events goes with it, and the caller's mapping of it is let go of here, in case intuition is dead and can't take it back.
 
 **INPUTS**
 - `in` -- an `Intuition` that `OpenIntuition` opened.
@@ -28,6 +28,7 @@ None.
 
 **NOTES**
 - The windows' bitmaps stay the caller's to free. intuition lets go of its mappings of them as it closes the windows.
+- After `ERR_PORT_DIED`, this and then `OpenIntuition` again make a new connection to intuition's next self. The old `Window`s are refused (`ERR_BADARG`) and must be opened again (Libraries ch. 13, "When a program or a server dies").
 
 **BUGS**
 None known.
@@ -58,7 +59,7 @@ A window whose close gadget was clicked must be closed within a second of its `I
 
 **RESULT**
 0, or:
-- `ERR_BADARG` -- `w` isn't open.
+- `ERR_BADARG` -- `w` isn't open, or was opened on a connection since closed.
 - `ERR_NOTFOUND` -- intuition had no such window of the caller's.
 - `ERR_TIMEOUT`, `ERR_PORT_DIED` -- intuition didn't answer in time, or has gone.
 
@@ -171,6 +172,7 @@ if (IIntuition->OpenIntuition(&in, CurrentTime() + 5000000000) != 0)
 - `in_Width` and `in_Height` are the screen's. A window may be anywhere, on it or off it.
 - **Differs from the RKM:** there's no `IntuitionBase` to open, nor `OpenWorkbench`. The Workbench's screen is the only one, and the `Intuition` is the caller's connection to it.
 - The connection uses signal 22 of the calling task.
+- With a deadline, it's the way back after intuition dies: hwdb starts it again, and this connects as soon as it's published.
 
 **BUGS**
 None known.
@@ -267,7 +269,7 @@ It doesn't wait for intuition: the message goes, and its answer is taken later. 
 
 **RESULT**
 0, or:
-- `ERR_BADARG` -- the window isn't open, there are too many rectangles, or one isn't inside it.
+- `ERR_BADARG` -- the window isn't open (or was opened on a connection since closed), there are too many rectangles, or one isn't inside it.
 - `ERR_TIMEOUT`, `ERR_PORT_DIED` -- the last `INTUI_INFLIGHT` (4) presents are all unanswered, a second on, or intuition has gone.
 - `ERR_NOTFOUND`, from intuition, later -- it took the window off the screen, as its close gadget went unanswered.
 - An earlier present's refusal, from intuition, which this is the first to say. The frame was presented.
@@ -316,7 +318,7 @@ Returns once the connection's ring has an event not yet taken: `GetIntuiEvent` t
 0, or:
 - `ERR_BADARG` -- `in` isn't open.
 - `ERR_TIMEOUT` -- the deadline passed first.
-- `ERR_PORT_DIED` -- intuition has gone.
+- `ERR_PORT_DIED` -- intuition has gone. A wait under way when it dies returns this at once: the page is woken as intuition's mapping of it goes.
 
 **NOTES**
 - **Differs from the RKM:** `Wait` on a window's `UserPort` signal. A program waiting for events and its frames both waits on one, and polls the other: see `WaitSafe`'s no-call return.
@@ -351,9 +353,9 @@ If `is_Safe` is there already, it returns at once with no kernel call. Otherwise
 
 **RESULT**
 0, or:
-- `ERR_BADARG` -- the window isn't open.
+- `ERR_BADARG` -- the window isn't open, or was opened on a connection since closed.
 - `ERR_TIMEOUT` -- the deadline passed first.
-- `ERR_PORT_DIED` -- intuition has gone.
+- `ERR_PORT_DIED` -- intuition has gone, as for `WaitIntuiEvent`. While display is away, a window of two buffers is still made safe at once; one of one waits for display.
 - An earlier present's refusal, from intuition.
 
 **EXAMPLE**

@@ -1497,9 +1497,11 @@ void selftest_tasks(void *)
     kprintf("V7.2 done\n");
     /* hwdb's window test said what it saw of intuition (servers/hwdb/
      * intuition.c), and exited 0 only if that held: its windows, then its
-     * input and chrome. */
+     * input and chrome, then intuition, display and input killed under
+     * them. */
     kprintf("V7.3 done\n");
     kprintf("V7.4 done\n");
+    kprintf("V7.5 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

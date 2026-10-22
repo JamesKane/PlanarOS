@@ -63,7 +63,8 @@ struct area {
     unsigned sharers;
     unsigned refs;                  /* calls using it (lock held) */
     uint32_t handle;                /* 0 if the kernel owns it, or once freed */
-    struct process *owner;
+    bool user;                      /* AllocArea's: a process's, even once freed or its owner dead */
+    struct process *owner;          /* nullptr: the kernel's, or its owner is dead */
     struct mapping *maps;
 };
 
@@ -403,8 +404,10 @@ void area_process_died(struct process *p)
         }
         a = m->area;
         unlink_mapping(m);
-        if (a->owner == p)
+        if (a->owner == p) {
             a->handle = 0;          /* its handle goes with the process */
+            a->owner = nullptr;     /* and the record, which another may reuse */
+        }
         last = unused(a);
         spin_unlock_irqrestore(&lock, was);
         kfree(m);
@@ -567,6 +570,7 @@ static int64_t alloc(uint64_t size, uint32_t flags, uint64_t addr_out, struct le
                         l ? lease_dma_limit(l) : 0)))
         return ERR_NOMEM;
     a->owner = p;
+    a->user = true;
     a->refs = 1;                    /* ours, until the call is done */
     if (l) {
         a->lease = l;
@@ -643,6 +647,7 @@ struct area *area_take(uint32_t h, struct process *p, uint64_t min_size)
         unlink_mapping(m);
         a->handle = 0;
         a->owner = nullptr;         /* the kernel's, until it maps it in the child */
+        a->user = false;
         a->refs--;                  /* area_of's: now as area_new leaves one */
     }
     spin_unlock_irqrestore(&lock, was);
@@ -716,7 +721,9 @@ int64_t area_unshare_call(uint32_t h, uint32_t task)
 
 /* ReleaseArea: the caller's own mapping of an Area another process
  * owns and shared with it (v5-plan step 5: a server done with what a
- * client lent it). The Area goes, if nothing else holds it. */
+ * client lent it), or did before it freed it or died (v7-plan step 5: a
+ * killed client's windows). The Area goes, if nothing else holds it.
+ * Never one the kernel made: an arena, a stack, an image. */
 int64_t area_release_call(uint64_t addr)
 {
     struct process *p = task_self()->process;
@@ -728,7 +735,7 @@ int64_t area_release_call(uint64_t addr)
             a = m->area;
             break;
         }
-    if (!a || a->owner == p || a->handle == 0) {
+    if (!a || a->owner == p || !a->user) {
         spin_unlock_irqrestore(&lock, was);
         return a ? ERR_RIGHTS : ERR_NOTFOUND;
     }

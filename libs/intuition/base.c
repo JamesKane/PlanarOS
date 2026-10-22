@@ -1,7 +1,7 @@
 /*
  * libs/intuition/base.c -- intuition.library: its base and its interface
  *
- * V7 steps 3 and 4, decision 5. lib/intuition built as a shared library image
+ * V7 steps 3 to 5, decision 5. lib/intuition built as a shared library image
  * (lib.ld), with what it calls linked in: lib/exec's messages, utility's
  * tag lists, and the kernel calls' stubs. Its state is the caller's
  * Intuition and Windows.
@@ -29,8 +29,8 @@ static struct Interface *const interfaces[] = { (struct Interface *)&main_iface,
 static const struct Library base = {
     .lib_Name = "intuition.library",
     .lib_Version = 7,
-    .lib_Revision = 4,
-    .lib_IdString = "intuition.library 7.4 (22.10.2026)",
+    .lib_Revision = 5,
+    .lib_IdString = "intuition.library 7.5 (22.10.2026)",
     .lib_Interfaces = interfaces,
 };
 

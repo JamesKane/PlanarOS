@@ -1,6 +1,6 @@
 /*
  * lib/intuition/intuition.c -- intuition.library: the client's side
- * (v7-plan steps 3 and 4)
+ * (v7-plan steps 3 to 5)
  *
  * Over the messages of planar/intuition.h, on a connection the caller's
  * Intuition holds. OPEN, CLOSE, INFO and EVENTS wait for their answers, a second
@@ -17,6 +17,13 @@
  * The connection's IntuiAck is a page of its own, shared with intuition
  * read-only. Nothing here keeps state of its own: it's all in the
  * caller's Intuition and Windows, and that page.
+ *
+ * When intuition dies, its page is woken as its mapping goes, so a
+ * WaitSafe or a WaitIntuiEvent returns ERR_PORT_DIED, as every call
+ * does after. The client closes its Intuition, opens it again (which
+ * waits for the port, OpenPort's wait) and opens its windows again from
+ * the bitmaps it kept. A window of the old connection is refused, not
+ * read: its sync words were on the page that went.
  */
 #include <planar/intuition.h>
 #include <planar/ipc.h>
@@ -93,10 +100,13 @@ int64_t OpenIntuition(struct Intuition *in, uint64_t deadline)
 }
 
 /* The windows go with the connection: intuition closes them, and lets
- * go of the IntuiAck's page, which lasts until it has. */
+ * go of the IntuiAck's page, which lasts until it has. Its own page is
+ * let go of here too, in case intuition is dead and can't. */
 void CloseIntuition(struct Intuition *in)
 {
     ClosePort(&in->in_Port);
+    if (in->in_Page)
+        ReleaseArea(in->in_Page);
     if (in->in_AckArea)
         FreeArea(in->in_AckArea);
     in->in_AckArea = 0;
@@ -166,12 +176,21 @@ int64_t OpenWindowTagList(struct Intuition *in, struct Window *w, const struct T
     return 0;
 }
 
+/* A window of the connection as it is: not one of before it was opened
+ * again, whose sync line was on the old page. */
+static bool live(const struct Window *w)
+{
+    const struct Intuition *in = w->w_Intuition;
+
+    return in && w->w_Id && in->in_Page && ((uint64_t)w->w_Sync & ~4095ULL) == (uint64_t)in->in_Page;
+}
+
 int64_t CloseWindow(struct Window *w)
 {
     struct Intuition *in = w->w_Intuition;
     int64_t e;
 
-    if (!in || !w->w_Id)
+    if (!live(w))
         return ERR_BADARG;
     clear(in->in_Call, sizeof *in->in_Call);
     in->in_Call->im_Window = w->w_Id;
@@ -229,7 +248,7 @@ int64_t PresentWindow(struct Window *w, const struct GfxRect *damage, uint32_t c
     unsigned k;
     int64_t e;
 
-    if (!in || !w->w_Id || count > INTUI_RECTS || (count && !damage))
+    if (!live(w) || count > INTUI_RECTS || (count && !damage))
         return ERR_BADARG;
     for (uint32_t i = 0; i < count; i++)
         if (damage[i].MinX < 0 || damage[i].MinY < 0 || damage[i].MinX > damage[i].MaxX ||
@@ -262,7 +281,7 @@ int64_t WaitSafe(struct Window *w, uint64_t deadline)
     const struct IntuiSync *s = w->w_Sync;
     uint64_t v;
 
-    if (!w->w_Intuition || !w->w_Id)
+    if (!live(w))
         return ERR_BADARG;
     while ((v = __atomic_load_n(&s->is_Safe, __ATOMIC_ACQUIRE)) < w->w_Frame) {
         if (PortGone(&w->w_Intuition->in_Port))

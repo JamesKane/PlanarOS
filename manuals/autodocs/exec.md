@@ -1584,14 +1584,14 @@ int64_t ReleaseArea(const void *address);
 ```
 
 **FUNCTION**
-Unmaps from the calling process the Area containing `address`, which another process owns and shared with it (`ShareArea`). It's the sharer's side of `UnshareArea`: a server done with what a client lent it, such as `gpu-panthor` with an app's ring once its queue has gone. The Area itself goes only if nothing else holds it: its owner's handle and other mappings keep it.
+Unmaps from the calling process the Area containing `address`, which another process owns and shared with it (`ShareArea`), or did before it freed the Area or died. It's the sharer's side of `UnshareArea`: a server done with what a client lent it, such as `gpu-panthor` with an app's ring once its queue has gone, or intuition with a killed program's bitmaps. The Area itself goes only if nothing else holds it: its owner's handle and other mappings keep it.
 
-A kernel call (53), added in V5 step 5: before it, only the owner could take a mapping back, so what a dead client had lent a server stayed mapped in the server until the server died.
+A kernel call (53), added in V5 step 5: before it, only the owner could take a mapping back. Until V7 step 5 it also refused an Area whose owner had freed it or died, taking it for the kernel's, so what a dead client had lent a server still stayed mapped in the server until the server died. kill-window found it.
 
 **RESULT**
 0, or:
 - `ERR_NOTFOUND` -- nothing the caller maps contains `address`.
-- `ERR_RIGHTS` -- the caller owns that Area (free it with `FreeArea`), or the kernel does (the program image, a stack, a connection's arena).
+- `ERR_RIGHTS` -- the caller owns that Area (free it with `FreeArea`), or the kernel made it (the program image, a stack, a connection's arena).
 
 **NOTES**
 - Tested by `conformance/conn.c`: the client lends the server an Area, the server releases it, and the client sees one sharer left; the refusals for the server's own Area and for the arena.

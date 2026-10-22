@@ -1,6 +1,6 @@
 # The input class
 
-*Checked against V5; its clients against V7 step 4.*
+*Checked against V5; its clients against V7 step 5.*
 
 ## What it's for
 
@@ -59,7 +59,7 @@ for (;;) {
 }
 ```
 
-A client that should notice `input` going looks at `PortGone(&mp)` now and then (with a deadline on `WaitAddr`), and connects again: the Shell tries every half second. intuition doesn't yet: taking the ring again after input's restart is V7 step 5's.
+A client that should notice `input` going looks at `PortGone(&mp)` now and then (with a deadline on `WaitAddr`), and connects again: the Shell tries every half second. intuition is told at once, by its connection's signal. It lets go of the ring, waits for input's port with a task of its own, and opens the ring again, the pointer where it was (V7 step 5). The keyboards and mice come back a little after, as xhci tells the new input of them: what's sent before is lost. A client that held the ring and died is let go of when input sees its connection go, so the next one may find it busy for a moment: intuition, starting, tries again for a second.
 
 intuition reads the ring with a task of its own waiting in `WaitAddr` on `ir_Head`, which signals intuition's main task. Mouse moves are clamped to the screen, with no acceleration.
 

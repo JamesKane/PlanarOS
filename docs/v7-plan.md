@@ -1,6 +1,6 @@
 # V7 plan: Workbench I, windows
 
-**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 4 done.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
+**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 5 done.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
 
 **Goal (§8):** windows on the screen of both boards, composed on the CPU, with the pointer on its own plane. A client draws into its own memory with `gfx.library`, presents it without a copy across IPC, and is dragged, raised, closed and, when it dies, cleared away by `intuition`, which the client can't hang. Text is the 8×8 font until V8.
 
@@ -233,6 +233,36 @@ QEMU's `ramfb` is a framebuffer in guest memory that the guest describes through
 - **hwdb keeps intuition** as it keeps input. `T_WINDOW` in the kill test runs all of the above, and `V7.5 done` closes it.
 
 **Tested by** the kill test, on every QEMU boot with a screen, mutation-tested: an intuition that forgets to unshare fails `kill-window`'s page count.
+
+**Done (2026-10-22).** hwdb keeps intuition while it's wanted (`servers/hwdb/intuition.c`), and intuition outlives display and input. `T_WINDOW` is now two rounds of `conformance/window.c`. The first round ends with kill-window, after which hwdb checks intuition's handles and pages. The second runs across intuition's, display's and input's deaths, which hwdb causes. Both pass on the six QEMU boots with a screen, and `V7.5 done` closes them. intuition.library is 7.5. Built so, not quite as planned:
+- **A kernel bug, found by kill-window.** `ReleaseArea` refused an Area whose owner had died or freed it, taking it for the kernel's (its handle 0). So intuition had never let go of a dead client's bitmaps, since step 3: they stayed mapped in intuition until it died. Nor could it have let go of a dead display's buffers. An Area now says whether a process allocated it (`user`), and a sharer may release one whose owner has gone. The kernel's own (arenas, stacks, images) are still refused. A dead owner's pointer is cleared too, since its record may be reused.
+- **No stop method for intuition.** It has no device: display turns off a dead client's planes at the next latch, as it already did, and the console shows.
+- **How intuition waits.** Two tasks of its own wait for display's and input's ports to come back, by `OpenPort`'s wait. Each closes the connection it made to find the port at once, and the main task connects itself, so the signals are its own. intuition goes on serving its clients meanwhile.
+  - The tasks that watch `ds_Disp` and `ir_Head` are moved to the new words. The old ones are woken until each watcher has stopped reading them, so they can be let go of.
+  - While display is away, a window of two buffers has its frame taken at once, as nothing reads the other buffer. A window of one waits for display.
+  - Back, display gets the whole screen composed into two new buffers.
+- **A client is told of intuition's death without polling**, by what the kernel already did: tasks waiting on a word in an Area are woken when a mapping of it goes. So `WaitSafe` and `WaitIntuiEvent` return `ERR_PORT_DIED`.
+  - `CloseIntuition` now lets go of the connection's page itself, in case intuition is dead and can't take it back.
+  - A `Window` of a closed connection is refused (`ERR_BADARG`), as its sync words were on the page that went.
+- **hwdb's cues.** hwdb watches intuition with `INTUI_INFO` on a connection of its own. The second round opens a third window once its first two are checked: that's when hwdb kills intuition, and again, on intuition's next self, when it kills display. hwdb kills input once intuition has taken its buffers from the new display. `INTUI_INFO` gained `im_InputOpens`, so the client can see input's ring opened again.
+- **"The screen never goes dark"** is checked as: where the windows were, the screen shows neither them nor the backdrop. The console's text isn't modelled.
+- **kill-window's bitmaps.** The killed client shares its bitmaps with the first round too, so that round can watch them unshared and then freed. It shares them once that round has answered on a connection, as an Area is shared only with a peer.
+- **When intuition starts, `ERR_BUSY` from input is tried again for a second.** A dead intuition's ring is let go of only when input sees the connection go.
+- **The mouse after input's restart** comes back a little later, once xhci has told the new input of it. Moves sent before then are lost, so the client asks again.
+- **Measured under TCG.** A killed client's windows read back gone within 1 to 3 vblanks of the kill, the reading back itself slow; the check allows 4, and step 6 measures the boards. 2 to 4 frames were presented while display was away, each safe at once.
+- **Mutation-tested.** Each of these failed a boot:
+  - intuition forgetting to let go of a dead client's bitmaps (the plan's), and the kernel's old `ReleaseArea`;
+  - `CloseIntuition` keeping the page;
+  - display's death ending intuition;
+  - nothing taken while display is away;
+  - the latch's watcher left on the old display;
+  - the screen not composed again;
+  - input's ring not opened again;
+  - the pointer moved when input's back;
+  - hwdb not starting intuition again.
+
+  The last survived at first, as the client noted the pointer after hwdb might already have killed input. Now it notes it before display's death.
+- **Not tested on the boots:** a one-buffer window while display is away, and display coming back with another size (intuition exits, for hwdb to restart it).
 
 ## 6. The boards
 

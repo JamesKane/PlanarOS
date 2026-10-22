@@ -1,6 +1,6 @@
 /*
- * conformance/window.c -- intuition's windows, presented, and worked by
- * the mouse and keys (v7-plan steps 3 and 4)
+ * conformance/window.c -- intuition's windows, presented, worked by the
+ * mouse and keys, and outliving the servers (v7-plan steps 3 to 5)
  *
  * Started by hwdb's window test (servers/hwdb/intuition.c) once it has
  * started intuition. Through intuition.library, with bitmaps from
@@ -31,13 +31,30 @@
  *    back and brought forward by its depth gadget, and closed by its
  *    close gadget's IDCMP_CLOSEWINDOW. The chrome isn't read back, only
  *    the windows' insides and the backdrop.
- * 6. A client that has stopped (this program, started again with 1): its
- *    window dragged and raised all the same, and taken off the screen a
- *    second after its close gadget, which it never answers.
+ * 6. A client that has stopped (this program, started again with
+ *    STOPPED): its window dragged and raised all the same, and taken off
+ *    the screen a second after its close gadget, which it never answers.
+ * 7. kill-window: a client (this program again, KILLED) with two windows
+ *    over one of this one's, killed. They're gone from the screen by the
+ *    next latch but one, and intuition lets go of their bitmaps, which
+ *    the client shared with this program too to show it: then they're
+ *    this program's alone, and freed when it lets go.
  *
  * Then the costs, intuition's own: composing, a megapixel. Exits 0;
- * NO_INPUT if 1 to 4 passed and nobody moved the mouse (a board with
- * nobody at it), or intuition has no input; or the failed check's number.
+ * NO_INPUT if 1 to 4 and 7 passed and nobody moved the mouse (a board
+ * with nobody at it), or intuition has no input; or the failed check's
+ * number.
+ *
+ * 8. With SURVIVE, hwdb's second round, across the servers' deaths: two
+ *    windows checked, then a third opened, hwdb's cue to kill intuition.
+ *    The ring's wait returns ERR_PORT_DIED, and the console shows where
+ *    the windows were. Connected again as soon as intuition's back, the
+ *    windows are opened again from the same bitmaps, with nothing of the
+ *    old connection left mapped; the third is the cue again, to kill
+ *    display. Frames presented while it's away are safe at once, and
+ *    shown once it's back. Then input is killed: its ring is opened
+ *    again, the pointer where it was, and (SURVIVE_MOUSE, if 5 ran) a
+ *    click heard after. Exits 0, or the failed check's number.
  */
 #include <stddef.h>
 
@@ -50,16 +67,20 @@
 
 void *memset(void *dst, int c, size_t n);
 
-constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21;
+constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23;     /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FRAMES = 120, TIMED = 10;
 constexpr uint32_t BACKDROP = 0x182038;     /* intuition's (compose.h's IC_BACKDROP) */
 constexpr uint32_t CHROME = 0x00c0ffee;     /* the model's: a pixel of the chrome, not read; clear, so no pixel drawn */
 constexpr int NO_INPUT = 1000;
+enum : uint64_t { FIRST, STOPPED, KILLED, SURVIVE, SURVIVE_MOUSE = 4 };     /* the argument's low byte */
 
-/* The stopped client's window, which both ends know. */
+/* The stopped client's window, and the killed one's two, which both ends know. */
 constexpr int32_t HUNG_X = 420, HUNG_Y = 80;
 constexpr uint32_t HUNG_W = 120, HUNG_H = 80, HUNG_COLOUR = 0x307050;
+constexpr int32_t KILL_X = 180, KILL_Y = 280, KILL2_X = 60, KILL2_Y = 360;
+constexpr uint32_t KILL_W = 200, KILL_H = 100, KILL_COLOUR = 0x705030;
+constexpr uint32_t KILL2_W = 120, KILL2_H = 80, KILL2_COLOUR = 0x504070;
 
 static unsigned step;
 
@@ -90,17 +111,21 @@ static int64_t display(uint32_t op)
     return dm->dm_Msg.mn_Error;
 }
 
-static int64_t display_up(void)
+static int64_t display_up(uint64_t deadline)
 {
-    int64_t e = ConnectPortUntil(&dmp, "display.0", SIG_DISPLAY, 2, 2 * sizeof *dm, 0);
+    int64_t e = ConnectPortUntil(&dmp, "display.0", SIG_DISPLAY, 2, 2 * sizeof *dm, deadline);
 
     if (e != 0)
         return e;
-    if (!(dm = AllocMsg(&dmp, sizeof *dm)))
+    if (!(dm = AllocMsg(&dmp, sizeof *dm))) {
+        ClosePort(&dmp);
         return ERR_NOMEM;
+    }
     memset(dm, 0, sizeof *dm);
-    if ((e = display(DISPLAY_INFO)) != 0)
+    if ((e = display(DISPLAY_INFO)) != 0) {
+        ClosePort(&dmp);
         return e;
+    }
     dsync = (const struct DisplaySync *)dm->dm_Sync;
     return 0;
 }
@@ -124,50 +149,87 @@ static struct Intuition in;
 static struct Window wa, wb;
 static int32_t ptr_x, ptr_y;        /* the pointer, as intuition last said */
 
-/* The windows on the screen, front first: this program's, or the
- * stopped client's, a flat colour. */
-struct shown {
-    const struct Window *w;         /* or nullptr: the stopped one's, at hung_x, hung_y */
+/* Another client's window, a flat colour: the stopped client's, and
+ * the killed one's two. */
+struct other {
+    int32_t x, y;                   /* its top left, its chrome's if it has any */
+    uint32_t w, h, colour;          /* its inside's */
+    bool chrome;
 };
 
-static struct shown order[4];
-static unsigned nshown;
-static int32_t hung_x = HUNG_X, hung_y = HUNG_Y;
+static struct other others[3] = {
+    { HUNG_X, HUNG_Y, HUNG_W, HUNG_H, HUNG_COLOUR, true },
+    { KILL_X, KILL_Y, KILL_W, KILL_H, KILL_COLOUR, true },
+    { KILL2_X, KILL2_Y, KILL2_W, KILL2_H, KILL2_COLOUR, false },
+};
 
-static void to_front(const struct Window *w)
+#define HUNG (&others[0])
+
+/* The windows on the screen, front first: each a Window of this
+ * program's, or an other. */
+static const void *order[8];
+static unsigned nshown;
+
+static const struct other *other_of(const void *k)
+{
+    for (unsigned i = 0; i < sizeof others / sizeof others[0]; i++)
+        if (k == &others[i])
+            return &others[i];
+    return nullptr;
+}
+
+static void to_front(const void *k)
 {
     unsigned i = 0;
 
-    while (i < nshown && order[i].w != w)
+    while (i < nshown && order[i] != k)
         i++;
     if (i == nshown)
         nshown++;
     for (; i > 0; i--)
         order[i] = order[i - 1];
-    order[0].w = w;
+    order[0] = k;
 }
 
-static void to_back(const struct Window *w)
+static void to_back(const void *k)
 {
     unsigned i = 0;
 
-    while (i < nshown && order[i].w != w)
+    while (i < nshown && order[i] != k)
         i++;
     for (; i + 1 < nshown; i++)
         order[i] = order[i + 1];
-    order[nshown - 1].w = w;
+    order[nshown - 1] = k;
 }
 
-static void taken_off(const struct Window *w)
+static void taken_off(const void *k)
 {
     unsigned i = 0;
 
-    while (i < nshown && order[i].w != w)
+    while (i < nshown && order[i] != k)
         i++;
     if (i == nshown)
         return;
     for (nshown--; i < nshown; i++)
         order[i] = order[i + 1];
+}
+
+/* Where a window is: its top left, its inside's offset from there, and
+ * its inside's size. */
+struct place {
+    int32_t left, top, bl, bt, iw, ih;
+};
+
+static struct place place_of(const void *k)
+{
+    const struct other *o = other_of(k);
+    const struct Window *w = k;
+
+    if (o)
+        return (struct place){ o->x, o->y, o->chrome ? (int32_t)INTUI_BORDER : 0,
+                               o->chrome ? (int32_t)INTUI_TITLEBAR : 0, (int32_t)o->w, (int32_t)o->h };
+    return (struct place){ w->w_Sync->is_LeftEdge, w->w_Sync->is_TopEdge, w->w_BorderLeft,
+                           w->w_BorderTop, (int32_t)w->w_Width, (int32_t)w->w_Height };
 }
 
 static uint32_t shown_px(const struct Window *w, int32_t x, int32_t y)
@@ -177,24 +239,21 @@ static uint32_t shown_px(const struct Window *w, int32_t x, int32_t y)
     return ((const uint32_t *)((const uint8_t *)bm->bm_BaseAddr + (uint64_t)y * bm->bm_BytesPerRow))[x];
 }
 
-/* (x, y) of the screen, from window 'w' of the model: false if it's not on it. */
-static bool from(const struct shown *s, int32_t x, int32_t y, uint32_t *px)
+/* (x, y) of the screen, from window 'k' of the model: false if it's not on it. */
+static bool from(const void *k, int32_t x, int32_t y, uint32_t *px)
 {
-    const struct Window *w = s->w;
-    int32_t left = w ? w->w_Sync->is_LeftEdge : hung_x, top = w ? w->w_Sync->is_TopEdge : hung_y;
-    int32_t bl = w ? w->w_BorderLeft : (int32_t)INTUI_BORDER;
-    int32_t bt = w ? w->w_BorderTop : (int32_t)INTUI_TITLEBAR;
-    int32_t iw = w ? (int32_t)w->w_Width : (int32_t)HUNG_W, ih = w ? (int32_t)w->w_Height : (int32_t)HUNG_H;
-    int32_t br = bl ? (int32_t)INTUI_BORDER : 0;
+    struct place p = place_of(k);
+    const struct other *o = other_of(k);
+    int32_t br = p.bl ? (int32_t)INTUI_BORDER : 0;
 
-    if (x < left || y < top || x >= left + bl + iw + br || y >= top + bt + ih + br)
+    if (x < p.left || y < p.top || x >= p.left + p.bl + p.iw + br || y >= p.top + p.bt + p.ih + br)
         return false;
-    x -= left + bl;
-    y -= top + bt;
-    if (x < 0 || y < 0 || x >= iw || y >= ih)
+    x -= p.left + p.bl;
+    y -= p.top + p.bt;
+    if (x < 0 || y < 0 || x >= p.iw || y >= p.ih)
         *px = CHROME;
     else
-        *px = w ? shown_px(w, x, y) : HUNG_COLOUR;
+        *px = o ? o->colour : shown_px(k, x, y);
     return true;
 }
 
@@ -205,7 +264,7 @@ static uint32_t screen_px(int32_t x, int32_t y)
     if (x >= ptr_x && y >= ptr_y && (p = pointer_pixel((uint32_t)(x - ptr_x), (uint32_t)(y - ptr_y))) >> 24)
         return p;
     for (unsigned i = 0; i < nshown; i++)
-        if (from(&order[i], x, y, &p))
+        if (from(order[i], x, y, &p))
             return p;
     return BACKDROP;
 }
@@ -630,9 +689,11 @@ static bool typed(const struct Window *w, const char *keys, const char *chars)
 }
 
 /* Dragged by (dx, dy) from (x, y): there within a second. */
-static bool dragged(const struct Window *w, int32_t x, int32_t y, int32_t dx, int32_t dy)
+static bool dragged(const void *k, int32_t x, int32_t y, int32_t dx, int32_t dy)
 {
-    int32_t left = w ? w->w_Sync->is_LeftEdge : hung_x, top = w ? w->w_Sync->is_TopEdge : hung_y;
+    struct other *o = (struct other *)other_of(k);
+    const struct Window *w = o ? nullptr : k;
+    int32_t left = place_of(k).left, top = place_of(k).top;
     struct IntuiMsg *m = in.in_Call;
     uint64_t until;
 
@@ -652,20 +713,20 @@ static bool dragged(const struct Window *w, int32_t x, int32_t y, int32_t dx, in
             else
                 nap(5);
     } else {
-        hung_x += dx;
-        hung_y += dy;
+        o->x += dx;
+        o->y += dy;
     }
-    to_front(w);
+    to_front(k);
     return true;
 }
 
 /* A gadget clicked: 'x' from the right of the window's chrome, 'y' down. */
-static bool gadget_click(const struct Window *w, int32_t from_right)
+static bool gadget_click(const void *k, int32_t from_right)
 {
-    int32_t left = w ? w->w_Sync->is_LeftEdge : hung_x, top = w ? w->w_Sync->is_TopEdge : hung_y;
-    int32_t width = (int32_t)(w ? w->w_Width : HUNG_W) + 2 * (int32_t)INTUI_BORDER;
+    struct place p = place_of(k);
+    int32_t width = p.iw + 2 * (int32_t)INTUI_BORDER;
 
-    if (!point_at(left + width - from_right, top + 12))
+    if (!point_at(p.left + width - from_right, p.top + 12))
         return false;
     click();
     return true;
@@ -771,30 +832,30 @@ static int input_half(bool readable)
     /* 6: a client that has stopped. */
     CHECK(info(m) == 0);
     windows = m->im_Windows;
-    CHECK((hung = CreateProcess("window", 1, SIG_HUNG, 0)) >= 0);
+    CHECK((hung = CreateProcess("window", STOPPED, SIG_HUNG, 0)) >= 0);
     for (uint64_t until = CurrentTime() + 3000 * MS; info(m) == 0 && m->im_Windows == windows;)
         if (CurrentTime() > until)
             return failed("the stopped client's window never came");
         else
             nap(10);
     nap(50);                            /* its frame on the screen */
-    to_front(nullptr);
+    to_front(HUNG);
     CHECK(screen_is(readable, HUNG_X + 4, HUNG_Y + 26, HUNG_W, HUNG_H));
-    CHECK(dragged(nullptr, 440, 90, -60, 40));          /* c's close left none active */
-    CHECK(screen_is(readable, hung_x + 4, hung_y + 26, HUNG_W, HUNG_H));
+    CHECK(dragged(HUNG, 440, 90, -60, 40));             /* c's close left none active */
+    CHECK(screen_is(readable, HUNG->x + 4, HUNG->y + 26, HUNG_W, HUNG_H));
     CHECK(clicked_in(&wd, 300, 240));                   /* d to the front, over it */
     to_front(&wd);
     CHECK(screen_is(readable, 364, 146, 40, 80));       /* where their insides meet */
-    CHECK(gadget_click(nullptr, DEPTH_GADGET));         /* it, from the back to the front */
-    to_front(nullptr);
+    CHECK(gadget_click(HUNG, DEPTH_GADGET));            /* it, from the back to the front */
+    to_front(HUNG);
     CHECK(screen_is(readable, 364, 146, 40, 80));
-    CHECK(gadget_click(nullptr, CLOSE_GADGET));         /* never answered */
+    CHECK(gadget_click(HUNG, CLOSE_GADGET));            /* never answered */
     for (uint64_t until = CurrentTime() + 3000 * MS; info(m) == 0 && m->im_Windows != windows;)
         if (CurrentTime() > until)
             return failed("the stopped client's window was never taken off");
         else
             nap(10);
-    taken_off(nullptr);
+    taken_off(HUNG);
     CHECK(screen_is(readable, 408, 146, 76, 80));       /* the backdrop, right of d */
     ends();
     CHECK(IIntuition->CloseWindow(&wd) == 0);
@@ -827,6 +888,296 @@ static int stopped(void)
         nap(1000000);
 }
 
+/* --- 7: kill-window. --- */
+
+/* The killed client's, to this program: its windows' bitmaps, which it
+ * shares with this program as well as intuition, so that this one can
+ * see them unshared. */
+struct kill_msg {
+    struct Message km_Msg;
+    uint64_t km_Bitmap[2];
+};
+
+static int64_t sharers(uint64_t address)
+{
+    struct AreaInfo ai;
+
+    return QueryArea((const void *)address, &ai) == 0 ? (int64_t)ai.ai_Sharers : -1;
+}
+
+static int kill_window(bool readable)
+{
+    struct IntuiMsg *m = in.in_Call;
+    struct MsgPort kp;
+    struct kill_msg *km;
+    struct BitMap *ebm;
+    struct Window we;
+    uint64_t bitmap[2], until, v0, vblanks;
+    int64_t port, child;
+    unsigned windows;
+
+    CHECK(info(m) == 0);
+    windows = m->im_Windows;
+    /* One of this program's, under the killed client's two. */
+    CHECK((ebm = IGfx->AllocBitMap(160, 100, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &we, { WA_Left, 100 }, { WA_Top, 300 },
+                         { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)ebm }) == 0);
+    picture(&we.w_RPort, 160, 100, 0x3a6298, "window e");
+    CHECK(IIntuition->PresentWindow(&we, nullptr, 0) == 0);
+    to_front(&we);
+    CHECK(on_screen(&we, 1));
+
+    CHECK((port = CreatePort("window.kill", SIG_KILL)) >= 0);
+    CHECK((child = CreateProcess("window", KILLED | (uint64_t)FindTask(nullptr) << 32, SIG_HUNG, 0)) >= 0);
+    until = CurrentTime() + 5000 * MS;
+    while (AcceptPort(&kp, (Handle)port, SIG_KILL) != 0) {
+        CHECK(CurrentTime() < until);
+        WaitUntil(1ULL << SIG_KILL | 1ULL << SIG_HUNG, until);
+    }
+    CHECK((km = (struct kill_msg *)WaitPort(&kp)) && km->km_Msg.mn_Length == sizeof *km);
+    bitmap[0] = km->km_Bitmap[0];
+    bitmap[1] = km->km_Bitmap[1];
+    ReplyMsg(&kp, &km->km_Msg);
+    for (until = CurrentTime() + 3000 * MS; info(m) == 0 && m->im_Windows != windows + 3;)
+        if (CurrentTime() > until)
+            return failed("the killed client's windows never came");
+        else
+            nap(10);
+    to_front(&others[1]);
+    to_front(&others[2]);
+    CHECK(sharers(bitmap[0]) == 3 && sharers(bitmap[1]) == 3);     /* it, intuition, this */
+    CHECK(screen_is(readable, KILL_X + 4, KILL_Y + 26, KILL_W, KILL_H));
+    CHECK(screen_is(readable, KILL2_X, KILL2_Y, KILL2_W, KILL2_H));
+
+    /* Killed: gone from the screen, and its bitmaps this program's alone. */
+    v0 = dsync->ds_Vblank;
+    CHECK(KillProcess((Handle)child) == 0);
+    taken_off(&others[1]);
+    taken_off(&others[2]);
+    CHECK(screen_is(readable, 40, 280, 360, 180));
+    vblanks = dsync->ds_Vblank - v0;
+    CHECK(!readable || vblanks <= 4);   /* the next latch, but for reading back under TCG */
+    for (until = CurrentTime() + 1000 * MS; sharers(bitmap[0]) != 1 || sharers(bitmap[1]) != 1;)
+        if (CurrentTime() > until)
+            return failed("intuition didn't let go of a killed client's bitmaps");
+        else
+            nap(5);
+    CHECK(info(m) == 0 && m->im_Windows == windows + 1);
+    for (unsigned i = 0; i < 2; i++)
+        CHECK(ReleaseArea((const void *)bitmap[i]) == 0 && sharers(bitmap[i]) < 0);    /* freed */
+    CloseHandle((Handle)child);
+    ClosePort(&kp);
+    DeletePort((Handle)port);
+    CHECK(IIntuition->CloseWindow(&we) == 0);
+    taken_off(&we);
+    IGfx->FreeBitMap(ebm);
+    if (readable)
+        KPrintF("window: kill-window: a killed client's two windows gone from the screen as read "
+                "back %lu vblanks after, its bitmaps unshared and freed", vblanks);
+    else
+        KPrintF("window: kill-window: a killed client's two windows gone, its bitmaps unshared and freed");
+    return 0;
+}
+
+/* 7, the other end: two windows, then killed. It shares their bitmaps
+ * with this program's first self once that has answered on its
+ * connection, as an Area is shared only with a peer. */
+static int killed(Handle parent)
+{
+    const uint32_t colour[2] = { KILL_COLOUR, KILL2_COLOUR };
+    struct BitMap *bm[2];
+    struct Window w[2];
+    struct MsgPort mp;
+    struct kill_msg *km;
+
+    if (open_lib() || IIntuition->OpenIntuition(&in, CurrentTime() + 1000 * MS) != 0 ||
+        !(bm[0] = IGfx->AllocBitMap(KILL_W, KILL_H, PIXFMT_XRGB8888, 0, nullptr)) ||
+        !(bm[1] = IGfx->AllocBitMap(KILL2_W, KILL2_H, PIXFMT_XRGB8888, 0, nullptr)) ||
+        ConnectPortUntil(&mp, "window.kill", SIG_KILL, 2, 2 * sizeof *km, CurrentTime() + 3000 * MS) != 0 ||
+        !(km = AllocMsg(&mp, sizeof *km)))
+        return 1;
+    km->km_Msg.mn_Length = sizeof *km;
+    km->km_Bitmap[0] = (uint64_t)bm[0]->bm_BaseAddr;
+    km->km_Bitmap[1] = (uint64_t)bm[1]->bm_BaseAddr;
+    if (DoMsg(&mp, &km->km_Msg) != 0 || ShareArea(bm[0]->bm_Area, parent, AREAR_READ) != 0 ||
+        ShareArea(bm[1]->bm_Area, parent, AREAR_READ) != 0)
+        return 2;
+    if (OpenWindowTags(IIntuition, &in, &w[0], { WA_Left, KILL_X }, { WA_Top, KILL_Y },
+                       { WA_Title, (uint64_t)"killed" },
+                       { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET },
+                       { WA_BitMap, (uint64_t)bm[0] }) != 0 ||
+        OpenWindowTags(IIntuition, &in, &w[1], { WA_Left, KILL2_X }, { WA_Top, KILL2_Y },
+                       { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)bm[1] }) != 0)
+        return 3;
+    for (unsigned i = 0; i < 2; i++) {
+        w[i].w_RPort.rp_FgPen = 0xff000000 | colour[i];
+        IGfx->RectFill(&w[i].w_RPort, 0, 0, (int32_t)w[i].w_Width - 1, (int32_t)w[i].w_Height - 1);
+        if (IIntuition->PresentWindow(&w[i], nullptr, 0) != 0)
+            return 4;
+    }
+    for (;;)
+        nap(1000000);
+}
+
+/* --- 8: across intuition's, display's and input's deaths. --- */
+
+static struct BitMap *sbm[4];
+static struct Window sa, sb, sc;
+
+/* The three windows opened, from the same bitmaps each time: the first
+ * two checked on the screen, then the third, hwdb's cue. */
+static int open_three(bool readable)
+{
+    CHECK(info(in.in_Call) == 0);
+    CHECK(OpenWindowTags(IIntuition, &in, &sa, { WA_Left, 64 }, { WA_Top, 48 }, { WA_Flags, WFLG_BORDERLESS },
+                         { WA_BitMap, (uint64_t)sbm[0] }, { WA_BackBitMap, (uint64_t)sbm[1] }) == 0);
+    CHECK(OpenWindowTags(IIntuition, &in, &sb, { WA_Left, 300 }, { WA_Top, 200 }, { WA_Title, (uint64_t)"sb" },
+                         { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET },
+                         { WA_IDCMP, IDCMP_MOUSEBUTTONS | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW },
+                         { WA_BitMap, (uint64_t)sbm[2] }) == 0);
+    CHECK(IIntuition->PresentWindow(&sa, nullptr, 0) == 0 && IIntuition->PresentWindow(&sb, nullptr, 0) == 0);
+    to_front(&sa);
+    to_front(&sb);
+    CHECK(on_screen(&sa, 1) && on_screen(&sb, 1));
+    CHECK(screen_is(readable, 64, 48, 200, 120));
+    CHECK(screen_is(readable, 304, 226, 160, 100));
+    CHECK(OpenWindowTags(IIntuition, &in, &sc, { WA_Left, (int64_t)in.in_Width - 24 }, { WA_Top, 8 },
+                         { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)sbm[3] }) == 0);
+    CHECK(IIntuition->PresentWindow(&sc, nullptr, 0) == 0);
+    to_front(&sc);
+    return 0;
+}
+
+/* A frame of sa, once it's safe to draw: a second at most. */
+static int64_t present_one(void)
+{
+    int64_t e = IIntuition->WaitSafe(&sa, CurrentTime() + 1000 * MS);
+
+    if (e != 0)
+        return e;
+    tick(&sa.w_RPort, sa.w_Frame + 1);
+    return IIntuition->PresentWindow(&sa, &bar, 1);
+}
+
+static int survive(bool mouse)
+{
+    struct IntuiMsg *m;
+    struct IntuiEvent ev;
+    struct ProcessInfo p0, p1;
+    struct RastPort rp;
+    uint32_t want_win, want_bg, got = 0;
+    uint64_t until, away = 0;
+    int32_t px, py;
+    unsigned opens;
+    bool readable, input;
+    int64_t e;
+    int r;
+
+    if ((r = open_lib()))
+        return r;
+    CHECK(IIntuition->OpenIntuition(&in, CurrentTime() + 5000 * MS) == 0);
+    CHECK(display_up(0) == 0);
+    readable = read_screen(0, 0, 1, 1, &got) == 0;
+    CHECK((sbm[0] = IGfx->AllocBitMap(200, 120, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (sbm[1] = IGfx->AllocBitMap(200, 120, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (sbm[2] = IGfx->AllocBitMap(160, 100, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (sbm[3] = IGfx->AllocBitMap(16, 16, PIXFMT_XRGB8888, 0, nullptr)));
+    for (unsigned i = 0; i < 4; i++) {
+        IGfx->InitRastPort(&rp, sbm[i]);
+        picture(&rp, sbm[i]->bm_Width, sbm[i]->bm_Height, i < 2 ? 0x5b88c2 : 0x8a5a44, "survivor");
+    }
+    if ((r = open_three(readable)))
+        return r;
+    CHECK(QueryProcess(0, &p0) == 0);
+
+    /* intuition killed (hwdb's cue was the third window): its page is
+     * woken as it goes. */
+    until = CurrentTime() + 30000 * MS;
+    while ((e = IIntuition->WaitIntuiEvent(&in, until)) == 0)
+        while (IIntuition->GetIntuiEvent(&in, &ev))
+            ;
+    CHECK(e == ERR_PORT_DIED);
+    /* The console shows through where its windows were, neither they nor the backdrop. */
+    CHECK(expect(64, 48, 200, 120, &want_win));
+    nshown = 0;
+    ptr_x = ptr_y = -100;
+    CHECK(expect(64, 48, 200, 120, &want_bg));
+    for (until = CurrentTime() + 1000 * MS; readable;)
+        if (read_screen(64, 48, 200, 120, &got) == 0 && got != want_win && got != want_bg)
+            break;
+        else if (CurrentTime() > until)
+            return failed("the console didn't show through once intuition had died");
+    IIntuition->CloseIntuition(&in);
+
+    /* Connected to as soon as it's back, and the windows opened again
+     * from the same bitmaps; nothing of this program's left behind. */
+    CHECK(IIntuition->OpenIntuition(&in, CurrentTime() + 20000 * MS) == 0);
+    CHECK(info(in.in_Call) == 0);
+    /* Where the pointer is, which nothing moves now, and input's rings
+     * opened: hwdb may kill input as soon as display is back. */
+    opens = in.in_Call->im_InputOpens;
+    input = in.in_Call->im_Input;
+    px = ptr_x;
+    py = ptr_y;
+    if ((r = open_three(readable)))
+        return r;
+    CHECK(QueryProcess(0, &p1) == 0 && p1.pi_Pages == p0.pi_Pages);
+    KPrintF("window: intuition killed: the console showed through, and the windows opened again on "
+            "its next self from the same bitmaps");
+
+    /* display killed under intuition: sa's frames go on all the while,
+     * and are shown again once it's back. Told at once of its death, by
+     * this program's own connection to it. */
+    for (until = CurrentTime() + 30000 * MS; !PortGone(&dmp);) {
+        CHECK(CurrentTime() < until);
+        CHECK(present_one() == 0);
+        WaitUntil(1ULL << SIG_DISPLAY, CurrentTime() + 16 * MS);
+    }
+    ClosePort(&dmp);
+    /* While it's away, a frame is safe at once: nothing reads the other
+     * buffer. So before it's back (hwdb starts it 10 ms after at least). */
+    CHECK(present_one() == 0 && IIntuition->WaitSafe(&sa, CurrentTime() + 1000 * MS) == 0);
+    CHECK(display_up(0) != 0);
+    for (until = CurrentTime() + 20000 * MS;; nap(16)) {
+        CHECK(present_one() == 0);
+        away++;
+        if (display_up(0) == 0)
+            break;
+        CHECK(CurrentTime() < until);
+    }
+    CHECK(present_one() == 0);
+    CHECK(on_screen(&sa, sa.w_Frame));
+    CHECK(info(in.in_Call) == 0);
+    CHECK(screen_is(readable, 64, 48, 200, 120));
+    CHECK(screen_is(readable, 304, 226, 160, 100));
+    KPrintF("window: display killed under intuition: %lu frames presented while it was away, safe "
+            "at once, and shown once it was back", away + 1);
+
+    /* input killed: its ring opened again, the pointer where it was. */
+    m = in.in_Call;
+    if (input) {
+        for (until = CurrentTime() + 30000 * MS; info(m) == 0 && m->im_InputOpens == opens; nap(10))
+            CHECK(CurrentTime() < until);
+        CHECK(m->im_Input && ptr_x == px && ptr_y == py);
+        /* The mouse is input's again once xhci has told it of it, a
+         * little after: until then a move is lost, and asked for again. */
+        for (until = CurrentTime() + 10000 * MS; mouse && !point_at(380, 280);)
+            CHECK(CurrentTime() < until);
+        if (mouse)
+            CHECK(clicked_in(&sb, 380, 280));
+        KPrintF("window: input killed: its ring opened again, the pointer where it was%s",
+                mouse ? ", and a click heard after" : "");
+    } else {
+        KPrintF("window: input: not exercised across its death: intuition holds no input ring");
+    }
+    CHECK(IIntuition->CloseWindow(&sc) == 0 && IIntuition->CloseWindow(&sb) == 0 &&
+          IIntuition->CloseWindow(&sa) == 0);
+    IIntuition->CloseIntuition(&in);
+    for (unsigned i = 0; i < 4; i++)
+        IGfx->FreeBitMap(sbm[i]);
+    return 0;
+}
+
 int main(uint64_t arg)
 {
     struct BitMap *bm[3];
@@ -834,15 +1185,22 @@ int main(uint64_t arg)
     bool readable;
     int r, input;
 
-    if (arg == 1)
+    if ((arg & 0xff) == STOPPED)
         return stopped();
+    if ((arg & 0xff) == KILLED) {
+        r = killed((Handle)(arg >> 32));
+        KPrintF("window: the client to be killed couldn't show its windows (%ld)", (int64_t)r);
+        return r;
+    }
+    if ((arg & 3) == SURVIVE)
+        return survive(arg & SURVIVE_MOUSE);
     if ((r = open_lib()))
         return r;
     if ((r = (int)IIntuition->OpenIntuition(&in, CurrentTime() + 5000 * MS)) != 0)
         KPrintF("window: intuition wouldn't connect: %ld", (int64_t)r);
     CHECK(r == 0);
     CHECK(in.in_Width >= 640 && in.in_Height >= 480);
-    CHECK(display_up() == 0);
+    CHECK(display_up(0) == 0);
     CHECK(info(in.in_Call) == 0);
     if ((r = two_windows(&readable, bm)) || (r = refusals(bm)) || (r = frames(readable)))
         return r;
@@ -865,6 +1223,8 @@ int main(uint64_t arg)
     ends();
     if (input && input != NO_INPUT)
         return input;
+    if ((r = kill_window(readable)))
+        return r;
 
     CHECK(info(in.in_Call) == 0 && in.in_Call->im_Frames > 0);
     KPrintF("window: intuition composed %lu frames, %lu us a megapixel; the screen %s",

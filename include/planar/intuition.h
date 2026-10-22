@@ -110,7 +110,7 @@ struct IntuiMsg {
     uint32_t im_Active;                 /* the active window's number, of any client's; 0 none */
     uint32_t im_Windows;                /* on the screen, every client's */
     uint32_t im_Input;                  /* 1 if intuition holds input's ring */
-    uint32_t im_Pad;
+    uint32_t im_InputOpens;             /* input's rings it has opened: one more each time input's back */
 };
 
 /* A window's sync words: a cache line of its connection's page. */

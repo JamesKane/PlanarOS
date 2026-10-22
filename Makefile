@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V7.4 done
+EXPECT := V7.5 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -114,7 +114,7 @@ QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercis
 	--forbid 'typing not exercised'
 # A QEMU machine with a screen (RV64's ramfb, AArch64's through edk2)
 # must show it: display's and intuition's tests may not be skipped there.
-QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] (screen|windows|input)): not exercised'
+QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] (screen|windows|input|supervision)): not exercised'
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.

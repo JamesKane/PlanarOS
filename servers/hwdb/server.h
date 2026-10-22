@@ -150,6 +150,7 @@ void acpid_stop(void);              /* at the end: kill it, take its leases back
 constexpr uint32_t CONN_POWER = UINT32_MAX - 2;     /* conn_unit's mark for power's */
 constexpr uint32_t CONN_DISPLAY = UINT32_MAX - 3;   /* and display's, in test mode */
 constexpr uint32_t CONN_INPUT = UINT32_MAX - 4;     /* and input's, in test mode */
+constexpr uint32_t CONN_INTUITION = UINT32_MAX - 5; /* and intuition's, in test mode */
 bool server_add_conn(const struct MsgPort *mp, uint32_t mark);
 struct MsgPort *server_conn(uint32_t mark);         /* nullptr if there's none */
 
@@ -191,8 +192,12 @@ struct unit *display_unit(void);    /* the console's display, running */
 uint32_t display_buffers(void);     /* display's, every client's, as last asked; UINT32_MAX: not known */
 bool display_ask(void);             /* ask again; true once the answer is in */
 
-/* --- intuition (intuition.c): the window test. --- */
+/* --- intuition (intuition.c): the server kept going while it's wanted; the window test. --- */
 
+void intuition_keep(void);          /* started, and again when it ends, while wanted; ended when stopping */
+uint64_t intuition_due(void);       /* when it's to start again; 0 if running or not wanted */
+void intuition_conn_down(void);
+void intuition_conn_serve(struct MsgPort *mp);
 bool window_test(void);             /* the kill test's window step: true when it's over */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */

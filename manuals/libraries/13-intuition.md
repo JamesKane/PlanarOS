@@ -1,6 +1,6 @@
 # 13. intuition: windows on the screen
 
-*Written, V7 step 3; input, focus, the chrome and dragging, V7 step 4.*
+*Written, V7 step 3; input, focus, the chrome and dragging, V7 step 4; servers dying, V7 step 5.*
 
 intuition puts windows on the screen. A program draws a window's pixels with gfx.library (chapter 12) into bitmaps of its own, and presents each frame. intuition composes the screen from every window's latest frame, on the CPU, and shows it. A window's pixels never cross IPC: intuition reads them where the program drew them, shared read-only ([docs §13.1](../../docs/13-workbench.md)). Around them it draws the window's chrome, its own pixels. It holds the mouse and the keyboard, moves the pointer, and drags and depth-arranges windows itself, telling each program what it asked to hear. It never writes a program's memory, and never waits for one.
 
@@ -8,7 +8,7 @@ There are two parts:
 - **intuition, the server** (`servers/intuition`), display's client. It composes into two full-screen buffers of display's, shown in turn on plane 1, over the console on plane 0. The pointer is plane 2. When intuition goes, the console shows again.
 - **intuition.library**, the program's side, reached through `IIntuition`. Its functions are in `planar/intuition.h` and `lib/intuition`. It keeps no state: the connection is the caller's `Intuition`, and each window the caller's `Window`.
 
-intuition runs when it's wanted, not at every boot (v7-plan decision 4): the console Shell keeps the keyboard until V8 puts it in a window. hwdb starts it for its window test. If another program holds input's ring when intuition starts, intuition goes on without the mouse and keys, and says so.
+intuition runs when it's wanted, not at every boot (v7-plan decision 4): the console Shell keeps the keyboard until V8 puts it in a window. hwdb starts it for its window test, and then keeps it as it keeps input: started again 10 ms after it ends, later each time if it keeps ending at once, until it's no longer wanted. If another program holds input's ring when intuition starts, intuition goes on without the mouse and keys, and says so.
 
 ## Concepts
 
@@ -124,6 +124,23 @@ IIntuition->WaitIntuiEvent(&in, CurrentTime() + 1000 * MS);
 
 **A program that has stopped** loses nothing of its windows meanwhile. They're dragged, raised and lowered on their last frames, and the pointer moves over them, all without the program. Its events wait for it, as above.
 
+## When a program or a server dies
+
+- **A program that dies** loses its windows at the next latch, or the one after. intuition sees its connection go, takes its windows off, damages where they were, and lets go of their bitmaps, which are freed once nothing else maps them. A program needn't close anything before it ends.
+- **intuition dying** takes the windows off the screen at the next latch: display turns off a dead client's planes, so the console shows. The program's next call returns `ERR_PORT_DIED`. A `WaitSafe` or `WaitIntuiEvent` asleep is woken to say so, as the page its sync words are on goes. The program closes its `Intuition`, opens it again with a deadline, which waits for intuition's port without polling, and opens its windows again from the bitmaps it kept, presenting each. Nothing of the program's is lost, as its pixels were always its own:
+  ```c
+  if (IIntuition->WaitIntuiEvent(&in, DEADLINE_NONE) == ERR_PORT_DIED) {
+      IIntuition->CloseIntuition(&in);
+      if (IIntuition->OpenIntuition(&in, CurrentTime() + 10000 * MS) == 0)
+          reopen_windows();       /* OpenWindowTags from the same bitmaps, then PresentWindow */
+  }
+  ```
+  A `Window` of the old connection is refused with `ERR_BADARG`, not read: its sync words were on the page that went. hwdb starts intuition again.
+- **display dying** under intuition shows nothing to the program but a late `is_Disp`. intuition lets go of its buffers, keeps serving, and composes the whole screen into two new ones when display is back. Meanwhile a window of two buffers has each frame taken at once, so `WaitSafe` returns as usual, and a window of one waits for display.
+- **input dying** loses nothing either. intuition opens its ring again when input is back, a little after which xhci finds the mouse and keyboard again. The pointer stays where it was, and a button held or a drag under way is let go.
+
+intuition waits for display's and input's ports to come back with a task each, so it goes on serving its programs meanwhile.
+
 ## How intuition composes
 
 - **Damage.** intuition keeps the rectangles of the screen that changed: a window's damage moved to where it is, or a window's whole rectangle when it opens, closes or moves. A frame is composed into the buffer not on the screen, which is a frame old, so each frame repaints what changed for it and for the last.
@@ -155,6 +172,7 @@ The 3 calls are `WaitSafe`'s `WaitAddr`, the signal `PresentWindow`'s message gi
 - **Free the bitmaps after `CloseWindow`**, not before: intuition still maps them until then, and the memory lasts while it does.
 - **Presenting can fail late.** A refusal of intuition's comes back with the next `PresentWindow` or `WaitSafe`.
 - **Close a window on `IDCMP_CLOSEWINDOW`**, within a second. intuition doesn't wait longer.
+- **Open everything again after `ERR_PORT_DIED`.** Close the `Intuition`, open it again, and open the windows again with `OpenWindowTags`: the old `Window`s are refused.
 - **Read events often.** A program that leaves them loses mouse moves first, but past 111 keys and buttons it loses those too.
 
 ## Differences from the RKM

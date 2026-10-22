@@ -1,6 +1,6 @@
 /*
  * servers/intuition/main.c -- intuition: windows composed on the screen
- * (v7-plan steps 3 and 4)
+ * (v7-plan steps 3 to 5)
  *
  * planar/intuition.h has the protocol. intuition is display's client:
  * two full-screen XRGB buffers of display's, shown on plane 1 in turn
@@ -31,7 +31,16 @@
  *
  * When a client goes, closed or dead, its windows go and intuition lets
  * go of their buffers' Areas. hwdb starts intuition when it's wanted
- * (decision 4): its test now, and in V8 the Workbench.
+ * (decision 4): its test now, and in V8 the Workbench; then it keeps it,
+ * as it keeps input.
+ *
+ * display or input may die under intuition, and hwdb starts them again.
+ * intuition lets go of what it had of the dead one, and a task waits for
+ * its port to be made again (OpenPort's wait), so the clients are served
+ * meanwhile. Back, display gets the whole screen composed into two new
+ * buffers; while it's away a window of two buffers has its frames taken
+ * at once, as nothing is reading the other. input's ring is opened
+ * again, the pointer where it was.
  */
 #include <stddef.h>
 
@@ -51,6 +60,8 @@ void *memcpy(void *restrict dst, const void *restrict src, size_t n);
 
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_LATCH = 18, SIG_DISPLAY = 19;
 constexpr int64_t SIG_INPUT = 20, SIG_INPUT_PORT = 21, SIG_TIMER = 22;
+constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24;
+constexpr int64_t SIG_AWAIT = 16;               /* an awaiting task's own, for its connection */
 constexpr unsigned CONNS = 16;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t CALL_DEADLINE = 1000 * MS;   /* for display's and input's answers (V6 step 7) */
@@ -96,22 +107,23 @@ static struct {
     struct ic_screen screen;
     const struct GfxIFace *gfx;
 
-    /* display, and what intuition shows on it. */
+    /* display, and what intuition shows on it: ds nullptr while it's away. */
     struct MsgPort dp;
     struct DisplayMsg *dm;
     const struct DisplaySync *ds;
     uint32_t width, height;
     uint32_t buf[2], pointer;
-    struct BitMap sbm[2];
+    struct BitMap sbm[2], pbm;
     unsigned back;
     int32_t px, py;
     bool flipping, pointer_moved;
     uint64_t flip_seq;
 
-    /* input, and what's done with it. */
+    /* input, and what's done with it: ring nullptr while there's none. */
     struct MsgPort ip;
     const struct InputRing *ring;
     uint64_t itail;
+    uint32_t input_opens;           /* rings opened, for INFO */
     uint16_t buttons;               /* IEQ_*BUTTON held */
     struct window *active;
     struct window *drag;            /* by its title bar, the pointer at (dx, dy) of it */
@@ -126,6 +138,103 @@ static struct {
 static void say(const char *s)
 {
     KLog(s);
+}
+
+static void nap(uint64_t ms)
+{
+    static uint64_t never;              /* a word nobody wakes */
+
+    WaitAddr(&never, 0, CurrentTime() + ms * MS);
+}
+
+/* --- The tasks that wait, so the first needn't. --- */
+
+/*
+ * A word another process moves (display's ds_Disp, input's ir_Head),
+ * waited on by a task of its own, which signals the first task each
+ * time it does. watch_set() gives it another, or none, and returns only
+ * once it has stopped reading the old one, which may then be let go.
+ */
+struct watch {
+    const volatile uint64_t *word;  /* the first task's: nullptr, none */
+    const volatile uint64_t *on;    /* the watcher's: the word it's about to wait on */
+    uint64_t gen;                   /* moved with 'word', and woken */
+    uint64_t sig;
+};
+
+static struct watch latch_w = { .sig = 1ULL << SIG_LATCH }, input_w = { .sig = 1ULL << SIG_INPUT };
+
+static void watcher(uint64_t arg)
+{
+    struct watch *w = (struct watch *)arg;
+
+    for (;;) {
+        uint64_t g = __atomic_load_n(&w->gen, __ATOMIC_SEQ_CST), v;
+        const volatile uint64_t *word = __atomic_load_n(&w->word, __ATOMIC_SEQ_CST);
+
+        __atomic_store_n(&w->on, word, __ATOMIC_SEQ_CST);
+        if (!word) {
+            WaitAddr(&w->gen, g, 0);
+            continue;
+        }
+        if (__atomic_load_n(&w->word, __ATOMIC_SEQ_CST) != word)
+            continue;                   /* changed meanwhile: the old one may be going */
+        v = *word;
+        Signal(it.task, w->sig);
+        WaitAddr(word, v, 0);
+    }
+}
+
+static void watch_set(struct watch *w, const volatile uint64_t *word)
+{
+    const volatile uint64_t *old = w->word;
+
+    __atomic_store_n(&w->word, word, __ATOMIC_SEQ_CST);
+    __atomic_fetch_add(&w->gen, 1, __ATOMIC_SEQ_CST);
+    WakeAddr(&w->gen, 1);
+    /* Woken until it has looked again: it may be about to sleep on 'old'. */
+    while (old && __atomic_load_n(&w->on, __ATOMIC_SEQ_CST) == old) {
+        WakeAddr(old, UINT32_MAX);
+        nap(1);
+    }
+}
+
+/*
+ * A server's port, waited for by a task of its own once asked, which
+ * signals the first task when it's there. It has to connect to find it;
+ * that connection is closed at once, and the first task makes its own,
+ * whose signals are its own.
+ */
+struct await {
+    const char *name;
+    int64_t sig;
+    uint64_t asked;
+};
+
+static struct await display_a = { "display.0", SIG_DISPLAY_BACK, 0 }, input_a = { "input", SIG_INPUT_BACK, 0 };
+
+static void awaiter(uint64_t arg)
+{
+    struct await *a = (struct await *)arg;
+    uint64_t done = 0;
+
+    for (;;) {
+        struct MsgPort mp;
+        uint64_t asked;
+
+        while ((asked = __atomic_load_n(&a->asked, __ATOMIC_ACQUIRE)) == done)
+            WaitAddr(&a->asked, done, 0);
+        done = asked;
+        if (ConnectPortUntil(&mp, a->name, SIG_AWAIT, 2, 256, DEADLINE_NONE) == 0)
+            ClosePort(&mp);
+        Signal(it.task, 1ULL << a->sig);
+    }
+}
+
+static void await(struct await *a)
+{
+    __atomic_fetch_add(&a->asked, 1, __ATOMIC_RELEASE);
+    WakeAddr(&a->asked, 1);
 }
 
 /* --- display. --- */
@@ -158,31 +267,44 @@ static int64_t alloc(uint32_t w, uint32_t h, uint32_t format, uint32_t *id, stru
                : ERR_BADARG;
 }
 
-/* The second task: ds_Disp moved. */
-static void watch(uint64_t)
+/* What intuition had of display, let go: its buffers and its sync
+ * page, once the watcher has stopped reading it. */
+static void screen_down(void)
 {
-    for (;;) {
-        uint64_t v = it.ds->ds_Disp;
-
-        Signal(it.task, 1ULL << SIG_LATCH);
-        WaitAddr(&it.ds->ds_Disp, v, 0);
-    }
+    watch_set(&latch_w, nullptr);
+    for (unsigned b = 0; b < 2; b++)
+        if (it.sbm[b].bm_BaseAddr)
+            ReleaseArea(it.sbm[b].bm_BaseAddr);
+    if (it.pbm.bm_BaseAddr)
+        ReleaseArea(it.pbm.bm_BaseAddr);
+    if (it.ds)
+        ReleaseArea(it.ds);
+    ClosePort(&it.dp);
+    it.sbm[0] = it.sbm[1] = it.pbm = (struct BitMap){ 0 };
+    it.ds = nullptr;
+    it.dm = nullptr;
+    it.flipping = false;
 }
 
-static int64_t screen_up(void)
+/* display's screen, connected to by 'deadline': at the first, the
+ * screen's size and the pointer at its middle; after, all of the screen
+ * composed again. ERR_BADARG if display came back with another size. */
+static int64_t screen_up(uint64_t deadline)
 {
-    struct BitMap pbm;
+    const struct DisplaySync *ds;
+    bool first = !it.width;
     int64_t e;
 
-    if ((e = ConnectPortUntil(&it.dp, "display.0", SIG_DISPLAY, 2, 2 * sizeof *it.dm,
-                              CurrentTime() + 5000 * MS)) != 0)
+    if ((e = ConnectPortUntil(&it.dp, "display.0", SIG_DISPLAY, 2, 2 * sizeof *it.dm, deadline)) != 0)
         return e;
     if (!(it.dm = AllocMsg(&it.dp, sizeof *it.dm)))
         return ERR_NOMEM;
     memset(it.dm, 0, sizeof *it.dm);
     if ((e = display(DISPLAY_INFO)) != 0)
         return e;
-    it.ds = (const struct DisplaySync *)it.dm->dm_Sync;
+    it.ds = ds = (const struct DisplaySync *)it.dm->dm_Sync;    /* mapped: screen_down's */
+    if (!first && (it.dm->dm_Width != it.width || it.dm->dm_Height != it.height))
+        return ERR_BADARG;
     it.width = it.dm->dm_Width;
     it.height = it.dm->dm_Height;
     if (it.dm->dm_Count < 3 || !(it.dm->dm_Plane[1].di_Formats & 1u << DISPLAY_XRGB8888) ||
@@ -192,15 +314,47 @@ static int64_t screen_up(void)
     for (unsigned b = 0; b < 2; b++)
         if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, &it.buf[b], &it.sbm[b])) != 0)
             return e;
-    if ((e = alloc(POINTER_SIZE, POINTER_SIZE, DISPLAY_ARGB8888, &it.pointer, &pbm)) != 0)
+    if ((e = alloc(POINTER_SIZE, POINTER_SIZE, DISPLAY_ARGB8888, &it.pointer, &it.pbm)) != 0)
         return e;
     for (uint32_t y = 0; y < POINTER_SIZE; y++)
         for (uint32_t x = 0; x < POINTER_SIZE; x++)
-            ((uint32_t *)((uint8_t *)pbm.bm_BaseAddr + y * pbm.bm_BytesPerRow))[x] = pointer_pixel(x, y);
-    it.px = (int32_t)it.width / 2;
-    it.py = (int32_t)it.height / 2;
-    ic_init(&it.screen, it.gfx, it.width, it.height);
-    return CreateTask(watch, 0) < 0 ? ERR_NOMEM : 0;
+            ((uint32_t *)((uint8_t *)it.pbm.bm_BaseAddr + y * it.pbm.bm_BytesPerRow))[x] =
+                pointer_pixel(x, y);
+    if (first) {
+        it.px = (int32_t)it.width / 2;
+        it.py = (int32_t)it.height / 2;
+        ic_init(&it.screen, it.gfx, it.width, it.height);
+    } else {
+        ic_damage(&it.screen, (struct GfxRect){ 0, 0, (int32_t)it.width - 1, (int32_t)it.height - 1 });
+    }
+    it.back = 0;
+    it.pointer_moved = true;
+    watch_set(&latch_w, &ds->ds_Disp);
+    return 0;
+}
+
+/* display went: what's shown again when it's back. */
+static void display_lost(void)
+{
+    say("intuition: display went: the screen composed again when it's back");
+    screen_down();
+    await(&display_a);
+}
+
+static void display_back(void)
+{
+    int64_t e = screen_up(0);
+
+    if (e == 0) {
+        say("intuition: display is back: the screen composed again");
+        return;
+    }
+    screen_down();
+    if (e == ERR_BADARG || e == ERR_NOSYS) {
+        say("intuition: display came back with another screen");
+        ExitProcess(5);
+    }
+    await(&display_a);              /* gone again, or not yet there */
 }
 
 /* --- Frames. --- */
@@ -251,6 +405,20 @@ static bool unsafe(void)
     return false;
 }
 
+/* display away: a window of two buffers has its frame taken, as
+ * nothing reads the other; one of one waits for display. */
+static void taken_away(void)
+{
+    for (unsigned i = 0; i < IC_WINDOWS; i++) {
+        struct window *w = &it.win[i];
+
+        if (w->used && w->buffers > 1 && w->frame > w->composed) {
+            w->composed = w->frame;
+            set_word(&line_of(w)->is_Safe, w->composed);
+        }
+    }
+}
+
 static void frame(void)
 {
     bool compose;
@@ -258,6 +426,10 @@ static void frame(void)
     int64_t e;
     unsigned n = 0;
 
+    if (!it.ds) {
+        taken_away();
+        return;
+    }
     if (it.flipping)
         return;
     compose = ic_dirty(&it.screen);
@@ -278,9 +450,13 @@ static void frame(void)
     }
     it.dm->dm_Set[n++] = (struct DisplayPlane){ 2, it.pointer, it.px, it.py };
     it.dm->dm_Count = n;
-    if ((e = display(DISPLAY_COMMIT)) != 0) {
+    if ((e = display(DISPLAY_COMMIT)) == ERR_PORT_DIED) {
+        display_lost();
+        return;
+    }
+    if (e != 0) {
         say("intuition: display refused a frame");
-        ExitProcess(e == ERR_PORT_DIED || e == ERR_TIMEOUT ? 3 : 4);
+        ExitProcess(e == ERR_TIMEOUT ? 3 : 4);
     }
     it.pointer_moved = false;
     it.flip_seq = it.dm->dm_Seq;
@@ -291,7 +467,7 @@ static void frame(void)
 
 static void latch(void)
 {
-    if (it.flipping && it.ds->ds_Disp >= it.flip_seq) {
+    if (it.ds && it.flipping && it.ds->ds_Disp >= it.flip_seq) {
         it.flipping = false;
         shown(it.ds->ds_Time);
     }
@@ -666,6 +842,7 @@ static void message(unsigned c, struct IntuiMsg *m)
         m->im_Active = it.active ? id_of(it.active) : 0;
         m->im_Windows = it.screen.nz;
         m->im_Input = it.ring != nullptr;
+        m->im_InputOpens = it.input_opens;
         break;
     case INTUI_OPEN:
         e = open_window(c, &q, m);
@@ -720,49 +897,78 @@ static void gone(unsigned c)
 
 /* --- input. --- */
 
-/* The third task: input's ring has more. */
-static void watch_input(uint64_t)
+/* input's ring, by 'deadline': 0, or why not (ERR_BUSY: another holds it). */
+static int64_t ring_up(uint64_t deadline)
 {
-    for (;;) {
-        uint64_t v = it.ring->ir_Head;
-
-        Signal(it.task, 1ULL << SIG_INPUT);
-        WaitAddr(&it.ring->ir_Head, v, 0);
-    }
-}
-
-/* input's ring, if nobody holds it: the Shell may (decision 4), and then
- * intuition goes on without it. */
-static void input_up(void)
-{
-    const char *why = "intuition: no input: no pointer or keys";
     struct InputMsg *m;
     int64_t e;
 
-    if (ConnectPortUntil(&it.ip, "input", SIG_INPUT_PORT, 2, 2 * sizeof *m, CurrentTime() + 1000 * MS)) {
-        say(why);
-        return;
+    if ((e = ConnectPortUntil(&it.ip, "input", SIG_INPUT_PORT, 2, 2 * sizeof *m, deadline)) != 0)
+        return e;
+    if (!(m = AllocMsg(&it.ip, sizeof *m))) {
+        ClosePort(&it.ip);
+        return ERR_NOMEM;
     }
-    if (!(m = AllocMsg(&it.ip, sizeof *m)))
-        goto closed;
     memset(m, 0, sizeof *m);
     m->im_Msg.mn_Length = sizeof *m;
     m->im_Op = INPUT_OPEN;
     m->im_Task = it.task;
     if ((e = DoMsgUntil(&it.ip, &m->im_Msg, CurrentTime() + CALL_DEADLINE)) != 0 ||
-        m->im_Msg.mn_Error != 0) {
-        if (!e && m->im_Msg.mn_Error == ERR_BUSY)
-            why = "intuition: input's ring is another's: no pointer or keys";
-        goto closed;
+        (e = m->im_Msg.mn_Error) != 0) {
+        ClosePort(&it.ip);
+        return e;
     }
     it.ring = (const struct InputRing *)m->im_Ring;
     it.itail = it.ring->ir_Head;
-    if (CreateTask(watch_input, 0) >= 0)
+    it.input_opens++;
+    watch_set(&input_w, &it.ring->ir_Head);
+    return 0;
+}
+
+/* input's ring, unless another program holds it: the Shell may
+ * (decision 4), and then intuition goes on without it. A holder that
+ * died, as intuition's last self may have, is let go of by input soon
+ * after, so at the start ERR_BUSY is tried again for a second. Without
+ * input, its port is waited for. */
+static void input_up(uint64_t deadline)
+{
+    uint64_t until = CurrentTime() + 1000 * MS;
+    int64_t e;
+
+    while ((e = ring_up(deadline)) == ERR_BUSY && deadline && CurrentTime() < until)
+        nap(50);
+    if (e == 0) {
+        if (it.input_opens > 1)
+            say("intuition: input is back: its ring opened again, the pointer where it was");
         return;
-    it.ring = nullptr;
-closed:
+    }
+    if (e == ERR_BUSY) {
+        say("intuition: input's ring is another's: no pointer or keys");
+        return;
+    }
+    if (it.input_opens == 0 && deadline)
+        say("intuition: no input: no pointer or keys until it comes");
+    await(&input_a);
+}
+
+/* input went: nothing is held down any more. */
+static void input_lost(void)
+{
+    say("intuition: input went: its ring opened again when it's back");
+    watch_set(&input_w, nullptr);
+    ReleaseArea(it.ring);
     ClosePort(&it.ip);
-    say(why);
+    it.ring = nullptr;
+    it.buttons = 0;
+    it.drag = nullptr;
+    for (unsigned b = 0; b < 3; b++)
+        it.button_to[b] = nullptr;
+    if (it.press) {
+        it.press->ch.pressed = CH_NONE;
+        redraw(it.press);
+        it.press = nullptr;
+    }
+    await(&input_a);
 }
 
 static int32_t clamp(int64_t v, int32_t lo, int32_t hi)
@@ -926,12 +1132,17 @@ int main(uint64_t)
         say("intuition: no gfx.library");
         return 1;
     }
-    if ((h = screen_up()) != 0) {
+    if (CreateTask(watcher, (uint64_t)&latch_w) < 0 || CreateTask(watcher, (uint64_t)&input_w) < 0 ||
+        CreateTask(awaiter, (uint64_t)&display_a) < 0 || CreateTask(awaiter, (uint64_t)&input_a) < 0) {
+        say("intuition: no tasks");
+        return 1;
+    }
+    if ((h = screen_up(CurrentTime() + 5000 * MS)) != 0) {
         say(h == ERR_NOSYS ? "intuition: display has no overlay and pointer planes to compose on"
                            : "intuition: no screen from display");
         return 2;
     }
-    input_up();
+    input_up(CurrentTime() + 1000 * MS);
     if ((h = CreatePort("intuition", SIG_ACCEPT)) < 0) {
         say("intuition: \"intuition\" couldn't be published");
         return 1;
@@ -943,8 +1154,18 @@ int main(uint64_t)
         uint64_t sigs;
 
         frame();
-        sigs = WaitPorts(it.mp, it.nconns, 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_LATCH |
-                                               1ULL << SIG_INPUT | 1ULL << SIG_TIMER);
+        sigs = WaitPorts(it.mp, it.nconns,
+                         1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_LATCH | 1ULL << SIG_DISPLAY |
+                             1ULL << SIG_INPUT | 1ULL << SIG_INPUT_PORT | 1ULL << SIG_TIMER |
+                             1ULL << SIG_DISPLAY_BACK | 1ULL << SIG_INPUT_BACK);
+        if (it.ds && PortGone(&it.dp))
+            display_lost();
+        else if (!it.ds && sigs & 1ULL << SIG_DISPLAY_BACK)
+            display_back();
+        if (it.ring && PortGone(&it.ip))
+            input_lost();
+        else if (!it.ring && sigs & 1ULL << SIG_INPUT_BACK)
+            input_up(0);
         for (struct MsgPort extra; ;) {
             struct MsgPort *mp = it.nconns < CONNS ? &it.mp[it.nconns] : &extra;
 

@@ -1,6 +1,6 @@
 # The display class
 
-*Checked against V7 step 3.*
+*Checked against V7 step 5.*
 
 ## What it's for
 
@@ -62,7 +62,7 @@ To flip, draw the next frame in a second buffer and commit it to the same plane.
 - Draw only in a buffer no commit on the screen shows: wait for `ds_Safe` before reusing the one you flipped away from.
 - Plane 0 is the console's. A commit to it is refused (`ERR_RIGHTS`); one to a plane another client holds, `ERR_BUSY`.
 - Every message carries the client's task (`dm_Task`): the server maps the sync page and buffers into it.
-- After display dies, `DoMsg` says `ERR_PORT_DIED`. Connect again, and allocate again: the old buffers are still yours to write, but nothing shows them, and they're freed when you end.
+- After display dies, `DoMsg` says `ERR_PORT_DIED`, and the connection's signal says so at once. Connect again, and allocate again: the old buffers are still yours to write, but nothing shows them, and they're freed when you let go of them (`ReleaseArea`, as intuition does, along with the old sync page) or end. intuition composes the whole screen again into its new buffers (V7 step 5).
 
 ## The machines
 

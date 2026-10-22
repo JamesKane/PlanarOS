@@ -191,6 +191,8 @@
         kprintf("V7.3 done\n");
         kprintf("V7.4 input skipped: no tasks\n");
         kprintf("V7.4 done\n");
+        kprintf("V7.5 supervision skipped: no tasks\n");
+        kprintf("V7.5 done\n");
         arch_halt();
     }
     sched_idle();
