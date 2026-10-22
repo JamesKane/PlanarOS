@@ -16,6 +16,9 @@
  * memory; arch_memory_init() makes the rest of RAM normal.
  */
 #define ARCH_DIRECT_MAP     0xffff000000000000ULL
+
+/* The relocation a shared library's image has (kernel/library.c). */
+#define ARCH_R_RELATIVE     1027                /* R_AARCH64_RELATIVE */
 #define ARCH_DIRECT_MAP_GIB 1024
 
 /* TTBR0's half with 48-bit addresses; everything above belongs to TTBR1. */

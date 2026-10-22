@@ -12,10 +12,15 @@
  * CreatePoolMem pool is made in.
  *
  * AllocVec's blocks have a 16-byte header saying how big, and come from
- * a pool the process makes at its first call, shared by its tasks.
+ * a pool the process makes at its first call, shared by its tasks. The
+ * pool is named in the process's own memory (procdata.h), so this file's
+ * AllocVec, linked into a program, and exec.library's, shared, use the
+ * same one.
  */
 #include <planar/exec.h>
 #include <stdatomic.h>
+
+#include "procdata.h"
 
 constexpr uint64_t PAGE = 4096;
 constexpr unsigned SMALL_CLASSES = 16;          /* 16 to 256 bytes */
@@ -274,11 +279,10 @@ static_assert(sizeof(struct vec) == 16);
 
 constexpr uint64_t VEC_PUDDLE = 64 * 1024, VEC_THRESHOLD = 16 * 1024;
 
-static struct Pool *_Atomic vec_pool;
-
 void *AllocVec(uint64_t byteSize, uint32_t requirements)
 {
     uint64_t n = byteSize + sizeof(struct vec);
+    struct Pool *_Atomic *slot = &process_data()->pd_VecPool;
     struct Pool *p, *none = nullptr;
     struct vec *v;
 
@@ -295,11 +299,11 @@ void *AllocVec(uint64_t byteSize, uint32_t requirements)
         *v = (struct vec){ n, (Handle)a, 0 };
         return v + 1;                           /* an Area is zero already */
     }
-    if (!(p = atomic_load_explicit(&vec_pool, memory_order_acquire))) {
+    if (!(p = atomic_load_explicit(slot, memory_order_acquire))) {
         /* The first call; two tasks making it at once keep one pool. */
         if (!(p = CreatePool(POOLF_LOCKED, VEC_PUDDLE, VEC_THRESHOLD)))
             return nullptr;
-        if (!atomic_compare_exchange_strong_explicit(&vec_pool, &none, p, memory_order_acq_rel,
+        if (!atomic_compare_exchange_strong_explicit(slot, &none, p, memory_order_acq_rel,
                                                      memory_order_acquire)) {
             DeletePool(p);
             p = none;
@@ -324,5 +328,6 @@ void FreeVec(void *memoryBlock)
     if (v->area)
         FreeArea(v->area);
     else
-        FreePooled(atomic_load_explicit(&vec_pool, memory_order_acquire), v, v->size);
+        FreePooled(atomic_load_explicit(&process_data()->pd_VecPool, memory_order_acquire), v,
+                   v->size);
 }

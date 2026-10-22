@@ -41,6 +41,7 @@
 | CallHookPkt | [utility](utility.md#utilitycallhookpkt) | library |
 | CloseConn | [exec](exec.md#execcloseconn) | kernel |
 | CloseHandle | [exec](exec.md#execclosehandle) | kernel |
+| CloseLibrary | [exec](exec.md#execcloselibrary) | library, through `IExec` |
 | ClosePort | [msg](msg.md#execcloseport) | library |
 | con_open, con_write, con_puts, con_dec, con_close | [dos](dos.md#doscon_open) | library |
 | ConnectPort | [msg](msg.md#execconnectport) | library |
@@ -65,6 +66,7 @@
 | dos_run | [dos](dos.md#dosdos_run) | library |
 | dos_stat | [dos](dos.md#dosdos_stat) | library |
 | dos_volume | [dos](dos.md#dosdos_volume) | library |
+| DropInterface | [exec](exec.md#execdropinterface) | library, through `IExec` |
 | drv_dma_clean, drv_dma_flush | [drv](drv.md#drvdrv_dma_clean) | library |
 | drv_hwdb_msg, drv_hwdb | [drv](drv.md#drvdrv_hwdb) | library |
 | drv_in_heap | [drv](drv.md#drvdrv_in_heap) | library |
@@ -82,6 +84,7 @@
 | FreePooled | [exec](exec.md#execfreepooled) | library |
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
 | FreeVec | [exec](exec.md#execfreevec) | library |
+| GetInterface | [exec](exec.md#execgetinterface) | library, through `IExec` |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
 | GetTagData | [utility](utility.md#utilitygettagdata) | library |
@@ -93,6 +96,7 @@
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
 | MapLease | [lease](lease.md#leasemaplease) | kernel |
 | NextTagItem | [utility](utility.md#utilitynexttagitem) | library |
+| OpenLibrary | [exec](exec.md#execopenlibrary) | library, through `IExec` |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
 | PortGone | [msg](msg.md#execportgone) | library |
 | ProtectArea | [exec](exec.md#execprotectarea) | kernel |

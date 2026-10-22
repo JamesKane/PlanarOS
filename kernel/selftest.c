@@ -24,6 +24,7 @@
 #include "handle.h"
 #include "intc.h"
 #include "lease.h"
+#include "library.h"
 #include "kmalloc.h"
 #include "kstring.h"
 #include "port.h"
@@ -1400,6 +1401,8 @@ void selftest_tasks(void *)
     kprintf("V6.2 done\n");
     selftest_utility();
     kprintf("V6.3 done\n");
+    selftest_libraries();
+    kprintf("V6.4 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -2880,6 +2883,30 @@ void selftest_exec_memory(void)
     kprintf("V6.2 exec memory ok: pools' puddles filled and taken again, blocks above the "
             "threshold an Area each, a pool in a fixed buffer, DeletePool leaving no handle; "
             "AllocVec shared by two tasks; RawDoFmt as C formats\n");
+}
+
+/*
+ * V6 step 4: the shared library region (kernel/library.c) and the
+ * interfaces through it (conformance/library.c): two processes calling
+ * exec.library and utility.library through their tables, mapping the
+ * same pages, which a third can't write.
+ */
+void selftest_libraries(void)
+{
+    static const char *const tests[] = { "library" };
+
+    if (!user_images[0].name) {
+        kprintf("V6.4 libraries skipped: no user programs\n");
+        return;
+    }
+    if (!library_iexec())
+        fail("V6.4 libraries", "no shared library region");
+    run_each("V6.4 libraries", tests, 1);
+    kprintf("V6.4 libraries ok: %u libraries in %llu pages, relocated once and mapped global "
+            "in every process; exec.library's CopyMem %s; IExec and IUtility from two "
+            "processes, the tables read-only\n", library_count(),
+            (unsigned long long)library_pages(),
+            library_vector() ? "by the vector unit" : "by words: no vector unit");
 }
 
 /*

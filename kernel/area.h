@@ -61,6 +61,14 @@ bool area_map(struct area *a, struct process *p, uint32_t rights, uint64_t exec_
  * (CreateProcessImage). nullptr, and nothing changed, if it can't be. */
 struct area *area_take(uint32_t h, struct process *p, uint64_t min_size);
 
+/* Make 'a' the shared library region (kernel/library.c): mapped global
+ * in every domain (MAP_GLOBAL), never freed, and not in area_count. */
+void area_make_library(struct area *a);
+
+/* Pages 'p' maps, each Area once; '*library' says how many are the
+ * library region's. */
+uint64_t area_process_pages(struct process *p, uint64_t *library);
+
 /* 'p' stops mapping 'a'; it's freed if nobody else maps it. */
 void area_release(struct area *a, struct process *p);
 

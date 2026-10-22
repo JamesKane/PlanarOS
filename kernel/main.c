@@ -22,6 +22,7 @@
 #include "intc.h"
 #include "kprintf.h"
 #include "ktime.h"
+#include "library.h"
 #include "memmap.h"
 #include "plat.h"
 #include "pmm.h"
@@ -106,6 +107,9 @@
     selftest_lock();
     kprintf("V1.2 done\n");
 
+    /* Before the first process: each maps the libraries from its start. */
+    library_init();
+
     /* Step 3's tests need to block, so they run as a task; this code
      * becomes the boot CPU's idle task. */
     if (!task_create("selftest", 10, 1, selftest_tasks, nullptr)) {
@@ -166,6 +170,8 @@
         kprintf("V6.2 done\n");
         kprintf("V6.3 utility skipped: no tasks\n");
         kprintf("V6.3 done\n");
+        kprintf("V6.4 libraries skipped: no tasks\n");
+        kprintf("V6.4 done\n");
         arch_halt();
     }
     sched_idle();

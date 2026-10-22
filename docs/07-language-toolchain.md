@@ -43,6 +43,8 @@ Source for the Odin rows: `OS/VectraOS-Odin/spikes/RESULTS.md`, `docs/adr/0001`,
    - Kernel internals use `subsystem_verb` prefixes (`port_put`, `area_share`), as in Omega.
 5. **Vestra** stays a possible later language through the C ABI.
 
+**As built (V6 step 4).** A shared library is an image of code and constants (`arch/<isa>/user/lib.ld` refuses data), relocated once by the kernel at boot into the shared library region, which every process maps read and execute, global ([§3.4](03-memory.md), `kernel/library.c`). Its base is a `struct Library`, which lists its interfaces. `IExec` reaches each program in its third argument register at the start (VQ6). Interface functions take no `Self`, unlike AmigaOS 4's: what a library needs per process is the program's own, found through the thread pointer (`lib/exec/procdata.h`). The ABI is in [Libraries ch. 8](../manuals/libraries/08-libraries.md).
+
 ## 7.3 C23 baseline
 
 - `-std=c23` with clang ≥ 19; the tree pins one LLVM version.
@@ -66,7 +68,7 @@ Source for the Odin rows: `OS/VectraOS-Odin/spikes/RESULTS.md`, `docs/adr/0001`,
 |---|---|---|
 | Kernel | RV: `rv64imac_zba_zbb` (no F/D/V, as in Omega); A64: `-mgeneral-regs-only` | Small. Never touches user vector state except to save and restore it. |
 | Servers, libraries, apps | Full ISA: RVV 1.0, NEON, SVE2 where present | SIMD is expected here |
-| Shared `mem*`/`str*` and helpers | Picked per CPU at boot, or chosen through the interface table (**VQ22**) | |
+| Shared `mem*`/`str*` and helpers | The ISA's base, with the vector unit's functions chosen through the interface table at boot (**VQ22**, decided) | One image runs on every hart, with or without V |
 
 How state is saved follows from this:
 - RISC-V keeps the lazy save driven by `sstatus.VS`. It costs nothing to check, and scalar tasks and the kernel benefit.

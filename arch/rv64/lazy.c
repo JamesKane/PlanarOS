@@ -42,6 +42,12 @@ void riscv_lazy_init(uint64_t hart_vlenb)
     vlenb = (VEC_OFFSET + 4) * 8 + 32 * hart_vlenb <= PAGE_SIZE ? hart_vlenb : 0;
 }
 
+/* V, if the hart has it and its registers fit the save area. */
+bool arch_has_vector(void)
+{
+    return vlenb != 0;
+}
+
 /* What an illegal instruction would have used, had it been allowed: a
  * mask, since vector FP needs both (review H6). */
 enum ext { EXT_NONE = 0, EXT_FP = 1, EXT_VEC = 2 };

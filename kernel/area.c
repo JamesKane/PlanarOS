@@ -57,6 +57,7 @@ struct area {
     struct lease *lease;            /* a device's DMA memory (kernel/lease.c) */
     bool held;                      /* lent to a dead driver's device: area_hold_lent */
     bool lent_dma;                  /* held, and its own DMA Area: no lease's once let go */
+    bool library;                   /* the shared library region: global, never freed */
     struct area *held_next;
     uint64_t run_pa, run_pages;     /* the whole run, guard included */
     unsigned sharers;
@@ -215,6 +216,8 @@ static uint32_t map_flags(const struct area *a, uint32_t rights)
 {
     uint32_t f = a->flags & AREAF_NC ? MAP_USER | MAP_NC : MAP_USER;
 
+    f |= a->library ? MAP_GLOBAL : 0;
+
     f |= rights & AREAR_READ ? MAP_READ : 0;
     f |= rights & AREAR_WRITE ? MAP_WRITE : 0;
     f |= rights & AREAR_EXEC ? MAP_EXEC : 0;
@@ -327,6 +330,30 @@ static int64_t map_into(struct area *a, struct process *p, uint32_t rights, uint
     }
     spin_unlock_irqrestore(&lock, was);
     return 0;
+}
+
+void area_make_library(struct area *a)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+
+    a->library = true;
+    a->refs++;                      /* the kernel's, for good */
+    spin_unlock_irqrestore(&lock, was);
+    atomic_fetch_sub(&live, 1);     /* not one a leak check counts */
+}
+
+uint64_t area_process_pages(struct process *p, uint64_t *library)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    uint64_t bytes = 0, lib = 0;
+
+    for (const struct mapping *m = p->maps; m; m = m->next_in_proc) {
+        bytes += m->area->size;
+        lib += m->area->library ? m->area->size : 0;
+    }
+    spin_unlock_irqrestore(&lock, was);
+    *library = lib / PAGE_SIZE;
+    return bytes / PAGE_SIZE;
 }
 
 bool area_map(struct area *a, struct process *p, uint32_t rights, uint64_t exec_bytes)

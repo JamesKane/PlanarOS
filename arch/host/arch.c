@@ -199,7 +199,7 @@ unsigned arch_domain_tables(struct arch_domain *)
     return 0;
 }
 
-[[noreturn]] void arch_user_enter(uint64_t, uint64_t, uint64_t, uint64_t)
+[[noreturn]] void arch_user_enter(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 {
     abort();
 }
@@ -219,6 +219,11 @@ void arch_sync_icache(const void *, size_t)
 }
 
 bool arch_has_nc(void)
+{
+    return false;
+}
+
+bool arch_has_vector(void)
 {
     return false;
 }

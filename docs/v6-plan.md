@@ -1,6 +1,6 @@
 # V6 plan: foundations, libraries and supervision
 
-**Status: in progress (2026-10-22): steps 1 to 3 done.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
+**Status: in progress (2026-10-22): steps 1 to 4 done; decisions 1 to 4 taken as they leaned.** Scoped from the [roadmap's replan after V5](08-roadmap.md#replanned-after-v5): §17 (the C runtime and libraries), §7.2 and §3.4 (interface tables and the shared library region), §11 and §12 (the driver model's and let-it-crash's unbuilt halves), §10.8 (the review's open low findings), and what V5 carried forward. The decisions at the end are open.
 
 **Goal (§8):** the floor the Workbench stands on, and the supervision the design set promised. Every library V7 and V8 add (`gfx`, `ui`, `font`, `intuition`'s client side) is a shared library behind an interface table, built on pools, `Span` and checked readers. None of that exists. And V5 showed what happens without deadlines and supervision: the RV2's `dos` stall left `gpu-rogue` waiting forever on a call that couldn't time out.
 
@@ -168,6 +168,43 @@ As §17.4.3 specifies, in `include/planar/utility.h` and `lib/utility/`:
 
 ## 4. Interface tables and the shared library region
 
+**Done (2026-10-22), on QEMU.** Decisions 1 to 4 went as they leaned, but for one register (below).
+
+- **Library images** (`libs/exec`, `libs/utility`): PIE images of code and constants with a `PLIB` header (`lib/libhead.S`, `planar/libimage.h`), linked by `arch/<isa>/user/lib.ld`. Its `ASSERT` refuses a library with data or `.bss`: tried with a counter added to utility.library. Pointers relocated at boot go with the constants (`.data.rel.ro`, `.got`), since nothing runs before the kernel has written them. Built for the ISA's base, without V, so one image runs on any hart. exec.library is 8.3 KiB and utility.library 6.7 KiB on RV64.
+- **The region** (`kernel/library.c`): one Area that the kernel fills at boot, before the first process. Each image goes in a page apart and is relocated there once (`R_*_RELATIVE` only, every offset checked). Then its alternatives are applied, and exec.library's directory gets every library's base. Every process maps the whole region read and execute with `MAP_GLOBAL` (RISC-V's G bit, Arm's nG clear) as it's created (`library_map`). The region is never freed, and is outside the leak checks' Area count. It's 5 pages on RV64 and 7 on AArch64.
+- **`OpenLibrary`, `GetInterface`, `CloseLibrary`, `DropInterface`** are exec.library's, in its main interface. `struct Library` has a name, version, revision, ID string and interfaces, and `struct Interface` a name, version, size and library. `CloseLibrary` and `DropInterface` count nothing: the region is read-only and nothing is unloaded, so the plan's count has nowhere to live. Both libraries are version 6.4, with main interfaces at version 1.
+- **`IExec`** (decision 3): the third argument register (`a2`, `x2`), not the second. The second is already hwdb's root lease (`process_create_root`). crt0 stores it in the program's `IExec` (`lib/rt/tls.c`) after relocating.
+- **Per-process data** (decision 2): none in the library. What exec.library needs per process (`AllocVec`'s pool and crt0's `_task_start` for `CreateTask`) is a `struct ProcessData` in the program (`lib/exec/procdata.h`). The first word of every task's thread block points at it (`lib/rt/tls.c`). RISC-V's crt0 now puts tp 64 bytes into the block, as Arm's TCB already was. The linked-in `AllocVec` and the library's share the pool.
+- **SIMD through the table** (decision 4): exec's `CopyMem`, `CopyMemQuick` and `SetMem` start as word loops, and the kernel repoints them at `string.S`'s, renamed, where `arch_has_vector()` says so: RVV, or NEON (always). SVE2 isn't used, since the kernel doesn't save SVE's registers. The static `mem*` that programs link stay the build's choice.
+- **`ProcessInfo`** gains `pi_Pages` and `pi_LibraryPages`.
+- **utility.library** has its own copy of `fmt.c` for `SNPrintf`: a library can't keep exec's interface to call through.
+
+**Tested by:**
+- `conformance/library.c`:
+  - `IExec` and its header.
+  - `OpenLibrary` and `GetInterface`: the right base and interfaces, with too new a version, an unknown name and an unknown interface refused.
+  - `CopyMem` and `SetMem` through the table at every length to 300 and 8 alignments, and overlapping.
+  - `AllocVec` freed by the other `FreeVec` both ways, and `CreateTask` through the library starting a task with its own `thread_local`.
+  - `IUtility`'s `SNPrintf`, `GetTagData`, a Span read and a refused one.
+  - A second process: the same `pi_LibraryPages`, `QueryArea` of `IExec` showing the kernel's Area, read and execute, two or more sharers and the region's size, the same calls, and `IExec`'s address back as its exit code, equal to the first's.
+  - A third process, which writes to the table and faults with `PFAULT_WRITE` at that address.
+- `V6.4 libraries ok`, on every QEMU boot. It says how many libraries, how many pages and whether `CopyMem` is the vector unit's.
+
+**Costs**, under QEMU:
+
+| | RV64 | AArch64 |
+|---|---|---|
+| `AllocVec` and `FreeVec`, linked in | 190–210 ns | 80–97 ns |
+| The same through `IExec` | 195–205 ns | 83–92 ns |
+| An empty `GetTagData` through `IUtility` | 25 ns | 10 ns |
+| The region | 5 pages | 7 pages |
+
+**Not tested:**
+- A RISC-V hart without V, for the word-loop path. QEMU's hart has V, and the programs themselves are built with it.
+- That the TLB keeps one entry per page: the G bit is set, but nothing measures it.
+
+**Not yet on the boards**, with steps 1 to 3.
+
 The design says three things (§3.4, §7.2, VQ12): shared libraries live in a global RX region bound once at boot, public libraries are reached through interface tables, and a process finds `ExecBase` somehow (VQ6, open). Nothing is built.
 
 - **A library image** is a PIE ELF like a program's, in the boot bundle, with only code and read-only data: no writable section. The build refuses one that has one. What a library keeps per process lives in memory its caller gives it: a pool, a structure, or `thread_local` storage in the caller's block. Per-process library data is a decision (below).
@@ -223,10 +260,10 @@ Every command in `cmd/` moves to `ReadArgs`, and the Shell's script test (`SYS:E
 
 ## Decisions
 
-1. **The shared region in V6.** Build it now, or link the interface tables statically and share later. *Leaning:* now (the roadmap's leaning). §14's atlas and §16's bitmaps assume libraries mapped once at one address, and the region is VQ6's natural home.
-2. **A library's per-process data.** None: libraries are code and constants, and state lives in what the caller passes. Or a per-process data block the loader allocates for each library a process opens, found through the interface. *Leaning:* none in V6. Every library step 4 builds can work that way, and it keeps the region read-only.
-3. **How a process finds `IExec`** (VQ6). The second argument register at entry, or a fixed address in the shared region, which the identity layout can't guarantee. *Leaning:* the register.
-4. **SIMD choice** (VQ22). Once per CPU at boot, or through the interface table. *Leaning:* through the table, built at boot.
+1. **The shared region in V6.** *Taken (2026-10-22): now* (step 4). Build it now, or link the interface tables statically and share later. *Leaning:* now (the roadmap's leaning). §14's atlas and §16's bitmaps assume libraries mapped once at one address, and the region is VQ6's natural home.
+2. **A library's per-process data.** *Taken (2026-10-22): none in the library;* the program's `ProcessData`, through the thread pointer (step 4). None: libraries are code and constants, and state lives in what the caller passes. Or a per-process data block the loader allocates for each library a process opens, found through the interface. *Leaning:* none in V6. Every library step 4 builds can work that way, and it keeps the region read-only.
+3. **How a process finds `IExec`** (VQ6). *Taken (2026-10-22): a register,* the third, since hwdb's root lease has the second (step 4). The second argument register at entry, or a fixed address in the shared region, which the identity layout can't guarantee. *Leaning:* the register.
+4. **SIMD choice** (VQ22). *Taken (2026-10-22): through the table, at boot* (step 4). Once per CPU at boot, or through the interface table. *Leaning:* through the table, built at boot.
 5. **The dos rename.** At once, or with snake_case aliases for a phase. *Leaning:* at once. Every caller is in this tree.
 6. **Ports across a restart** (VQ28). `OpenPort`'s wait alone, or also a supervisor holding each supervised server's port so its name never goes. *Leaning:* the wait in V6, and supervisor-held ports when a server's clients can't tolerate the window.
 7. **hwdb's death** (VQ29). A meditation and a reset, or restarting hwdb, which would have to adopt the leases and units of a dead one. *Leaning:* the reset, as VQ29 leans. Restarting in place is a phase of its own.

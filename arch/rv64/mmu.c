@@ -28,6 +28,7 @@ constexpr uint64_t PTE_R  = 1ULL << 1;
 constexpr uint64_t PTE_W  = 1ULL << 2;
 constexpr uint64_t PTE_X  = 1ULL << 3;
 constexpr uint64_t PTE_U  = 1ULL << 4;
+constexpr uint64_t PTE_G  = 1ULL << 5;
 constexpr uint64_t PTE_A  = 1ULL << 6;
 constexpr uint64_t PTE_D  = 1ULL << 7;
 constexpr uint64_t PTE_LEAF = PTE_R | PTE_W | PTE_X;
@@ -213,6 +214,7 @@ bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
     bits |= flags & MAP_WRITE ? PTE_W : 0;
     bits |= flags & MAP_EXEC ? PTE_X : 0;
     bits |= flags & MAP_USER ? PTE_U : 0;
+    bits |= flags & MAP_GLOBAL ? PTE_G : 0;
     /* MAP_DEVICE needs nothing: the platform's PMAs make device ranges
      * uncached I/O, on QEMU and the K1 alike. MAP_NC is Svpbmt's, which
      * area.c asks for only once arch_has_nc() has said it works. */

@@ -18,6 +18,9 @@
  * ranges are devices.
  */
 #define ARCH_DIRECT_MAP     0xffffffc000000000ULL
+
+/* The relocation a shared library's image has (kernel/library.c). */
+#define ARCH_R_RELATIVE     3                   /* R_RISCV_RELATIVE */
 #define ARCH_DIRECT_MAP_GIB 128     /* of Sv39's 256: RAM above it goes unused */
 
 /* Sv39's user half; everything above belongs to the kernel. */

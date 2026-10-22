@@ -143,6 +143,9 @@ constexpr uint32_t MAP_EXEC  = 1u << 2;
 constexpr uint32_t MAP_USER  = 1u << 3;
 constexpr uint32_t MAP_DEVICE = 1u << 4;    /* device registers, not memory */
 constexpr uint32_t MAP_NC = 1u << 5;        /* memory the CPU doesn't cache (AREAF_NC) */
+/* The same in every domain, so the TLB keeps one entry for all of them
+ * (RISC-V's G bit, Arm's nG clear): the shared library region. */
+constexpr uint32_t MAP_GLOBAL = 1u << 6;
 
 bool arch_domain_create(struct arch_domain *d);
 unsigned arch_asid_bits(void);                      /* 0: none, every switch flushes */
@@ -168,7 +171,8 @@ unsigned arch_domain_tables(struct arch_domain *d);
 /* Leave the kernel for user mode at 'pc' with 'sp', and 'arg0' and 'arg1'
  * as the first two arguments, in the running task's domain. The task
  * comes back through the trap path. */
-[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1);
+[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1,
+                                  uint64_t arg2);
 
 /* Copy from or to a user address, which may be bad: false if it faulted. */
 bool arch_copy_from_user(void *dst, uint64_t src, size_t n);
@@ -188,6 +192,10 @@ void arch_sync_icache(const void *va, size_t len);
  */
 bool arch_has_nc(void);
 void arch_dcache_flush(const void *va, size_t len);
+
+/* Whether user code may use the CPU's vector unit: RVV 1.0 on RISC-V,
+ * NEON on Arm (always). For exec.library's table (kernel/library.c). */
+bool arch_has_vector(void);
 
 /*
  * A call to the firmware by the SMC Calling Convention (v5-plan step 2):

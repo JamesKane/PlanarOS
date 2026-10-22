@@ -86,7 +86,7 @@ struct task {
     struct area *user_stack;
     uint32_t handle;
     atomic_bool killed;             /* stop at the next return to user mode */
-    uint64_t user_pc, user_sp, user_arg[2];
+    uint64_t user_pc, user_sp, user_arg[3];
     uint64_t sig_alloc;             /* AllocSignal's bits */
     _Atomic uint64_t calls;         /* kernel calls it made (cpu_count) */
 };

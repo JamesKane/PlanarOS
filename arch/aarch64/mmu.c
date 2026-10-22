@@ -163,7 +163,7 @@ static desc_t *walk(struct arch_domain *d, uint64_t va, bool create)
 
 bool arch_map(struct arch_domain *d, uint64_t va, uint64_t pa, uint32_t flags)
 {
-    desc_t *e, bits = DESC_PAGE | AF | NG | PXN;
+    desc_t *e, bits = DESC_PAGE | AF | (flags & MAP_GLOBAL ? 0 : NG) | PXN;
 
     if (va >= ARCH_USER_TOP || (va | pa) & (PAGE_SIZE - 1) || !(flags & MAP_READ))
         return false;
@@ -247,6 +247,13 @@ void arch_sync_icache(const void *va, size_t len)
 }
 
 bool arch_has_nc(void)
+{
+    return true;
+}
+
+/* NEON is part of every AArch64 CPU. SVE isn't offered to user code:
+ * its registers aren't saved (CPACR_EL1.ZEN traps it). */
+bool arch_has_vector(void)
 {
     return true;
 }

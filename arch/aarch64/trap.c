@@ -149,12 +149,14 @@ void trap_unexpected(struct trap_frame *f, uint64_t kind)
 
 /* The frame is built on the current stack; once popped, SP_EL1 is where
  * the next exception from EL0 builds its frame. */
-[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1)
+[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1,
+                                  uint64_t arg2)
 {
     struct trap_frame f = { 0 };
 
     f.x[0] = arg0;
     f.x[1] = arg1;
+    f.x[2] = arg2;
     f.sp = sp;
     f.elr = pc;
     f.spsr = 0;             /* EL0t, interrupts unmasked */

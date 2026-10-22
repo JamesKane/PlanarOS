@@ -53,6 +53,7 @@ PORTABLE_SRCS := \
 	kernel/kstring.c \
 	kernel/ktime.c \
 	kernel/lease.c \
+	kernel/library.c \
 	kernel/memmap.c \
 	kernel/pmm.c \
 	kernel/port.c \
@@ -73,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V6.3 done
+EXPECT := V6.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 

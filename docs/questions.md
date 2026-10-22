@@ -16,6 +16,8 @@ Each entry gives the question, where it came up, and the current leaning or deci
 | VQ19 | **Board order: RV2, then CIX (Orange Pi 6 Plus), then RK3588, then Q8B.** The ACPI path gets proven on the second board. | 2026-10-19 |
 | VQ14 | **FAT32 is required** for the EFI system partition and firmware interchange. The **native filesystem is a modern design**: journaling or copy-on-write metadata, extents and checksums are candidates. Snapshots and encryption are out of scope. The specific design is still open (VQ14a). | 2026-10-19 |
 | VQ18 | **`<stdint.h>` types with canonical Commodore V36–V40 RKM `CamelCase` API names** across public libraries (`exec.library`, `utility.library`, `dos.library`). Struct interface tables (`IExec->`, `IUtility->`, `IDos->`) are adopted independently for C namespacing. Details in [17-c-runtime-and-libraries.md](17-c-runtime-and-libraries.md). | 2026-10-21 |
+| VQ6 | **exec.library's interface (`IExec`) is handed to every process at its start, in the third argument register** (`a2`, `x2`): the first is `main`'s, the second hwdb's root lease. crt0 keeps it in the program's `IExec`. No fixed address: the identity layout can't promise one. See [v6-plan.md](v6-plan.md#4-interface-tables-and-the-shared-library-region). | 2026-10-22 |
+| VQ22 | **Through the interface table, chosen at boot.** The kernel points exec.library's `CopyMem`, `CopyMemQuick` and `SetMem` at the vector unit's functions where the CPU has one (RVV 1.0; NEON, always), as it relocates the library. SVE2 waits for the kernel to save SVE's registers. | 2026-10-22 |
 | VQ43 | **No PDP-11 `libc` in native code; Commodore V36–V40 library split + opt-in `lib/clib`.** Native programs use `exec.library` (`CreatePool`/`AllocPooled`/`AllocVec`/`RawDoFmt`), `utility.library` (`TagItem`, `Hook`, `Stricmp`, `SNPrintf`, 64-bit `Span`/`Str` slices), and `dos.library` (`ReadArgs`, `FilePart`, `Printf`). Standard C headers live in opt-in `include/clib/` (`lib/clib`) for third-party C ports (`acpid`), and LLVM `compiler-rt` 128-bit integer builtins are vendored into `third_party/compiler-rt/`. Details in [17-c-runtime-and-libraries.md](17-c-runtime-and-libraries.md). | 2026-10-21 |
 
 ## Memory
@@ -47,7 +49,7 @@ Raised in §1.2 and §3.5.
 
 **VQ6 How processes find ExecBase.**
 
-*Leaning:* pass its address in the first argument register at process start. Under the global-VA layout a fixed address becomes possible again.
+**Decided (2026-10-22):** the third argument register at the start (above, *Decided*). The leaning was the first, but `main` has it, and hwdb's root lease the second.
 
 Raised in §1.6.
 
@@ -108,6 +110,8 @@ Raised in §3.6.
 **VQ22 SIMD in the shared library region.**
 
 User code is expected to use SIMD, so the shared `mem*`/`str*` and codec helpers should use it too. Should one version be chosen per CPU at boot (RVV 1.0, NEON, SVE2), or should each library ship versions selected through its interface table?
+
+**Decided (2026-10-22):** through the table, chosen as the kernel relocates the library at boot (above, *Decided*).
 
 Raised in §7.4.
 

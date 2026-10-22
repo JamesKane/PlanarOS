@@ -12,6 +12,7 @@
 #include "area.h"
 #include "kstring.h"
 #include "lease.h"
+#include "library.h"
 #include "pmm.h"
 #include "port.h"
 #include "process.h"
@@ -64,7 +65,8 @@ static void user_start(void *)
     struct task *self = task_self();
 
     user_return();              /* killed before it ever ran */
-    arch_user_enter(self->user_pc, self->user_sp, self->user_arg[0], self->user_arg[1]);
+    arch_user_enter(self->user_pc, self->user_sp, self->user_arg[0], self->user_arg[1],
+                    self->user_arg[2]);
 }
 
 /* A task in 'p' starting at 'pc' with 'sp', not yet launched. */
@@ -82,6 +84,7 @@ static struct task *new_user_task(struct process *p, uint64_t pc, struct area *s
     t->user_sp = area_base(stack) + area_size(stack);
     t->user_arg[0] = arg0;
     t->user_arg[1] = arg1;
+    t->user_arg[2] = library_iexec();       /* the third: exec.library's interface */
     t->handle = handle_new(HANDLE_TASK, t, p);
     if (!t->handle) {
         task_discard(t);
@@ -161,6 +164,8 @@ static struct process *create_from(struct area *image, uint64_t etext, uint64_t 
         area_destroy(image);
         image = nullptr;
     }
+    if (image && !library_map(p))
+        image = nullptr;            /* mapped: it goes with the process */
     if (image && new_stack(p, &stack)) {
         p->stack_base = area_base(stack);
         t = new_user_task(p, area_base(image) + entry, stack, arg, 0);
@@ -519,6 +524,7 @@ int64_t process_query_call(uint32_t h, uint64_t info_out)
         info.pi_FaultPC = p->fault_pc;
     }
     info.pi_Handles = __atomic_load_n(&p->handles, __ATOMIC_RELAXED);
+    info.pi_Pages = area_process_pages(p, &info.pi_LibraryPages);
     process_put(p);
     return arch_copy_to_user(info_out, &info, sizeof info) ? 0 : ERR_BADADDR;
 }

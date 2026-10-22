@@ -108,6 +108,8 @@ struct ProcessInfo {
     uint64_t pi_FaultPC;
     uint32_t pi_Handles;            /* the handles it holds */
     uint32_t pi_Pad;
+    uint64_t pi_Pages;              /* pages it maps, each Area once */
+    uint64_t pi_LibraryPages;       /* of those, the shared library region's */
 };
 
 int64_t CreateProcess(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);
@@ -246,5 +248,99 @@ typedef void (*PutChProc)(char ch, void *putChData);
 
 uint64_t RawDoFmt(const char *formatString, va_list dataStream, PutChProc putChProc,
                   void *putChData);
+
+/*
+ * Libraries and interfaces (V6 step 4, docs §7.2, AmigaOS 4's model).
+ * A shared library is code and constants the kernel relocates once at
+ * boot into the shared library region, mapped read and execute into
+ * every process at the same address. Its base says its name and version
+ * and lists its interfaces; an interface is a table of functions, called
+ * as IExec->AllocVec(...). Libraries keep nothing of their own: what one
+ * needs per process is in the caller's memory.
+ */
+struct Interface;
+
+struct Library {
+    const char *lib_Name;           /* "exec.library" */
+    uint16_t lib_Version, lib_Revision;
+    uint32_t lib_Pad;
+    const char *lib_IdString;
+    struct Interface *const *lib_Interfaces;    /* ends with nullptr */
+};
+
+struct Interface {
+    const char *if_Name;            /* "main" */
+    uint32_t if_Version;
+    uint32_t if_Size;               /* bytes, this header and every function */
+    struct Library *if_Library;
+};
+
+/*
+ * exec.library's "main" interface, version 1: the kernel calls and
+ * exec's library functions above, by their names. Its order is the ABI:
+ * a new version only adds at the end. CopyMem, CopyMemQuick and SetMem
+ * are the vector unit's where the CPU has one, chosen at boot.
+ */
+struct ExecIFace {
+    struct Interface Data;
+
+    struct Library *(*OpenLibrary)(const char *name, uint32_t version);
+    void (*CloseLibrary)(struct Library *library);
+    struct Interface *(*GetInterface)(struct Library *library, const char *name,
+                                      uint32_t version);
+    void (*DropInterface)(struct Interface *iface);
+
+    int64_t (*KLog)(const char *text);
+    void (*ExitProcess)(int64_t code);
+    uint64_t (*SetSignal)(uint64_t bits, uint64_t mask);
+    uint64_t (*Wait)(uint64_t mask);
+    int64_t (*Signal)(Handle task, uint64_t mask);
+    Handle (*FindTask)(const char *name);
+    int64_t (*CreateTask)(void (*entry)(uint64_t arg), uint64_t arg);
+    void (*ExitTask)(int64_t code);
+    int64_t (*AllocSignal)(int64_t bit);
+    void (*FreeSignal)(int64_t bit);
+
+    int64_t (*AllocArea)(uint64_t size, uint32_t flags, void **address);
+    int64_t (*FreeArea)(Handle area);
+    int64_t (*ShareArea)(Handle area, Handle task, uint32_t rights);
+    int64_t (*UnshareArea)(Handle area, Handle task);
+    int64_t (*ReleaseArea)(const void *address);
+    int64_t (*ProtectArea)(Handle area, uint32_t rights);
+    int64_t (*QueryArea)(const void *address, struct AreaInfo *info);
+
+    int64_t (*CreateProcess)(const char *name, uint64_t arg, int64_t sigbit, uint32_t flags);
+    int64_t (*CreateProcessImage)(const struct ProcessImage *image, uint64_t arg, int64_t sigbit,
+                                  uint32_t flags);
+    int64_t (*StartProcess)(Handle process);
+    int64_t (*KillProcess)(Handle process);
+    int64_t (*QueryProcess)(Handle process, struct ProcessInfo *info);
+    int64_t (*CloseHandle)(Handle handle);
+
+    uint64_t (*CurrentTime)(void);
+    int64_t (*ArmTimer)(uint64_t deadline, int64_t sigbit);
+    int64_t (*QuerySystem)(struct SystemInfo *info);
+    int64_t (*WaitAddr)(const volatile uint64_t *address, uint64_t value, uint64_t deadline);
+    int64_t (*WakeAddr)(const volatile uint64_t *address, uint32_t count);
+
+    void (*CopyMem)(const void *source, void *dest, uint64_t size);
+    void (*CopyMemQuick)(const void *source, void *dest, uint64_t size);
+    void *(*SetMem)(void *dest, uint8_t fill, uint64_t size);
+
+    struct Pool *(*CreatePool)(uint32_t flags, uint64_t puddleSize, uint64_t threshSize);
+    struct Pool *(*CreatePoolMem)(void *buf, uint64_t size);
+    void (*DeletePool)(struct Pool *pool);
+    void *(*AllocPooled)(struct Pool *pool, uint64_t memSize);
+    void (*FreePooled)(struct Pool *pool, void *memory, uint64_t memSize);
+    void *(*AllocVec)(uint64_t byteSize, uint32_t requirements);
+    void (*FreeVec)(void *memoryBlock);
+
+    uint64_t (*RawDoFmt)(const char *formatString, va_list dataStream, PutChProc putChProc,
+                         void *putChData);
+};
+
+/* exec.library's main interface, from the kernel at the start (crt0):
+ * nullptr where there are no libraries (the hosted build). */
+extern struct ExecIFace *IExec;
 
 #endif /* PLANAR_EXEC_H */

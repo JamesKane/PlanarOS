@@ -153,13 +153,15 @@ void trap_handler(struct trap_frame *f)
 
 /* The frame is built on the current stack; once popped, the slot above
  * it is where the next trap from user mode lands. */
-[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1)
+[[noreturn]] void arch_user_enter(uint64_t pc, uint64_t sp, uint64_t arg0, uint64_t arg1,
+                                  uint64_t arg2)
 {
     struct trap_frame f = { 0 };
 
     f.x[2] = sp;
     f.x[10] = arg0;
     f.x[11] = arg1;
+    f.x[12] = arg2;
     f.sepc = pc;
     /* User mode, interrupts on after sret (SPIE) but not before (SIE:
      * they're still on here, and trap_return writes this sstatus before

@@ -1,10 +1,12 @@
 # exec: kernel calls
 
-*Checked against V5; pools, `AllocVec` and `RawDoFmt`, V6.*
+*Checked against V5; pools, `AllocVec`, `RawDoFmt` and the library calls, V6.*
 
 The kernel calls, in alphabetical order, and exec's library functions over them: those every program links, and the pools, `AllocVec` and `RawDoFmt` (`libexec.a`), which a program links if it calls them. Each kernel call is one stub in `arch/<isa>/user/syscalls.S` and traps on every call; a library function says so. The headers are `planar/exec.h` (tasks, signals, Areas, processes and time) and `planar/ipc.h` (ports and connections). The device-lease calls are in [lease.md](lease.md). Errors are listed in [Libraries ch. 1](../libraries/01-introduction.md#kernel-calls-and-errors), and the per-process limits behind `ERR_LIMIT` [there too](../libraries/01-introduction.md#limits).
 
 Most programs use connections through the [msg library](msg.md) rather than the connection calls here.
+
+exec.library, in the shared library region, has the calls here that aren't about ports and connections, by the same names, in its main interface: `IExec->AllocVec(...)` ([Libraries ch. 8](../libraries/08-libraries.md)). `OpenLibrary`, `GetInterface`, `DropInterface` and `CloseLibrary` are reached only that way.
 
 ---
 
@@ -353,6 +355,39 @@ The device root can't be closed: it lasts as long as its process.
 
 **SEE ALSO**
 [CreateProcess](#execcreateprocess), [KillProcess](#execkillprocess), [CreateLease](lease.md#leasecreatelease), [RevokeLease](lease.md#leaserevokelease)
+
+---
+
+## exec/CloseLibrary
+
+**NAME**
+CloseLibrary -- say a library is no longer used
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+IExec->CloseLibrary(struct Library *library);
+```
+
+**FUNCTION**
+Says the caller has done with a library `OpenLibrary` returned. Call it once for each `OpenLibrary`, after dropping its interfaces.
+
+Through `IExec` only: an interface function in exec.library ([Libraries ch. 8](../libraries/08-libraries.md)). It doesn't trap.
+
+**INPUTS**
+- `library` -- the library, or `nullptr`.
+
+**RESULT**
+None.
+
+**NOTES**
+- In V6 it does nothing. Nothing is unloaded, and the library region is read-only, so there's no count to keep. Code that closes what it opens keeps working when there is one.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[OpenLibrary](#execopenlibrary), [DropInterface](#execdropinterface)
 
 ---
 
@@ -778,6 +813,39 @@ None known.
 
 ---
 
+## exec/DropInterface
+
+**NAME**
+DropInterface -- say an interface is no longer used
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+IExec->DropInterface(struct Interface *iface);
+```
+
+**FUNCTION**
+Says the caller has done with an interface `GetInterface` returned. Call it once for each `GetInterface`, before `CloseLibrary`.
+
+Through `IExec` only. It doesn't trap.
+
+**INPUTS**
+- `iface` -- the interface, or `nullptr`.
+
+**RESULT**
+None.
+
+**NOTES**
+- In V6 it does nothing, as `CloseLibrary` doesn't.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[GetInterface](#execgetinterface), [CloseLibrary](#execcloselibrary)
+
+---
+
 ## exec/ExitProcess
 
 **NAME**
@@ -987,6 +1055,54 @@ None known.
 
 ---
 
+## exec/GetInterface
+
+**NAME**
+GetInterface -- one of a library's interfaces
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+struct Interface *IExec->GetInterface(struct Library *library, const char *name,
+                                      uint32_t version);
+```
+
+**FUNCTION**
+Returns `library`'s interface called `name`, if its version is `version` or later. An interface is a `struct Interface` header (its name, version, size and library), then the functions, in an order fixed for that name: a later version only adds at the end. Cast it to the library's type for it, such as `struct UtilityIFace`, and call through it.
+
+Through `IExec` only. It doesn't trap.
+
+**INPUTS**
+- `library` -- from `OpenLibrary`.
+- `name` -- the interface: every library has `"main"`.
+- `version` -- the least version that will do.
+
+**RESULT**
+The interface, or `nullptr` if `library` has none by that name, or only an older one.
+
+**EXAMPLE**
+From `conformance/library.c`:
+```c
+struct Library *util = IExec->OpenLibrary("utility.library", 6);
+struct UtilityIFace *IUtility =
+    util ? (struct UtilityIFace *)IExec->GetInterface(util, "main", 1) : nullptr;
+
+if (IUtility)
+    IUtility->SNPrintf(line, sizeof line, "%s %lu", "via", 64UL);
+```
+
+**NOTES**
+- `if_Size` is the table's size in bytes, header included: a program built against a later version can check that the entries it calls are there.
+- The table is read-only, in every process: a write to it faults.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[OpenLibrary](#execopenlibrary), [DropInterface](#execdropinterface)
+
+---
+
 ## exec/KillProcess
 
 **NAME**
@@ -1058,6 +1174,43 @@ A kernel call.
 
 **SEE ALSO**
 [Libraries ch. 1](../libraries/01-introduction.md#logging)
+
+---
+
+## exec/OpenLibrary
+
+**NAME**
+OpenLibrary -- find a shared library
+
+**SYNOPSIS**
+```c
+#include <planar/exec.h>
+struct Library *IExec->OpenLibrary(const char *name, uint32_t version);
+```
+
+**FUNCTION**
+Returns the base of the shared library called `name`, if its version is `version` or later. The base is a `struct Library`: its name, version and revision, an ID string, and its interfaces, which `GetInterface` returns.
+
+The libraries are the ones in the boot image, relocated by the kernel at boot into the shared library region, which every process maps read and execute at the same address. `OpenLibrary` loads nothing: it looks in exec.library's directory, which the kernel filled in then.
+
+Through `IExec` only. It doesn't trap. `IExec` is exec.library's main interface, which the kernel gives every process at its start (crt0 keeps it).
+
+**INPUTS**
+- `name` -- the library's name, such as `"utility.library"`.
+- `version` -- the least version that will do.
+
+**RESULT**
+The base, or `nullptr` if there's no such library, or its version is older than `version`.
+
+**NOTES**
+- In V6, exec.library and utility.library are version 6 (revision 4). exec.library's own base is `IExec->Data.if_Library`.
+- **Differs from Exec:** Exec's `OpenLibrary` found a library in memory or loaded it from `LIBS:`, and ran its init and open functions, which counted opens. Planar's libraries are code and constants only, in place since boot, so there's nothing to run or count.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[GetInterface](#execgetinterface), [CloseLibrary](#execcloselibrary)
 
 ---
 
@@ -1219,7 +1372,10 @@ Once it is dead, the other fields say how:
 | `pi_FaultAddress` | The address the fault was about: for an access fault, the one touched |
 | `pi_FaultPC` | Where it faulted |
 
-While the process is held or running, they are 0. `pi_Handles` is always filled in: the handles the process holds now, its tasks' among them. A supervisor checks with it that restarting its children leaks none (hwdb's kill test).
+While the process is held or running, they are 0. Three are always filled in:
+- `pi_Handles` -- the handles the process holds now, its tasks' among them. A supervisor checks with it that restarting its children leaks none (hwdb's kill test).
+- `pi_Pages` -- the pages it maps, each Area once however it's shared: its image, stacks, Areas, and those shared with it. 0 once it's dead.
+- `pi_LibraryPages` -- of those, the shared library region's, which is the same in every process, and in memory once ([Libraries ch. 8](../libraries/08-libraries.md)).
 
 A kernel call.
 

@@ -65,6 +65,7 @@ The kernel image is RX/RO/RW with W^X. It reaches user memory only through check
 These follow from VA = PA. All are **proposed**.
 
 - **Executables:** PIE ELF, relocated at load time into one RX Area and one RW Area. There is no fork. Shared libraries live in the global RX region and are bound once at boot.
+  - *As built (V6 step 4):* a program is one Area, its code RX and the rest RW, and relocates itself. The shared library region is one Area that the kernel fills at boot (`kernel/library.c`): every library image in the bundle, a page apart, relocated there once. Every process maps all of it read and execute, global (RISC-V's G bit, Arm's nG clear), so its pages and TLB entries exist once. It's never freed or written again. On QEMU it's 5 pages on RV64 and 7 on AArch64.
 - **Stacks:** a fixed size, chosen at task creation, with a guard gap of unmapped pages. Under VA = PA a guard gap is a physical hole, so stacks come from a dedicated stack zone where guard pages can be reused as other stacks' guard pages.
 - **Zoned physical allocator:**
   - Large Areas are allocated top-down in their own zone.

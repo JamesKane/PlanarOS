@@ -154,6 +154,50 @@ $(BUILD)/user/%.bin: $(BUILD)/user/%.elf
 
 USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 
+# Shared libraries (libs/NAME, V6 step 4): each one image of code and
+# constants, linked by lib.ld, which refuses data, and relocated once at
+# boot into the shared library region (kernel/library.c). Built for the
+# ISA's base, so a RISC-V hart without V runs it: the vector unit's
+# memory functions are string.S's, renamed, which the kernel picks at
+# boot where the hart has V.
+USER_LIBS := exec utility
+LIB_CFLAGS := $(subst rv64gcv,rv64gc,$(USER_CFLAGS))
+LIB_LDFLAGS := $(subst /user.ld,/lib.ld,$(USER_LDFLAGS)) -Wl,-z,norelro
+LIB_exec_SRCS := libs/exec/base.c lib/exec/pool.c lib/exec/fmt.c lib/exec/task.c \
+	arch/$(ARCH)/user/procdata.c \
+	lib/rt/string.c arch/$(ARCH)/user/syscalls.S
+LIB_utility_SRCS := libs/utility/base.c $(filter-out %/test.c,$(wildcard lib/utility/*.c)) \
+	lib/exec/fmt.c lib/rt/string.c
+LIB_VEC := $(BUILD)/libs/vec-string.o
+LIB_HEAD := $(BUILD)/libs/lib/libhead.o
+LIB_BINS := $(patsubst %,$(BUILD)/libs/%.library.bin,$(USER_LIBS))
+
+$(BUILD)/libs/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(LIB_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/libs/%.o: %.S
+	@mkdir -p $(dir $@)
+	$(CC) $(LIB_CFLAGS) -MMD -MP -c $< -o $@
+
+$(LIB_VEC): arch/$(ARCH)/user/string.S
+	@mkdir -p $(dir $@)
+	$(CC) $(LIB_CFLAGS) -Dmemcpy=vec_memcpy -Dmemmove=vec_memmove -Dmemset=vec_memset \
+	  -MMD -MP -c $< -o $@
+
+# A library: $(1) its name.
+define user_lib
+$(1)_LIB_OBJS := $(LIB_HEAD) $$(patsubst %,$(BUILD)/libs/%.o,$$(basename $$(LIB_$(1)_SRCS))) \
+	$(if $(filter exec,$(1)),$(LIB_VEC))
+$(BUILD)/libs/$(1).library.elf: $$($(1)_LIB_OBJS) $(USER_BUILTINS) arch/$(ARCH)/user/lib.ld
+	$$(CC) $(LIB_LDFLAGS) $$($(1)_LIB_OBJS) $(USER_BUILTINS) -o $$@
+-include $$(patsubst %.o,%.d,$$($(1)_LIB_OBJS))
+endef
+$(foreach l,$(USER_LIBS),$(eval $(call user_lib,$(l))))
+
+$(BUILD)/libs/%.bin: $(BUILD)/libs/%.elf
+	$(OBJCOPY) -O binary $< $@
+
 # Commands (cmd/NAME.c): programs that live on storage, in C: (step 6),
 # not in the image. Each links dos.library, and the build or the board's
 # loader puts its .elf on the disk.
@@ -171,18 +215,27 @@ $(BUILD)/user/cmd/%.elf: $(BUILD)/user/cmd/%.o $(USER_RT) $(USER_DOS) $(USER_UTI
 
 -include $(patsubst %,$(BUILD)/user/cmd/%.d,$(CMD_PROGS))
 
-$(BUILD)/user_images.S: $(USER_BINS) mk/user.mk
+# Programs, then the libraries (NAME.library), which the kernel tells
+# apart by their magic.
+$(BUILD)/user_images.S: $(USER_BINS) $(LIB_BINS) mk/user.mk
 	@{ echo '    .section .rodata'; \
 	   echo '    .balign 8'; \
 	   echo '    .globl user_images'; \
 	   echo 'user_images:'; \
-	   for p in $(subst -,_,$(USER_PROGS)); do echo "    .quad name_$$p, start_$$p, end_$$p"; done; \
+	   for p in $(subst -,_,$(USER_PROGS)) $(patsubst %,lib_%,$(USER_LIBS)); do \
+	     echo "    .quad name_$$p, start_$$p, end_$$p"; done; \
 	   echo '    .quad 0, 0, 0'; \
 	   for p in $(USER_PROGS); do l=$$(echo $$p | tr - _); \
 	     echo "name_$$l: .asciz \"$$p\""; \
 	     echo '    .balign 8'; \
 	     echo "start_$$l: .incbin \"$(BUILD)/user/$$p.bin\""; \
 	     echo "end_$$l:"; \
+	   done; \
+	   for p in $(USER_LIBS); do \
+	     echo "name_lib_$$p: .asciz \"$$p.library\""; \
+	     echo '    .balign 8'; \
+	     echo "start_lib_$$p: .incbin \"$(BUILD)/libs/$$p.library.bin\""; \
+	     echo "end_lib_$$p:"; \
 	   done; } > $@
 
 $(BUILD)/user_images.o: $(BUILD)/user_images.S

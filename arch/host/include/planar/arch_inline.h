@@ -17,6 +17,9 @@
 #define ARCH_DIRECT_MAP_GIB 0x100000ULL
 
 #define ARCH_DIRECT_MAP     0ULL
+
+/* The relocation a shared library's image has (kernel/library.c). */
+#define ARCH_R_RELATIVE     0                   /* no libraries */
 #define ARCH_USER_TOP       0ULL
 
 /* ucontext stands in for the context switch. */
