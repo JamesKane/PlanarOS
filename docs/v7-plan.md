@@ -1,6 +1,6 @@
 # V7 plan: Workbench I, windows
 
-**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 5 done, and step 6 on the RV2.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
+**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 5 done; step 6 done on the RV2, and on the CIX all but its 10-run kill test, which the board's own resets keep stopping (see [step 6's *To continue*](#to-continue)).** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
 
 **Goal (§8):** windows on the screen of both boards, composed on the CPU, with the pointer on its own plane. A client draws into its own memory with `gfx.library`, presents it without a copy across IPC, and is dragged, raised, closed and, when it dies, cleared away by `intuition`, which the client can't hang. Text is the 8×8 font until V8.
 
@@ -293,6 +293,34 @@ On the CIX, then the RV2:
 - **gfx.library on the X60's 256-bit vectors**, by the table against lib/gfx's scalar code, a megapixel: `RectFill` 529 µs against 1,283 (2.4×), `SRC_OVER` 6.8 ms against 29.8 (4.4×), `Text` 715 ns a glyph.
 - **By eye**, with `look`: the backdrop and both windows where they should be. Before that, the windows had been missed at test speed, each scene up for a second or two, and the backdrop (#182038) taken for black.
 - **Dragged by hand**, with `drag` (below): windows dragged by a USB mouse, and after the fixes below the pointer's feel "much better, and tracking acceptable". No tear was reported.
+
+**The CIX (2026-10-22, `e085715`).** 13 boots passed every test to `V7.5 done`, each with 36 kills (3–9 while binding) and `T_WINDOW`'s two rounds. But no 10 in a row yet: both attempts were stopped by the board, not by a test (below).
+- **600 frames at 60 Hz, none missed**, in every boot, of both windows: present to latch 16.65–16.67 ms, vblank to latch 16.66–16.68 ms, steadier than the RV2's. displaytest's flips latched one frame after their commit too (16.66 ms), where V5's notes say about two.
+- **Composing**, NC faster here, the RV2's opposite:
+
+  | | NC | cached, cleaned |
+  |---|---|---|
+  | the whole screen (2.07 Mpx) | 0.39–0.40 ms | 0.70–0.76 ms |
+  | a 640×480 window dragged (0.32 Mpx a frame) | 0.085–0.098 ms | 0.19–0.21 ms |
+  | the pointer alone | nothing composed; its commit 3–5 µs | |
+
+  About 11× the RV2's speed composing into NC. **Decision 3 is split by the boards:** the RV2 composes faster into cached memory cleaned (2.3× for a drag), the CIX into NC (2.2×). Not yet decided: a per-board choice (display could say which, as `DISPLAYA_CACHED`'s caller) or NC everywhere, which costs the RV2 1.3 ms a drag frame of its 16.7.
+- **gfx.library on the A720's NEON**, by the table against lib/gfx's scalar code, a megapixel: `RectFill` 84 µs against 546 (6.5×), `SRC_OVER` 1.08 ms against 5.96 (5.5×), `Text` 94 ns a glyph.
+- **Dragged by hand** with `drag`: the pointer at first stayed at the top and moved only left and right. The CIX's mouse, a Corsair (`1b1c:1bac`), sends buttons and 16-bit X and Y even in the boot protocol, so input read X's high byte as Y. xhci now reads a mouse in the report protocol, through its report descriptor (`drv/xhci/hid.c`, `e085715`), and turns each report into a boot report. Then it tracked, "good": 4,941 moves 1–20 ms after the last, the pointer on the screen 31 ms after input had a move, on average. A drag still costs "drag me" frames (179 of 1,084 vblanks): a move of a window is composed at once, and a window's frame presented after it waits for the latch after. Pointer moves alone cost none (18,001 frames in 18,001 vblanks with the pointer moving in 992), from `POINTER_LEAD`.
+- **The kill test's 10 in a row: not yet.** Attempt 1 passed 9, attempt 2 passed 4; the transcripts are in [`boards/cix-p1/v7-kill-test-attempts`](boards/cix-p1/v7-kill-test-attempts). Each was stopped by **the board's system reset hanging**: no TF-A line (`NOTICE:  BL2`) after the reset was asked for, the screen black, ssh gone, until the power was cycled.
+  - Attempt 1, run 10: FreeBSD's own `reboot` (efi-boot's, over ssh) hung, with Planar last run a whole boot before, and its run 9 clean.
+  - Attempt 2, run 5: Planar passed everything, said `planar: rebooting`, and its PSCI `SYSTEM_RESET` hung. The SBSA watchdog, left armed, didn't reset the board either.
+  - What V7 leaves on the hardware at the reset is as V6 left it: the DPU's layers off but the console's (hwdb's `stop_display`), the USB controllers halted. New are the Corsair in the report protocol (the device's own state) and xhci's `IMOD` 32. Neither touches the start of a reset. V6's 10 runs were on the same bench, the same Corsair and hub plugged in.
+
+#### To continue
+
+1. **Find whether the CIX's reset hangs without Planar.** A loop of FreeBSD reboots over ssh (no Planar), say 20, counting hangs (no `NOTICE:  BL2` within 30 s on the serial line). FreeBSD alone hanging at a like rate means the method needs a way round a stuck reset (a power switch the host can work, or the watchdog left to the firmware), not a fix in V7. None means looking at what Planar leaves the SCP: its `power` talks SCMI to it on mailbox 6 and to TF-A on `0x84380000`, the channel a PSCI reset may use.
+2. **Fix `power`'s SCMI busy window** (`drv/power/scmi.c`, `call`): it writes `SMT_STATUS` 0 (busy) before it rings the doorbell or makes the SMC, so a `power` killed between the two leaves the channel busy, perhaps across a warm reset, for whoever uses it next. The transcripts show it didn't happen in these runs (each run's later `power` answered on both channels), but V5.2 and V5.7 kill `power`, and V6's code has it too. A dead `power`'s channels could be made free again by hwdb, as `stop_display` turns a dead display's planes off: wait for the platform to free a rung channel, and free one that wasn't rung.
+3. **Then the CIX's 10 in a row**, `make PLATFORM=uefi-a64 test` in a loop as the RV2's ran, transcripts to `docs/boards/cix-p1/v7-kill-test/`, and the CIX's README row.
+4. **On the RV2 again**: one `drag` boot, as its mouse (`30fa:0300`) now goes through the report-protocol path too (tested only by the host and QEMU's `usb-mouse`), and to measure `POINTER_LEAD` there with a hand on the mouse.
+5. **Decision 3**, from the two boards' costs above.
+6. **Left for after V7** (noted, not blocking its exit): composing a window's drag late in the frame, so a window's frame presented after a drag move isn't held to the latch after; the pointer's 16×16 sprite, small on 1920×1080, and lost at the right and bottom edges, where one pixel of it shows.
+7. **V7's exit**: the manuals' *Checked against* lines moved to V7, and the plan's status to done.
 
 **The drag test** (`drag`, a boot argument as `look` is: `HWDB_DRAG`, `WINDOW_DRAG`). After its first two windows, the window test opens two with chrome, "drag me", 640×480 and two-buffered, and "close me to end", 320×200, until either's close gadget or 300 s. "drag me" presents a frame of moving stripes as soon as its last is on the screen, so a tear would show as a broken stripe. At each latch the test notes where each window is. After, it says the vblanks "drag me" missed, how far each window moved and how often it stood still for one frame between two that moved, and, from `INTUI_INFO`'s new `im_Moves`, `im_MoveNanos`, `im_MoveMax`, `im_ReadMax` and `im_MoveGaps`, the pointer's moves from input's `ie_Time` to the latch, and the gaps between them. It says every 30 s how it's going, since `serial-boot.py` gives up on 120 s without output. hwdb's and the kernel's waits for the window test grow by 300 s with it, and by 20 s with `look`. Said, not checked: a hand isn't a test.
 

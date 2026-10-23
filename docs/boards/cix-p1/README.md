@@ -12,6 +12,7 @@ Taken from the Orange Pi 6 Plus on 2026-10-20, running AbyssBSD's FreeBSD 16.0-C
 | `firmware-boot.log` | UART2 from power-on to FreeBSD's loader: TF-A, OP-TEE, UEFI. Escape sequences stripped. |
 | `freebsd-dmesg.txt` | FreeBSD's boot messages: devices found through ACPI, the CPU feature registers. |
 | `v6-kill-test/run-*.log.gz` | V6's exit: 10 boots in a row of `make PLATFORM=uefi-a64 test` at `9b9ba67` (2026-10-22), each through `V6.8 done` with the kill test (docs/v6-plan.md step 8). |
+| `v7-kill-test-attempts/{1,2}/run-*.log.gz` | V7 step 6's two attempts at 10 boots in a row (2026-10-22, `e085715`): 9 and then 4 passed to `V7.5 done`, each stopped by the board's system reset hanging (attempt 1's run 10, FreeBSD's reboot; attempt 2's run 5, Planar's). docs/v7-plan.md step 6 has what's known. |
 
 ## Facts
 
