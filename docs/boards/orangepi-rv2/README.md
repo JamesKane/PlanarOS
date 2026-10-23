@@ -7,6 +7,7 @@ Taken on 2026-10-20 from the board, for hwdb's tests (docs/v4-plan.md step 2).
 | `u-boot.dtb` | The tree the stock U-Boot (2022.10, in SPI flash) passes the kernel, 52,706 bytes: printed by the boot argument `dumpdtb` (`make PLATFORM=ky-x1 BOOTARGS=dumpdtb test`) and rebuilt from `build/ky-x1/serial-boot.log` with `tools/dtb-from-log.py`. |
 | `hwdb.txt` | The report hwdb's graph must give from it (`make hwdb-test`). |
 | `v6-kill-test/run-*.log.gz` | V6's exit: 10 boots in a row of `make PLATFORM=ky-x1 test` at `e42517d` (2026-10-22), each through `V6.8 done` with the kill test (docs/v6-plan.md step 8). |
+| `v7-kill-test/run-*.log.gz` | V7 step 6: 10 boots in a row of `make PLATFORM=ky-x1 test` at `15a6095` (2026-10-22), each through `V7.5 done` with the kill test's `T_WINDOW`: intuition's two rounds, the 600 paced frames and the composition costs. |
 
 ## Facts
 
@@ -21,6 +22,7 @@ Taken on 2026-10-20 from the board, for hwdb's tests (docs/v4-plan.md step 2).
 - **From the SD card** (`make PLATFORM=ky-x1 sdcard`, with the card's FAT partition mounted, `SD_MOUNT=/Volumes/OMEGA` by default): `EFI/planar/planar.bin`, the commands in `EFI/planar/C`, the scripts in `EFI/planar/S`, the GPU's firmware as `EFI/planar/DEVS/rogue.fw` (from the NAS, checked by its SHA-256), and `boot.scr`. On power-on the stock U-Boot runs `boot.scr`, which boots Planar to the Shell. `EndShell` resets the board.
 - **This U-Boot autoboots after 0 seconds and ignores Ctrl-C while it does.** With `EFI/planar/hold` on the card, `boot.scr` stops and U-Boot goes on to its prompt (after trying USB and the network, about 80 s). `Touch SYS:EFI/planar/hold` makes the file from the Shell; `Delete` removes it.
 - **Test runs:** `make PLATFORM=ky-x1 SD=1 test` makes the hold from the Shell, resets the board, and loads the image from the card with `load mmc`. Without `SD=1` it goes over the serial line by `loadx` (about two minutes for the image), which fails if the line drops bytes, as it did for a while on 2026-10-20.
+- **Looking at intuition's screen:** `make PLATFORM=ky-x1 BOOTARGS=look test` holds the window test's first two windows on the screen for 20 s, and says on the serial line what should be there (V7 step 6).
 - **The screen:** U-Boot leaves a 1920×1080 framebuffer at `0x7f700000` scanning out over HDMI when a monitor is attached. Planar keeps it and draws its console there.
 
 ## Facts found running Planar

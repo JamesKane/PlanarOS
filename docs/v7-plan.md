@@ -1,6 +1,6 @@
 # V7 plan: Workbench I, windows
 
-**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 5 done.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
+**Status: in progress (2026-10-22); decisions 1 to 7 taken as they leaned; steps 1 to 5 done, and step 6 on the RV2.** Scoped from the [roadmap's V7 row](08-roadmap.md) and its decision on who owns a window's buffers, §13.1 and §13.3 (the layer split, zero-copy surfaces, crash containment, the window's chrome), and §16.3's pillars 1, 3 and 4 (`BitMap`, planes, presentation). The decisions at the end are taken.
 
 **Goal (§8):** windows on the screen of both boards, composed on the CPU, with the pointer on its own plane. A client draws into its own memory with `gfx.library`, presents it without a copy across IPC, and is dragged, raised, closed and, when it dies, cleared away by `intuition`, which the client can't hang. Text is the 8×8 font until V8.
 
@@ -272,6 +272,26 @@ On the CIX, then the RV2:
 - **`gfx-test`'s SIMD entries on the hardware:** the X60's 256-bit vectors and the A720's NEON, against the scalar ones, as V6.1's costs weren't yet measured on either board.
 - **The kill test 10 runs in a row on each**, with `T_WINDOW`. The transcripts go in `docs/boards/*/v7-kill-test/`.
 - **What to look at by eye**, once on each board: windows dragged by a USB mouse, the pointer smooth, no tearing. The checksum can't see the DPU's own output.
+
+**Built for it.**
+- **`window.c`'s paced frames.** After its 120 frames as fast as `is_Safe` allows, it presents 600 frames of its 200×120 window, then 600 of a two-buffered window the screen's size, each presented whole just after a vblank. Each frame's latch is `is_DispTime`, the vblank's `ds_Time`. The test says present to latch, vblank to latch, and the vblanks missed, counted by the vblanks' period over the run, and fails on a board if any were. QEMU runs 30 of each and only says them. Its display composes the planes itself in software as it latches, the whole screen for intuition's plane, so RV64 QEMU misses one vblank a frame.
+- **intuition's costs.** hwdb starts intuition with `INTUITION_COSTS` at the first start of a test, on a board's controller alone. Before publishing its port, intuition composes 60 frames of each case from a bitmap of the screen's size: the whole screen damaged, and a 640×480 window dragged 8 right and 4 down each frame. Each runs into display's NC screen buffers, then into two cached ones with each frame's damage cleaned (`drv_dma_clean` over its bounds). It then times the pointer alone, which composes nothing, as plane 2's commit, call to answer. The costs are said, not checked.
+  - **`DISPLAYA_CACHED`**, a new `dm_Flags` bit (it was `dm_Pad`) for `DISPLAY_ALLOC`, gives a cached buffer where a controller would get an NC one. Its client cleans what it wrote before committing.
+- **`look`**, a boot argument: the window test holds its first two windows on the screen for 20 s, and says on the serial line what should be there. The kernel passes it to hwdb as `HWDB_LOOK`, and hwdb to `window` as `LOOK`.
+
+**The RV2 (2026-10-22, `15a6095`).** The kill test passed 10 boots in a row, each 36 kills (5–11 while binding), `T_WINDOW`'s two rounds, and every test to `V7.5 done`. The transcripts are in [`boards/orangepi-rv2/v7-kill-test`](boards/orangepi-rv2/v7-kill-test).
+- **600 frames at 60 Hz, none missed**, in every run, of the small window and of the full-screen one. Each latched at the next vblank: present to latch 16.6–16.7 ms (one run's full-screen frames 16.2–17.2 ms), as displaytest's own flips (16.6 ms).
+- **Composing**, in every run within 1%:
+
+  | | NC | cached, cleaned |
+  |---|---|---|
+  | the whole screen (2.07 Mpx) | 4.29 ms | 4.12 ms |
+  | a 640×480 window dragged (0.32 Mpx a frame) | 2.38 ms | 1.05 ms |
+  | the pointer alone | nothing composed; its commit 14 µs (cut from the runs' log lines by `KLOG_MAX`, measured at the next commit) | |
+
+  Cached and cleaned is never slower. It's 2.3× faster for the drag, though why NC is so much slower there, at 7.4 ns a pixel against 2.1 for the whole screen, isn't measured. Decision 3 leaned NC. The RV2 says cached, and the CIX decides.
+- **gfx.library on the X60's 256-bit vectors**, by the table against lib/gfx's scalar code, a megapixel: `RectFill` 529 µs against 1,283 (2.4×), `SRC_OVER` 6.8 ms against 29.8 (4.4×), `Text` 715 ns a glyph.
+- **By eye**, with `look`: the backdrop and both windows where they should be. Before that, the windows had been missed at test speed, each scene up for a second or two, and the backdrop (#182038) taken for black. Not yet looked at: windows dragged by a USB mouse, and tearing.
 
 ## Sources
 

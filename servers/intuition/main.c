@@ -1238,9 +1238,9 @@ static void costs(void)
     }
     KPrintF("intuition: costs, %lu frames each: the whole screen %lu us into NC, %lu us into cached and "
             "cleaned", (uint64_t)COST_FRAMES, c[0] / 1000, c[1] / 1000);
-    KPrintF("intuition: costs: a 640x480 window dragged %lu us into NC, %lu us cached and cleaned (%lu "
-            "pixels a frame); the pointer alone composes nothing, its commit %lu us",
-            c[2] / 1000, c[3] / 1000, px[2], commit / 10 / 1000);
+    KPrintF("intuition: costs: a 640x480 window dragged %lu us into NC, %lu us into cached and cleaned, "
+            "%lu pixels a frame", c[2] / 1000, c[3] / 1000, px[2]);
+    KPrintF("intuition: costs: the pointer alone composes nothing; its commit %lu us", commit / 10 / 1000);
 }
 
 int main(uint64_t arg)
