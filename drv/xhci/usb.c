@@ -7,9 +7,11 @@
  * and looked at every 250 ms (its status endpoint isn't read). A
  * full- or low-speed device behind a high-speed hub is reached through
  * that hub's transaction translator, which its slot context names
- * (§4.3.3, single TT). A HID interface that speaks the boot protocol
- * (subclass 1) is put in it, and its interrupt endpoint read for ever,
- * each report sent to input as it is.
+ * (§4.3.3, single TT). A HID interface of the boot subclass (1) is read
+ * from its interrupt endpoint for ever, each report sent to input as a
+ * boot report: a keyboard's as it is, in the boot protocol; a mouse's,
+ * in the report protocol, through what its report descriptor says
+ * (hid.c), or in the boot protocol if that wasn't understood.
  *
  * Only USB 2's ports are walked: SuperSpeed devices (the RV2's hub's
  * USB 3 half, a USB 3 stick) are left alone. Keyboards and mice are
@@ -129,6 +131,7 @@ static void hid_queue(struct xhc *c, struct xdev *x, struct hid *h)
  * read. */
 static bool hid_start(struct drv *d, struct xhc *c, struct xdev *x)
 {
+    static uint8_t report[1024];        /* a report descriptor: hc.c's CTRL_MAX */
     uint32_t add = 1, top = 1, *s;
 
     for (unsigned k = 0; k < XHC_HIDS; k++)
@@ -163,14 +166,38 @@ static bool hid_start(struct drv *d, struct xhc *c, struct xdev *x)
 
         if (!h->kind)
             continue;
-        /* Some refuse these and send boot reports anyway: said. */
-        if ((e = hc_control(d, c, x, 0x21, SET_PROTOCOL, 0, h->iface, 0, nullptr)) != 0) {
+        /* A mouse whose report descriptor says where its X and Y are is
+         * read in the report protocol, through that (hid.c): some send
+         * their own reports in the boot protocol. A keyboard, and a mouse
+         * whose descriptor wasn't understood, in the boot protocol. Some
+         * refuse SET_PROTOCOL and send boot reports anyway: said. */
+        if (h->kind == INPUT_MOUSE && h->report_len && h->report_len <= sizeof report &&
+            hc_control(d, c, x, 0x81, GET_DESCRIPTOR, 0x2200, h->iface, h->report_len, report) == 0)
+            h->by_layout = hid_layout(report, h->report_len, &h->layout);
+        if ((e = hc_control(d, c, x, 0x21, SET_PROTOCOL, h->by_layout, h->iface, 0, nullptr)) != 0) {
             struct xline l = { 0 };
 
             path(c, x, &l);
-            lput(&l, e < 0 ? ": SET_PROTOCOL (boot) never ended" : ": SET_PROTOCOL (boot) refused, code ");
+            lput(&l, e < 0 ? ": SET_PROTOCOL never ended" : ": SET_PROTOCOL refused, code ");
             if (e > 0)
                 lnum(&l, (uint64_t)e, 10);
+            xsay(c, &l);
+        }
+        if (h->by_layout) {
+            struct xline l = { 0 };
+
+            path(c, x, &l);
+            lput(&l, ": its reports by their descriptor: X at bit ");
+            lnum(&l, h->layout.x_at, 10);
+            lput(&l, " (");
+            lnum(&l, h->layout.x_bits, 10);
+            lput(&l, "), Y at ");
+            lnum(&l, h->layout.y_at, 10);
+            lput(&l, " (");
+            lnum(&l, h->layout.y_bits, 10);
+            lput(&l, h->layout.ids ? "), report ID " : ")");
+            if (h->layout.ids)
+                lnum(&l, h->layout.id, 10);
             xsay(c, &l);
         }
         if (h->kind == INPUT_KEYBOARD)
@@ -343,6 +370,8 @@ static void enumerate(struct drv *d, struct xhc *c, unsigned parent, unsigned po
                 x->hid[cur] = (struct hid){ .iface = k[2] };
                 x->hid[cur].kind = k[7] == 1 ? INPUT_KEYBOARD : INPUT_MOUSE;
             }
+        } else if (k[1] == 0x21 && k[0] >= 9 && cur < XHC_HIDS && k[6] == 0x22) {
+            x->hid[cur].report_len = (uint16_t)(k[7] | k[8] << 8);     /* HID 1.11 §6.2.1 */
         } else if (k[1] == 5 && k[0] >= 7 && cur < XHC_HIDS && !x->hid[cur].dci &&
                    k[2] & 0x80 && (k[3] & 3) == 3) {
             struct hid *h = &x->hid[cur];
@@ -538,8 +567,14 @@ void usb_transfer(struct drv *, struct xhc *c, uint32_t slot, uint32_t dci, uint
                     (trb - (uint64_t)h->ring.t) % sizeof *t)
                     return;         /* not one of its TRBs */
                 buf = (const uint8_t *)t->ptr;
-                if (residual < h->mps)
+                if (residual < h->mps && h->by_layout) {
+                    uint8_t boot[3];
+
+                    if (hid_boot(&h->layout, buf, h->mps - residual, boot))
+                        input_report(c, x, h, boot, sizeof boot);
+                } else if (residual < h->mps) {
                     input_report(c, x, h, buf, h->mps - residual);
+                }
                 ring_put(&h->ring, (uint64_t)buf, h->mps, trb_type(T_NORMAL) | TRB_IOC | TRB_ISP);
                 hc_ring_ep(c, x->slot, h->dci);
             } else {

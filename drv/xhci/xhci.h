@@ -97,6 +97,16 @@ enum : uint8_t { EP_CONTROL = 4, EP_INT_IN = 7 };
 
 struct xdev;
 
+/* Where a mouse's input report has its buttons, X and Y (hid.c): bit
+ * offsets after the report ID, which leads it if 'ids'. */
+struct hid_layout {
+    bool ids, has_x, has_y;
+    uint8_t id;
+    uint8_t x_bits, y_bits;
+    uint16_t x_at, y_at;
+    uint16_t button_at[3];          /* bit + 1; 0: none */
+};
+
 struct hid {
     uint8_t kind;                   /* INPUT_KEYBOARD, INPUT_MOUSE; 0 none */
     uint8_t iface, dci;
@@ -107,6 +117,9 @@ struct hid {
     bool attached;                  /* told to input */
     bool halted;                    /* by an error: to be reset */
     uint32_t halts;                 /* ever, said at the first few and then every 100th */
+    uint16_t report_len;            /* its report descriptor's bytes (its HID descriptor's) */
+    bool by_layout;                 /* a mouse read in the report protocol, through 'layout' */
+    struct hid_layout layout;
 };
 
 struct xdev {
@@ -148,6 +161,10 @@ struct xhc {
     bool wait_done;
     uint32_t wait_code, got_slot;   /* got_slot: Enable Slot's answer */
 };
+
+/* hid.c */
+bool hid_layout(const uint8_t *d, uint32_t n, struct hid_layout *l);
+bool hid_boot(const struct hid_layout *l, const uint8_t *r, uint32_t len, uint8_t out[3]);
 
 /* hc.c */
 uint32_t xr(const volatile uint8_t *base, uint32_t off);
