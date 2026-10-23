@@ -111,6 +111,10 @@ struct IntuiMsg {
     uint32_t im_Windows;                /* on the screen, every client's */
     uint32_t im_Input;                  /* 1 if intuition holds input's ring */
     uint32_t im_InputOpens;             /* input's rings it has opened: one more each time input's back */
+    uint64_t im_Moves;                  /* frames that moved the pointer */
+    uint64_t im_MoveNanos, im_MoveMax;  /* their moves' age when latched: input's ie_Time to the latch */
+    uint64_t im_ReadMax;                /* a move's age at most when intuition read it from the ring */
+    uint64_t im_MoveGaps[4];            /* moves after the last by (ie_Time) <1 ms, <20 ms, <100 ms, <1 s */
 };
 
 /* A window's sync words: a cache line of its connection's page. */

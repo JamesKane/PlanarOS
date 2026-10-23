@@ -2918,26 +2918,33 @@ void selftest_hwdb(void)
     uint64_t free_before = pmm_free_pages(), heap_before = kmalloc_pages();
     uint64_t msi_before = intc_msi_pages();
     struct process *p;
-    bool look;
+    uint64_t arg = 1, wait_s = 150;
 
     if (!user_images[0].name) {
         kprintf("V4.3 hwdb skipped: no user programs\n");
         return;
     }
     task_set_signal(0, SIGF_DEAD);
-    /* init, which starts hwdb and ends with its exit (V6 step 7); with
-     * "look", hwdb's (servers/hwdb/server.h's HWDB_LOOK) window test
-     * holds its windows on the screen for someone to look at. */
-    look = bootargs_has("look");
-    if (!(p = process_create_root("init", 5, look ? 1 | 8 : 1, task_self(), SIGF_DEAD)))
-        fail("V4.3 hwdb", "process_create failed");
     /* The boards take most of 15 s for the kill test alone, and the GPU's
      * load test (V5 step 7) 30 s more, intuition's paced frames (V7 step 6)
-     * 20 s; "look" holds the screen 20 s. */
-    for (uint64_t end = time_now() + time_us(look ? 180000000 : 150000000); !atomic_load(&p->dead) && time_now() < end;)
+     * 20 s. With "look" and "drag", hwdb's window test (servers/hwdb/
+     * server.h's HWDB_LOOK, HWDB_DRAG) holds its windows on the screen
+     * for someone to look at, 20 s, or to drag by hand, up to 300 s. */
+    if (bootargs_has("look")) {
+        arg |= 8;
+        wait_s += 20;
+    }
+    if (bootargs_has("drag")) {
+        arg |= 16;
+        wait_s += 300;
+    }
+    /* init, which starts hwdb and ends with its exit (V6 step 7). */
+    if (!(p = process_create_root("init", 5, arg, task_self(), SIGF_DEAD)))
+        fail("V4.3 hwdb", "process_create failed");
+    for (uint64_t end = time_now() + time_us(wait_s * 1000000); !atomic_load(&p->dead) && time_now() < end;)
         wait_test_dead();
     if (!atomic_load(&p->dead)) {
-        kprintf("hwdb: still running after 120 s\n");
+        kprintf("hwdb: still running after %llu s\n", (unsigned long long)wait_s);
         fail("V4.3 hwdb", "hwdb failed");
     }
     if (p->fault != FAULT_NONE || p->exit_code != 0) {

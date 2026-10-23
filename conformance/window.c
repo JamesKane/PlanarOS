@@ -82,6 +82,8 @@ constexpr uint32_t CHROME = 0x00c0ffee;     /* the model's: a pixel of the chrom
 constexpr int NO_INPUT = 1000;
 enum : uint64_t { FIRST, STOPPED, KILLED, SURVIVE, SURVIVE_MOUSE = 4 };     /* the argument's low byte */
 constexpr uint64_t LOOK = 1u << 8;          /* hwdb's WINDOW_LOOK: hold the first windows on the screen */
+constexpr uint64_t DRAG = 1u << 9;          /* hwdb's WINDOW_DRAG: windows to drag by hand */
+constexpr unsigned DRAG_S = 300;            /* at most: until the close gadget */
 
 /* The stopped client's window, and the killed one's two, which both ends know. */
 constexpr int32_t HUNG_X = 420, HUNG_Y = 80;
@@ -628,6 +630,141 @@ static int paced_both(bool readable)
     CHECK(IIntuition->WaitSafe(&wa, CurrentTime() + 1000 * MS) == 0);
     IGfx->FreeBitMap(fb[0]);
     IGfx->FreeBitMap(fb[1]);
+    return 0;
+}
+
+/* --- DRAG: windows dragged by hand, for someone at the board. --- */
+
+static int64_t info(struct IntuiMsg *m);
+
+/* Vertical stripes 16 wide, moved 4 right a frame: a tear shows as a
+ * stripe broken across. */
+static void stripes(struct RastPort *rp, uint32_t w, uint32_t h, uint64_t f)
+{
+    char s[8];
+
+    for (int32_t x = -(int32_t)(f * 4 % 32); x < (int32_t)w; x += 16) {
+        rp->rp_FgPen = (x + (int32_t)(f * 4 % 32)) & 16 ? 0xffe8e0d0 : 0xff203048;
+        IGfx->RectFill(rp, x < 0 ? 0 : x, 0, x + 15 >= (int32_t)w ? (int32_t)w - 1 : x + 15, (int32_t)h - 1);
+    }
+    for (uint64_t i = 0, v = f; i < 8; i++, v /= 10)
+        s[7 - i] = (char)('0' + v % 10);
+    rp->rp_FgPen = 0xffffffff;
+    rp->rp_BgPen = 0xff000000;
+    rp->rp_DrawMode = JAM2;
+    IGfx->Text(rp, 8, 8, s, 8);
+}
+
+/* A window's moves, one frame of the first window to the next. */
+struct moves {
+    int32_t x, y;
+    uint64_t frames, dist;          /* frames moved in, and how far (|dx| + |dy|) */
+    uint64_t stalls;                /* still for one frame between two moving */
+    bool moved, was_moved;
+};
+
+static void sample(struct moves *m, const struct Window *w)
+{
+    int32_t x = w->w_Sync->is_LeftEdge, y = w->w_Sync->is_TopEdge;
+    bool moved = x != m->x || y != m->y;
+
+    if (moved) {
+        m->frames++;
+        m->dist += (uint64_t)(x > m->x ? x - m->x : m->x - x) + (uint64_t)(y > m->y ? y - m->y : m->y - y);
+        if (!m->moved && m->was_moved)
+            m->stalls++;
+    }
+    m->was_moved = m->moved;
+    m->moved = moved;
+    m->x = x;
+    m->y = y;
+}
+
+/* Two windows with chrome until either's close gadget, or DRAG_S
+ * seconds: the first 640x480, two-buffered, a frame of its
+ * stripes presented as soon as the last is on the screen; the second
+ * still. At each latch, where each is (is_LeftEdge, is_TopEdge); after,
+ * the vblanks the first's frames missed, by the latches' times and the
+ * vblanks' period. Said, not checked: a hand isn't a test. */
+static int by_hand(void)
+{
+    static uint64_t gap[DRAG_S * 64];   /* latch to latch */
+    const uint32_t chrome = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET;
+    struct BitMap *b[3];
+    struct Window wm, ws;
+    struct moves mm = { 0 }, ms = { 0 };
+    struct IntuiEvent ev;
+    uint64_t end, say, frames = 0, missed = 0, last, v0, t0, v1, t1, period, moves0, nanos0;
+    bool closed = false;
+
+    CHECK((b[0] = IGfx->AllocBitMap(640, 480, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (b[1] = IGfx->AllocBitMap(640, 480, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (b[2] = IGfx->AllocBitMap(320, 200, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &wm, { WA_Left, 200 }, { WA_Top, 150 }, { WA_Title, (uint64_t)"drag me" },
+                         { WA_Flags, chrome }, { WA_IDCMP, IDCMP_CLOSEWINDOW }, { WA_BitMap, (uint64_t)b[0] }, { WA_BackBitMap, (uint64_t)b[1] }) == 0);
+    CHECK(OpenWindowTags(IIntuition, &in, &ws, { WA_Left, 1000 }, { WA_Top, 300 },
+                         { WA_Title, (uint64_t)"close me to end" }, { WA_Flags, chrome | WFLG_ACTIVATE },
+                         { WA_IDCMP, IDCMP_CLOSEWINDOW }, { WA_BitMap, (uint64_t)b[2] }) == 0);
+    picture(&ws.w_RPort, 320, 200, 0x8a5a44, "drag me too");
+    CHECK(IIntuition->PresentWindow(&ws, nullptr, 0) == 0);
+    stripes(&wm.w_RPort, 640, 480, 0);
+    CHECK(IIntuition->PresentWindow(&wm, nullptr, 0) == 0);
+    CHECK(on_screen(&wm, 1) && on_screen(&ws, 1));
+    mm.x = wm.w_Sync->is_LeftEdge, mm.y = wm.w_Sync->is_TopEdge;
+    ms.x = ws.w_Sync->is_LeftEdge, ms.y = ws.w_Sync->is_TopEdge;
+    KPrintF("window: drag: drag the windows by their title bars with the mouse. \"drag me\"'s stripes");
+    KPrintF("window: drag: move each frame, so a tear shows as a broken stripe; the pointer should be");
+    KPrintF("window: drag: smooth. A close gadget ends it, or %lu s.", (uint64_t)DRAG_S);
+    CHECK(info(in.in_Call) == 0);
+    moves0 = in.in_Call->im_Moves;
+    nanos0 = in.in_Call->im_MoveNanos;
+    end = CurrentTime() + DRAG_S * 1000 * MS;
+    say = CurrentTime() + 30000 * MS;   /* the serial line's watcher gives up after 120 s quiet */
+    last = wm.w_Sync->is_DispTime;
+    v0 = last_vblank(&t0);
+    while (!closed && CurrentTime() < end && frames < sizeof gap / sizeof gap[0]) {
+        CHECK(IIntuition->WaitSafe(&wm, CurrentTime() + 1000 * MS) == 0);
+        stripes(&wm.w_RPort, 640, 480, frames + 1);
+        CHECK(IIntuition->PresentWindow(&wm, nullptr, 0) == 0);
+        CHECK(on_screen(&wm, wm.w_Frame));
+        gap[frames++] = wm.w_Sync->is_DispTime - last;
+        last = wm.w_Sync->is_DispTime;
+        sample(&mm, &wm);
+        sample(&ms, &ws);
+        while (IIntuition->GetIntuiEvent(&in, &ev))
+            closed |= ev.iev_Class == IDCMP_CLOSEWINDOW;
+        if (CurrentTime() > say) {
+            KPrintF("window: drag: %lu frames so far; the windows moved %lu and %lu pixels", frames, mm.dist,
+                    ms.dist);
+            say += 30000 * MS;
+        }
+    }
+    v1 = last_vblank(&t1);
+    CHECK(v1 > v0);
+    period = (t1 - t0) / (v1 - v0);
+    for (uint64_t f = 0; f < frames; f++) {
+        uint64_t k = (gap[f] + period / 2) / period;
+
+        missed += k > 1 ? k - 1 : 0;
+    }
+    CHECK(IIntuition->CloseWindow(&wm) == 0 && IIntuition->CloseWindow(&ws) == 0);
+    for (unsigned i = 0; i < 3; i++)
+        IGfx->FreeBitMap(b[i]);
+    KPrintF("window: drag: %s; \"drag me\" %lu frames over %lu vblanks, %lu missed",
+            closed ? "closed" : "the time's up", frames, v1 - v0, missed);
+    KPrintF("window: drag: \"drag me\" moved in %lu frames, %lu pixels, still %lu times for one frame",
+            mm.frames, mm.dist, mm.stalls);
+    KPrintF("window: drag: \"close me to end\" moved in %lu frames, %lu pixels, still %lu times for one frame",
+            ms.frames, ms.dist, ms.stalls);
+    CHECK(info(in.in_Call) == 0);
+    moves0 = in.in_Call->im_Moves - moves0;
+    KPrintF("window: drag: the pointer moved in %lu frames, input's event to the latch %lu us on average,",
+            moves0, moves0 ? (in.in_Call->im_MoveNanos - nanos0) / moves0 / 1000 : 0);
+    KPrintF("window: drag: %lu us at most (since intuition started); read from the ring %lu us at most",
+            in.in_Call->im_MoveMax / 1000, in.in_Call->im_ReadMax / 1000);
+    KPrintF("window: drag: moves from input, after the last by <1 ms %lu, <20 ms %lu, <100 ms %lu, <1 s %lu",
+            in.in_Call->im_MoveGaps[0], in.in_Call->im_MoveGaps[1], in.in_Call->im_MoveGaps[2],
+            in.in_Call->im_MoveGaps[3]);
     return 0;
 }
 
@@ -1301,11 +1438,14 @@ int main(uint64_t arg)
     if ((r = two_windows(&readable, bm)))
         return r;
     if (arg & LOOK) {
-        KPrintF("window: look: for 20 s, over a dark navy backdrop (#182038) where the console was, "
-                "a blue window 200x120 at (64, 48) saying \"window a\", a grey one 160x100 at (180, 100) "
-                "over it saying \"window b\", and the pointer at (%ld, %ld)", (int64_t)ptr_x, (int64_t)ptr_y);
+        KPrintF("window: look: for 20 s, a dark navy backdrop (#182038) where the console was,");
+        KPrintF("window: look: a blue window 200x120 at (64, 48) saying \"window a\", a grey one 160x100");
+        KPrintF("window: look: at (180, 100) over it saying \"window b\", and the pointer at (%ld, %ld)",
+                (int64_t)ptr_x, (int64_t)ptr_y);
         nap(20000);
     }
+    if (arg & DRAG && (r = by_hand()))
+        return r;
     if ((r = refusals(bm)) || (r = frames(readable)) || (r = paced_both(readable)))
         return r;
 

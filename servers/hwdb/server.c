@@ -1277,6 +1277,7 @@ int main(uint64_t arg, uint64_t root)
     hwdb.test = arg & HWDB_TEST;
     hwdb.end = arg & HWDB_END;
     hwdb.look = arg & HWDB_LOOK;
+    hwdb.drag = arg & HWDB_DRAG;
     hwdb.now = CurrentTime();
     if (!build()) {
         say("hwdb: the firmware's description is unusable");

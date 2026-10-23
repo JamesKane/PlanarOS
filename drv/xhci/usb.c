@@ -159,11 +159,20 @@ static bool hid_start(struct drv *d, struct xhc *c, struct xdev *x)
         return false;
     for (unsigned k = 0; k < XHC_HIDS; k++) {
         struct hid *h = &x->hid[k];
+        int e;
 
         if (!h->kind)
             continue;
-        /* Some refuse these and send boot reports anyway. */
-        hc_control(d, c, x, 0x21, SET_PROTOCOL, 0, h->iface, 0, nullptr);
+        /* Some refuse these and send boot reports anyway: said. */
+        if ((e = hc_control(d, c, x, 0x21, SET_PROTOCOL, 0, h->iface, 0, nullptr)) != 0) {
+            struct xline l = { 0 };
+
+            path(c, x, &l);
+            lput(&l, e < 0 ? ": SET_PROTOCOL (boot) never ended" : ": SET_PROTOCOL (boot) refused, code ");
+            if (e > 0)
+                lnum(&l, (uint64_t)e, 10);
+            xsay(c, &l);
+        }
         if (h->kind == INPUT_KEYBOARD)
             hc_control(d, c, x, 0x21, SET_IDLE, 0, h->iface, 0, nullptr);
         hid_queue(c, x, h);
@@ -535,6 +544,17 @@ void usb_transfer(struct drv *, struct xhc *c, uint32_t slot, uint32_t dci, uint
                 hc_ring_ep(c, x->slot, h->dci);
             } else {
                 h->halted = true;   /* reset from usb_hubs: not while reading events */
+                if (++h->halts <= 3 || h->halts % 100 == 0) {
+                    struct xline l = { 0 };
+
+                    path(c, x, &l);
+                    lput(&l, h->kind == INPUT_MOUSE ? ": the mouse's endpoint halted, code "
+                                                    : ": the keyboard's endpoint halted, code ");
+                    lnum(&l, code, 10);
+                    lput(&l, "; halts ");
+                    lnum(&l, h->halts, 10);
+                    xsay(c, &l);
+                }
             }
             return;
         }

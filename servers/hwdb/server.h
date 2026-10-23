@@ -30,6 +30,7 @@ constexpr uint64_t HWDB_TEST = 1u << 0;     /* run the kill test, then exit */
 constexpr uint64_t HWDB_END = 1u << 1;      /* not the test: end when the Shell does */
 constexpr uint64_t HWDB_FAULT = 1u << 2;    /* fault at once: init's test (servers/init) */
 constexpr uint64_t HWDB_LOOK = 1u << 3;     /* the window test holds its windows on the screen to be looked at */
+constexpr uint64_t HWDB_DRAG = 1u << 4;     /* the window test gives someone windows to drag, 60 s */
 
 enum unit_state : uint8_t {
     U_WAITING,          /* not all its devices ready */
@@ -77,7 +78,7 @@ struct hwdb {
     uint64_t rsdp;              /* ACPI's, else 0: acpid runs */
     struct FirmwareInfo fb;     /* MapFirmware's: the GOP framebuffer, if any */
     uint64_t now;
-    bool test, end, look, stopping, finished;
+    bool test, end, look, drag, stopping, finished;
     unsigned errors;            /* teardown checks that failed */
     uint64_t quarantined;       /* DMA pages dead drivers left, all told */
     Handle dos;                 /* the dos server, the kill test's or the system's */

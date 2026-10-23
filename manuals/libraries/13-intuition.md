@@ -147,7 +147,7 @@ intuition waits for display's and input's ports to come back with a task each, s
 - **Front to back.** A rectangle to repaint is taken by the windows in depth order. The front one it meets gives the part they share, blitted from its buffer. The pieces beside that go on to the windows behind, and what none covers is the backdrop. Each pixel is written once, and the screen is never read, so it can be write-combined memory (v7-plan decision 3).
 - **gfx.library's blits.** intuition composes with `IGfx->BltBitMap` and `RectFill`, by the vector unit where the CPU has one.
 - **A window's parts.** A window is its inside, from the program's buffer, and four parts of chrome, from intuition's bitmaps. The front window a rectangle meets gives it from each of its parts in turn.
-- **The pointer** is a 16×16 sprite on plane 2 (§13.2's `cursor.fill`). Moving it is a commit of plane 2 alone, at the next vblank, with no window composed.
+- **The pointer** is a 16×16 sprite on plane 2 (§13.2's `cursor.fill`). Moving it is a commit of plane 2 alone, with no window composed. It's made 4 ms before the vblank, not as the mouse moves, so a window's frame presented meanwhile is composed into the same commit, not held to the latch after. (V7 step 6).
 
 `make intuition-test` runs the compositor on the host with the sanitizers. Over made-up windows, with chrome and without, opened, moved, presented, raised, lowered, activated and closed at random, every frame is checked pixel for pixel against a compositor that redraws the whole screen. A watch on gfx.library's table checks that no pixel is written twice in a frame. It also tests what's where on a window's chrome, and that a slow program gets every key and button in order.
 

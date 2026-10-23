@@ -109,7 +109,6 @@ uint32_t *ctx_out(struct xhc *c, struct xdev *x, unsigned i)
 
 unsigned hc_events(struct drv *d, struct xhc *c)
 {
-    bool any = false;
     unsigned transfers = 0;
 
     for (;;) {
@@ -129,7 +128,6 @@ unsigned hc_events(struct drv *d, struct xhc *c)
             c->ev_deq = 0;
             c->ev_cycle ^= 1;
         }
-        any = true;
         switch (ctl >> 10 & 0x3f) {
         case T_COMMAND_EV:
             if (c->wait_trb && ptr == c->wait_trb && !c->wait_slot) {
@@ -156,8 +154,12 @@ unsigned hc_events(struct drv *d, struct xhc *c)
             break;
         }
     }
-    if (any)
-        xw64(c->rt, ERDP, (uint64_t)&c->ev[c->ev_deq] | ERDP_EHB);
+    /* Always, events or not: EHB is cleared only here, and while it's
+     * set the controller raises no interrupt. The loop's poll can read
+     * the events before the interrupt's handler clears IP, which then
+     * finds none: written only after events, EHB could stay set until
+     * the next timer. */
+    xw64(c->rt, ERDP, (uint64_t)&c->ev[c->ev_deq] | ERDP_EHB);
     return transfers;
 }
 
@@ -364,7 +366,11 @@ int hc_start(struct drv *d, struct xhc *c)
     xw(c->rt, ERSTSZ, 1);
     xw64(c->rt, ERDP, (uint64_t)c->ev);
     xw64(c->rt, ERSTBA, (uint64_t)erst);
-    xw(c->rt, IMOD, 4000);          /* 1 ms between interrupts at most */
+    /* At least 32 ticks between interrupts: 8 us in xHCI's 250 ns ticks,
+     * 1 ms in the K1's DWC3's, which count at 32 kHz. 4000 (1 ms as the
+     * spec has it) was 125 ms there: the mouse's reports came 4 at a
+     * time, 8 times a second (v7-plan step 6). */
+    xw(c->rt, IMOD, 32);
     xw(c->rt, IMAN, IMAN_IP | IMAN_IE);
     xw(c->op, USBSTS, STS_EINT | STS_PCD | STS_HSE);
     xw(c->op, USBCMD, CMD_RS | (c->irq ? CMD_INTE : 0));

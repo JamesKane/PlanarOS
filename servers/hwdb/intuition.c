@@ -162,7 +162,7 @@ enum : uint8_t { W_START, W_UP, W_RUN, W_COUNTS, W_CUE, W_WITH, W_I_BACK, W_I_FR
 
 constexpr int64_t NO_INPUT = 1000;     /* window.c's: its windows ok, and nobody at the mouse */
 constexpr uint64_t SURVIVE = 3, SURVIVE_MOUSE = 4;  /* window.c's second round, and with the mouse */
-constexpr uint64_t WINDOW_LOOK = 1u << 8;   /* window.c's LOOK: HWDB_LOOK, passed on */
+constexpr uint64_t WINDOW_LOOK = 1u << 8, WINDOW_DRAG = 1u << 9;    /* window.c's LOOK and DRAG: HWDB_'s, passed on */
 
 static struct {
     uint8_t step;
@@ -213,7 +213,8 @@ static bool ended(int64_t *code)
 
 static bool start(uint64_t arg)
 {
-    int64_t p = CreateProcess("window", arg | (hwdb.look ? WINDOW_LOOK : 0), SIG_DEAD, 0);
+    int64_t p = CreateProcess("window", arg | (hwdb.look ? WINDOW_LOOK : 0) | (hwdb.drag ? WINDOW_DRAG : 0),
+                              SIG_DEAD, 0);
 
     if (p < 0) {
         test_fail("window couldn't be started");
@@ -300,7 +301,7 @@ bool window_test(void)
             return true;
         }
         if (!ended(&code)) {
-            if (late(90000))
+            if (late(90000 + (hwdb.look ? 20000 : 0) + (hwdb.drag ? 300000 : 0)))
                 test_fail("window didn't finish");
             return wt.step == W_DONE;
         }

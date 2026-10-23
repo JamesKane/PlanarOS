@@ -287,11 +287,20 @@ On the CIX, then the RV2:
   |---|---|---|
   | the whole screen (2.07 Mpx) | 4.29 ms | 4.12 ms |
   | a 640×480 window dragged (0.32 Mpx a frame) | 2.38 ms | 1.05 ms |
-  | the pointer alone | nothing composed; its commit 14 µs (cut from the runs' log lines by `KLOG_MAX`, measured at the next commit) | |
+  | the pointer alone | nothing composed; its commit 14 µs (cut from the runs' log lines at `KPrintF`'s 160 bytes, measured at the next commit) | |
 
   Cached and cleaned is never slower. It's 2.3× faster for the drag, though why NC is so much slower there, at 7.4 ns a pixel against 2.1 for the whole screen, isn't measured. Decision 3 leaned NC. The RV2 says cached, and the CIX decides.
 - **gfx.library on the X60's 256-bit vectors**, by the table against lib/gfx's scalar code, a megapixel: `RectFill` 529 µs against 1,283 (2.4×), `SRC_OVER` 6.8 ms against 29.8 (4.4×), `Text` 715 ns a glyph.
-- **By eye**, with `look`: the backdrop and both windows where they should be. Before that, the windows had been missed at test speed, each scene up for a second or two, and the backdrop (#182038) taken for black. Not yet looked at: windows dragged by a USB mouse, and tearing.
+- **By eye**, with `look`: the backdrop and both windows where they should be. Before that, the windows had been missed at test speed, each scene up for a second or two, and the backdrop (#182038) taken for black.
+- **Dragged by hand**, with `drag` (below): windows dragged by a USB mouse, and after the fixes below the pointer's feel "much better, and tracking acceptable". No tear was reported.
+
+**The drag test** (`drag`, a boot argument as `look` is: `HWDB_DRAG`, `WINDOW_DRAG`). After its first two windows, the window test opens two with chrome, "drag me", 640×480 and two-buffered, and "close me to end", 320×200, until either's close gadget or 300 s. "drag me" presents a frame of moving stripes as soon as its last is on the screen, so a tear would show as a broken stripe. At each latch the test notes where each window is. After, it says the vblanks "drag me" missed, how far each window moved and how often it stood still for one frame between two that moved, and, from `INTUI_INFO`'s new `im_Moves`, `im_MoveNanos`, `im_MoveMax`, `im_ReadMax` and `im_MoveGaps`, the pointer's moves from input's `ie_Time` to the latch, and the gaps between them. It says every 30 s how it's going, since `serial-boot.py` gives up on 120 s without output. hwdb's and the kernel's waits for the window test grow by 300 s with it, and by 20 s with `look`. Said, not checked: a hand isn't a test.
+
+**What the drag test found on the RV2:**
+- **The mouse's reports came in bursts**, 4 at a time, 8 times a second: in one run, 2,241 moves within 1 ms of the last, 341 after 100 ms to 1 s, none between. It felt laggy, the pointer seeming to move against the hand when the hand turned. Each report was a well-formed boot report. **The DWC3's interrupt moderation counts at 32 kHz**: `IMOD` 4000, 1 ms in xHCI's 250 ns ticks, held its interrupts 125 ms apart (80 in every 10 s). xhci now writes 32: 1 ms there, 8 µs elsewhere. After, 4,491 moves came 1 to 20 ms after the last, none in bursts, about 100 a second, and the pointer was on the screen 29 ms after input had a move, on average, 33 ms at most, with commits made as the mouse moved.
+- **`hc_events` writes ERDP every time**, events or not. drv.library's loop calls xhci's poll before the line's handler, so the poll can read the events and the handler find none after clearing IP: written only after events, EHB could stay set until the next timer. Seen in the code, not on the board, whose bursts were the moderation's.
+- **A pointer moved alone cost "drag me" a frame**: committed at once, it held the window's next frame to the latch after (23% of its vblanks missed, with moves at 100 a second). intuition now commits a pointer moved alone 4 ms before the vblank (`POINTER_LEAD`), so a frame presented meanwhile is composed into the same commit. Not yet measured with a hand on the mouse. Committing the pointer even while a flip waits made it worse, as display programs the controller with the first commit after a latch: the composed frame waited all the same, and the pointer was 43 ms late.
+- **The pointer is 16×16**, small on 1920×1080, and at the right or bottom edge it shows a pixel of itself, as its hot spot is its top left: it can seem lost. Not changed in V7.
 
 ## Sources
 

@@ -66,6 +66,7 @@ constexpr unsigned CONNS = 16;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t CALL_DEADLINE = 1000 * MS;   /* for display's and input's answers (V6 step 7) */
 constexpr uint64_t CLOSE_DEADLINE = 1000 * MS;  /* for CloseWindow, after the close gadget */
+constexpr uint64_t POINTER_LEAD = 4 * MS;       /* a pointer moved alone: committed this long before the vblank */
 
 /* A client's connection: its task, its page, and its events. */
 struct client {
@@ -118,6 +119,9 @@ static struct {
     int32_t px, py;
     bool flipping, pointer_moved;
     uint64_t flip_seq;
+    uint64_t period;                /* the vblanks', from display's refresh */
+    uint64_t pointer_due;           /* a pointer moved alone, to be committed then; 0 none */
+    uint64_t close_next;            /* close_late's next deadline; 0 none */
 
     /* input, and what's done with it: ring nullptr while there's none. */
     struct MsgPort ip;
@@ -133,6 +137,9 @@ static struct {
     struct window *button_to[3];    /* each button's press went to its inside */
 
     uint64_t frames, nanos;
+    uint64_t move_at, flip_move_at;     /* the oldest move not yet committed, and in the flip */
+    uint64_t moves, move_nanos, move_max, read_max;
+    uint64_t last_move, gaps[4];        /* input's ie_Time of the last move read, and the gaps since */
 } it;
 
 static void say(const char *s)
@@ -308,6 +315,7 @@ static int64_t screen_up(uint64_t deadline)
         return ERR_BADARG;
     it.width = it.dm->dm_Width;
     it.height = it.dm->dm_Height;
+    it.period = it.dm->dm_RefreshMilliHz ? 1000000000000ull / it.dm->dm_RefreshMilliHz : 16667 * 1000;
     if (it.dm->dm_Count < 3 || !(it.dm->dm_Plane[1].di_Formats & 1u << DISPLAY_XRGB8888) ||
         it.dm->dm_Plane[1].di_MaxWidth < it.width || it.dm->dm_Plane[1].di_MaxHeight < it.height ||
         !(it.dm->dm_Plane[2].di_Formats & 1u << DISPLAY_ARGB8888))
@@ -420,6 +428,16 @@ static void taken_away(void)
     }
 }
 
+/* intuition's one timer, at whichever is first. */
+static void rearm(void)
+{
+    uint64_t t = it.close_next;
+
+    if (it.pointer_due && (!t || it.pointer_due < t))
+        t = it.pointer_due;
+    ArmTimer(t, SIG_TIMER);
+}
+
 static void frame(void)
 {
     bool compose;
@@ -440,6 +458,19 @@ static void frame(void)
     }
     if (!compose && !it.pointer_moved)
         return;
+    /* A pointer moved alone waits until just before the vblank, so a
+     * window's frame presented meanwhile goes in the same commit: one
+     * committed first would hold it to the latch after. */
+    if (!compose) {
+        uint64_t due = it.ds->ds_Time + it.period - POINTER_LEAD;
+
+        if (CurrentTime() < due) {
+            it.pointer_due = due;
+            rearm();
+            return;
+        }
+    }
+    it.pointer_due = 0;
     memset(it.dm, 0, sizeof *it.dm);
     if (compose) {
         t = CurrentTime();
@@ -460,6 +491,8 @@ static void frame(void)
         ExitProcess(e == ERR_TIMEOUT ? 3 : 4);
     }
     it.pointer_moved = false;
+    it.flip_move_at = it.move_at;
+    it.move_at = 0;
     it.flip_seq = it.dm->dm_Seq;
     it.flipping = true;
     if (compose)
@@ -471,6 +504,14 @@ static void latch(void)
     if (it.ds && it.flipping && it.ds->ds_Disp >= it.flip_seq) {
         it.flipping = false;
         shown(it.ds->ds_Time);
+        if (it.flip_move_at && it.ds->ds_Time > it.flip_move_at) {
+            uint64_t age = it.ds->ds_Time - it.flip_move_at;
+
+            it.moves++;
+            it.move_nanos += age;
+            it.move_max = age > it.move_max ? age : it.move_max;
+        }
+        it.flip_move_at = 0;
     }
 }
 
@@ -696,7 +737,8 @@ static void close_late(void)
         else if (!next || w->close_by < next)
             next = w->close_by;
     }
-    ArmTimer(next, SIG_TIMER);
+    it.close_next = next;
+    rearm();
 }
 
 static int64_t open_window(unsigned c, const struct IntuiMsg *q, struct IntuiMsg *m)
@@ -844,6 +886,11 @@ static void message(unsigned c, struct IntuiMsg *m)
         m->im_Windows = it.screen.nz;
         m->im_Input = it.ring != nullptr;
         m->im_InputOpens = it.input_opens;
+        m->im_Moves = it.moves;
+        m->im_MoveNanos = it.move_nanos;
+        m->im_MoveMax = it.move_max;
+        m->im_ReadMax = it.read_max;
+        memcpy(m->im_MoveGaps, it.gaps, sizeof it.gaps);
         break;
     case INTUI_OPEN:
         e = open_window(c, &q, m);
@@ -987,6 +1034,8 @@ static void pointer(const struct InputEvent *ev)
     it.px = x;
     it.py = y;
     it.pointer_moved = true;
+    if (!it.move_at)
+        it.move_at = ev->ie_Time;
     if (it.drag) {
         move_to(it.drag, x - it.drag_dx, y - it.drag_dy);
     } else if (it.press) {              /* the gadget drawn pressed while the pointer's on it */
@@ -1111,6 +1160,15 @@ static void input_events(void)
         it.itail++;
         switch (ev.ie_Class) {
         case IECLASS_MOVE:
+            if (CurrentTime() - ev.ie_Time > it.read_max)
+                it.read_max = CurrentTime() - ev.ie_Time;
+            if (it.last_move && ev.ie_Time >= it.last_move) {
+                uint64_t g = ev.ie_Time - it.last_move;
+
+                if (g < 1000 * MS)
+                    it.gaps[g < 1 * MS ? 0 : g < 20 * MS ? 1 : g < 100 * MS ? 2 : 3]++;
+            }
+            it.last_move = ev.ie_Time;
             pointer(&ev);
             break;
         case IECLASS_BUTTON:

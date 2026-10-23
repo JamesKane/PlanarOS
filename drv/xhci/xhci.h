@@ -106,6 +106,7 @@ struct hid {
     uint8_t *buf;                   /* XHC_REPORTS reports' of 64 bytes */
     bool attached;                  /* told to input */
     bool halted;                    /* by an error: to be reset */
+    uint32_t halts;                 /* ever, said at the first few and then every 100th */
 };
 
 struct xdev {
