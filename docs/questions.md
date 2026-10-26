@@ -253,6 +253,18 @@ Should shaders ship as fat `.gbin` binaries compiled on the host by `tools/shade
 
 Raised in §16.5 and §16.9.
 
+**VQ44 Embedded interface symbol tables vs. disk `.bmap` files for PlanarBASIC `LIBRARY`.**
+
+Should Planar embed a compact function-name-to-slot table directly in each shared library's read-only RX image so `LIBRARY "gfx.library"` works without disk files, or load `.bmap` files from `LIBS:`? *Leaning:* embed the compact read-only symbol directory (`< 512` bytes per library, generated from `include/planar/*.h`) directly inside each shared library's RX image, and also accept `.bmap` alias files on disk.
+
+Raised in [§18.8](18-planar-basic.md#188-open-questions).
+
+**VQ45 Built-in `TRANSLATE$` and `SAY` speech synthesizer scope in PlanarBASIC.**
+
+Should PlanarBASIC implement the rule-based English-to-phoneme translator (`TRANSLATE$`) and Klatt formant synthesizer (`SAY`) over `dsp.library`, or stub `SAY` until after V10? *Leaning:* after V10 (`audio` + `dsp.library`), implement the ~350-rule public-domain NRL English-to-phoneme table and a ~400-line cascade formant synthesizer over `dsp.library`'s `DSP_FilterBiquad`.
+
+Raised in [§18.8](18-planar-basic.md#188-open-questions).
+
 ## Audio and DSP
 
 **VQ36 Hardware Audio DSP offload (`sky1_audss0` HiFi4, Q8B ADSP) vs. efficiency-core SIMD.**
