@@ -27,8 +27,6 @@
 
 #include "rogue.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_NAP = 24;
 constexpr uint64_t REGS = 0xcac00000, REGS_SIZE = 0x80000;
 constexpr uint64_t RETRY = 500 * MS;

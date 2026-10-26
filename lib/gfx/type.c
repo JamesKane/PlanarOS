@@ -28,8 +28,6 @@
 #include "../exec/procdata.h"
 #endif
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr uint32_t SLOTS = 1024;            /* the cache's, a power of two */
 constexpr uint32_t SLOTS_FULL = 768;        /* emptied at this many */
 constexpr uint32_t MAX_POINTS = 4096;       /* a glyph's outline, at most; its verbs likewise */

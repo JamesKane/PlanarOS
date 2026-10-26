@@ -30,8 +30,6 @@
 
 #include "rogue.h"
 
-void *memset(void *dst, int c, size_t n);
-
 /* In the context object: the common context, the memory context, the
  * context's state (zero, as the GP DM's is), and the page catalogue. */
 constexpr uint32_t CTX_MEM = 256, CTX_STATE = 512, CTX_PC = PAGE, CTX_SIZE = 2 * PAGE;

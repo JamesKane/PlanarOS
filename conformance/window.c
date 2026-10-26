@@ -131,8 +131,6 @@
 #include "typescene.h"
 #include "uiwin.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23, SIG_CONWIN = 24;  /* 22 is intuition.library's */
 constexpr int64_t SIG_DOS = 25, SIG_INPUT = 26, SIG_WB = 27, SIG_HWDB = 28;
 constexpr uint64_t MS = 1000000;

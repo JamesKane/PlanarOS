@@ -21,8 +21,6 @@
 
 #include "display.h"
 
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 static struct drv *drv;
 static struct dp_out out;
 static struct drv_dev *fb_dev, *ctl_dev;

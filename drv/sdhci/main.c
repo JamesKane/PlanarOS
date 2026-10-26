@@ -26,8 +26,6 @@
 #include <planar/drv.h>
 #include <planar/syscalls.h>
 
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t PAGE = 4096;
 constexpr uint32_t BLOCK = 512;

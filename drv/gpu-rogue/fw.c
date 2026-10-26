@@ -34,9 +34,6 @@
 
 #include "rogue.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_DOS = 27;
 constexpr uint64_t FW_MAX = 1u << 20;
 static const char FW_PATH[] = "SYS:EFI/planar/DEVS/rogue.fw";

@@ -23,8 +23,6 @@
 
 #include "rows.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SUB = 256;                    /* subpixels a pixel */
 constexpr int64_t FLAT_DIV = 512;              /* a curve's lines: within 1/FLAT_DIV px of it */
 constexpr int64_t MAX_STEPS = 4096;             /* lines a curve is cut into, at most */

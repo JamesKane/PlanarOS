@@ -42,9 +42,6 @@
 #include "log.h"
 #include "wb.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_DOS = 16, SIG_CHILD = 17, SIG_CALL = 18;  /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000, SECOND = 1000 * MS;
 constexpr unsigned DRAWERS = 6;             /* windows of volumes and drawers, at most */

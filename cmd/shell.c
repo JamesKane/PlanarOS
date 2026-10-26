@@ -33,8 +33,6 @@
 #include <planar/syscalls.h>
 #include <planar/utility.h>
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_CON = 16;
 constexpr int64_t SIG_DOS = 17;
 constexpr int64_t SIG_CHILD = 18;

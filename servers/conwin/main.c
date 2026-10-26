@@ -47,9 +47,6 @@
 #include "log.h"
 #include "term.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_EVENT = 18, SIG_CHILD = 19, SIG_TIMER = 20, SIG_DOS = 21;
 /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000;

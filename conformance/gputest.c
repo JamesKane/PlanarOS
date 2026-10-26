@@ -35,8 +35,6 @@
 
 #include "log.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_GPU = 20;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t RING = 64 * 1024;

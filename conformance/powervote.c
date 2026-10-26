@@ -15,8 +15,6 @@
 
 #include "log.h"
 
-void *memset(void *dst, int c, size_t n);
-
 static unsigned step;
 
 static int failed(const char *what)

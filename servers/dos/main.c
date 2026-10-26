@@ -16,9 +16,6 @@
 
 #include "fat.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_PORT = 16;            /* a client at "dos" */
 constexpr int64_t SIG_CONN = 17;            /* a client's connection */
 constexpr int64_t SIG_BLK = 18;             /* the block devices' connections */

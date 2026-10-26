@@ -27,9 +27,6 @@
 
 #include "xhci.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_INPUT = 25;
 constexpr unsigned MSGS = 32;
 constexpr uint64_t RETRY = 500 * MS;

@@ -13,8 +13,6 @@
 #include <planar/dos.h>
 #include <planar/syscalls.h>
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_DOS = 16;
 constexpr int64_t SIG_CHILD = 17;
 constexpr int64_t SIG_NAP = 18;

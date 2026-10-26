@@ -21,9 +21,6 @@
 #include <planar/devices/input.h>
 #include <planar/ui.h>
 
-void *memset(void *dst, int c, size_t n);
-void *memmove(void *dst, const void *src, size_t n);
-
 /* Sizes (§13.3), px. */
 constexpr int32_t FOCUS = 2, GAP = 12, GROOVE = 2;
 constexpr int32_t TOGGLE_W = 52, TOGGLE_H = 22, THUMB_W = 24, THUMB_H = 18;

@@ -32,8 +32,6 @@
 #include "gfxref.h"
 #include "log.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_DISPLAY = 20, SIG_TIMER = 21;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FLIPS = 30, PACED = 60;

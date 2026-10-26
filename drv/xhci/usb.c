@@ -24,8 +24,6 @@
 
 #include "xhci.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr uint32_t PAGE = 4096;
 constexpr uint32_t EP0_TRBS = 64, HID_TRBS = 32;
 constexpr uint32_t CFG_MAX = 1024;

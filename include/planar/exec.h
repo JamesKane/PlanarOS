@@ -225,8 +225,8 @@ int64_t WaitAddr(const volatile uint64_t *address, uint64_t value, uint64_t dead
 int64_t WakeAddr(const volatile uint64_t *address, uint32_t count);
 
 /*
- * Memory, by Exec's names (V6 step 1): over the runtime's memmove, memcpy
- * and memset (lib/rt, by the ISA's vector unit), which every program
+ * Memory, by Exec's names (V6 step 1): over the runtime's memmove, memcpy,
+ * memset and memcmp (lib/rt, by the ISA's vector unit), which every program
  * links. Exec's order: the source first. CopyMem copies overlapping
  * ranges correctly, which Exec didn't promise. CopyMemQuick is for
  * 8-byte-aligned source, destination and size, and takes no care over
@@ -235,6 +235,7 @@ int64_t WakeAddr(const volatile uint64_t *address, uint32_t count);
 void *memcpy(void *restrict dst, const void *restrict src, size_t n);
 void *memmove(void *dst, const void *src, size_t n);
 void *memset(void *dst, int c, size_t n);
+int memcmp(const void *a, const void *b, size_t n);
 
 static inline void CopyMem(const void *source, void *dest, uint64_t size)
 {

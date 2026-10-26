@@ -28,8 +28,6 @@ constexpr int64_t SIG_TIMER = 17;
 constexpr uint64_t PAGE = 4096;
 constexpr unsigned WINDOWS = 64;
 
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 static struct MsgPort hwdb;
 static struct AcpidMsg *m;          /* the one message: acpid asks one thing at a time */
 static uint32_t token;

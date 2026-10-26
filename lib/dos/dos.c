@@ -6,9 +6,6 @@
 #include <planar/dos.h>
 #include <planar/syscalls.h>
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 int64_t OpenDos(struct Dos *d, int64_t sigbit)
 {
     return OpenDosUntil(d, sigbit, 0);

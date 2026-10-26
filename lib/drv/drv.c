@@ -10,9 +10,6 @@
 #include <planar/drv.h>
 #include <planar/syscalls.h>
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_HWDB = 16;        /* hwdb's connection */
 constexpr int64_t SIG_ACCEPT = 17;      /* a client at a class port */
 constexpr int64_t SIG_CLIENT = 18;      /* a client's connection */

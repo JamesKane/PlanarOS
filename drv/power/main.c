@@ -15,8 +15,6 @@
 
 #include "power.h"
 
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 static struct drv *drv;
 static bool started;
 

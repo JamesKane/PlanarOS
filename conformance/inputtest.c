@@ -25,8 +25,6 @@
 
 #include "log.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_INPUT = 20;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t WAIT = 5000 * MS;        /* for someone to type */

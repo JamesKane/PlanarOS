@@ -27,8 +27,6 @@
 #include "log.h"
 #include "prefswin.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_INPUT = 16, SIG_DOS = 17, SIG_DISPLAY = 18;   /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000, SECOND = 1000 * MS;
 

@@ -23,8 +23,6 @@
 
 #include "panthor.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr uint32_t IFACE_VA = 0x05000000;           /* slot n's at + 0x2000 * n */
 constexpr uint32_t SUSPEND_VA = 0x06000000;         /* slot n's at + SUSPEND_MAX * n */
 constexpr uint32_t SUSPEND_MAX = 0x400000;

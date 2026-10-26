@@ -23,8 +23,6 @@
 
 #include "panthor.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr unsigned POOL = 1024;                 /* tables: 4 MiB */
 constexpr uint64_t PTE_VALID = 3;               /* a table, or a level-3 page */
 constexpr uint64_t PTE_AF = 1ull << 10, PTE_NG = 1ull << 11;

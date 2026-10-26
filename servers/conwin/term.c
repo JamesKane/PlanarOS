@@ -10,9 +10,6 @@
 
 #include "term.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 static struct term_cell *line(struct term *t, uint64_t n)
 {
     return t->cell + (n % TERM_LINES) * TERM_COLS;

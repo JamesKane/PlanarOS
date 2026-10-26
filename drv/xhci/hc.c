@@ -18,8 +18,6 @@
 
 #include "xhci.h"
 
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr int64_t SIG_NAP = 24;
 constexpr uint32_t PAGE = 4096;
 constexpr uint32_t CMD_TRBS = 256, EV_TRBS = 256;

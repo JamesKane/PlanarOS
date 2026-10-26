@@ -33,8 +33,6 @@
 
 #include "panthor.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_NAP = 24;
 constexpr uint64_t RCSU = 0x15000000, REGS = 0x15010000, RST = 0x16000000;
 constexpr uint64_t RETRY = 500 * MS;

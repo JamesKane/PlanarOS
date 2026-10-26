@@ -54,10 +54,6 @@ bool fdt_memreserve(uint32_t index, uint64_t *addr, uint64_t *size);
 const void *fdt_blob(void);
 uint32_t fdt_size(void);
 
-/* Print the node's properties: all of them, or only those named in the
- * nullptr-terminated list 'only'. */
-void fdt_dump_node(int32_t node, const char *const *only);
-
 /* Print the model, memory ranges, reservations and CPU count. */
 void fdt_report(void);
 

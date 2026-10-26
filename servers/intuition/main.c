@@ -83,10 +83,6 @@
 #include "log.h"
 #include "pointer.h"
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-int memcmp(const void *a, const void *b, size_t n);
-
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_LATCH = 18, SIG_DISPLAY = 19;
 constexpr int64_t SIG_INPUT = 20, SIG_INPUT_PORT = 21, SIG_TIMER = 22;
 constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24, SIG_CALL = 25, SIG_PREFS = 26;

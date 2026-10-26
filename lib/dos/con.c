@@ -9,9 +9,6 @@
 #include <planar/exec.h>
 #include <planar/syscalls.h>
 
-void *memset(void *dst, int c, size_t n);
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 /* The process's console. */
 static char con_name[CON_NAME] = "con.0";
 

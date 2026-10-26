@@ -20,8 +20,6 @@
 
 #include "xhci.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr int64_t SIG_POWER = 26;
 constexpr uint64_t PHY2 = 0xc0a30000, PHY3 = 0xc0b10000;
 
