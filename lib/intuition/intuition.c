@@ -466,3 +466,21 @@ int64_t EasyRequest(struct Intuition *in, struct Window *w, const struct EasyStr
         return e;
     return in->in_Call->im_Index;
 }
+
+/* intuition's settings (V8 step 7), on the connection's call message. */
+int64_t GetPrefs(struct Intuition *in, struct IntuiPrefs *prefs)
+{
+    int64_t e;
+
+    clear(in->in_Call, sizeof *in->in_Call);
+    if ((e = call(in, INTUI_GETPREFS)) == 0)
+        *prefs = in->in_Call->im_Prefs;
+    return e;
+}
+
+int64_t SetPrefs(struct Intuition *in, const struct IntuiPrefs *prefs)
+{
+    clear(in->in_Call, sizeof *in->in_Call);
+    in->in_Call->im_Prefs = *prefs;
+    return call(in, INTUI_SETPREFS);
+}

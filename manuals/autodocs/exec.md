@@ -1486,8 +1486,11 @@ Fills in `info` with counts summed over every CPU:
 | `si_Switches` | Task switches |
 | `si_Crossings` | Of those, from one process's domain to another's |
 | `si_Quarantined` | DMA pages waiting for their device to stop (`RevokeLease`) |
+| `si_IdleNanos` | Time every CPU has slept with nothing to run, added up (V8 step 7) |
+| `si_CPUs` | CPUs online |
+| `si_Pages`, `si_FreePages` | Memory's 4 KiB pages the kernel manages, and of those free now |
 
-It's for measuring what an operation costs: read it before and after, and divide. `conformance/blkbench.c` reports calls, interrupts and crossings per I/O this way (docs §11.8).
+It's for measuring what an operation costs: read it before and after, and divide. `conformance/blkbench.c` reports calls, interrupts and crossings per I/O this way (docs §11.8). The Workbench's HUD reads it once a second: the CPU busy is 1 less the idle time over the time passed times `si_CPUs`, the memory used 1 less `si_FreePages` over `si_Pages`.
 
 A kernel call.
 

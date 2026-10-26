@@ -1,6 +1,6 @@
 # The input class
 
-*Checked against V5; its clients against V7 step 5.*
+*Checked against V5; its clients against V7 step 5; its settings, V8 step 7.*
 
 ## What it's for
 
@@ -10,7 +10,7 @@ The serial console stays as it was ([chapter 3](03-console.md)): the Shell reads
 
 ## Concepts
 
-- **One port, two sides.** `input` publishes "input", with `struct InputMsg` messages (`planar/devices/input.h`). A client sends `INPUT_OPEN` and `INPUT_INFO`. A driver sends `INPUT_ATTACH` for each device it finds, `INPUT_REPORT` for each report, raw, and `INPUT_DETACH` when it goes.
+- **One port, two sides.** `input` publishes "input", with `struct InputMsg` messages (`planar/devices/input.h`). A client sends `INPUT_OPEN` and `INPUT_INFO`, and anyone `INPUT_GET` and `INPUT_SET` (below). A driver sends `INPUT_ATTACH` for each device it finds, `INPUT_REPORT` for each report, raw, and `INPUT_DETACH` when it goes.
 - **The ring** (`struct InputRing`) is one page, mapped read-only into the client that took it with `INPUT_OPEN`. `ir_Head` counts every event ever written; event *n* is at `ir_Event[n % INPUT_RING]`. A client keeps its own count, reads up to `ir_Head`, and sleeps in `WaitAddr` on it: `input` wakes it with `WakeAddr` when it moves. A client more than `INPUT_RING` (127) behind has lost the oldest; so has one whose event was overwritten while it copied it, which it sees by reading `ir_Head` again after.
 - **One client at a time.** The ring is the first opener's until its connection goes, dead or not; another meanwhile gets `ERR_BUSY`. A restarted `input` has a new ring, at a new address.
 - **Events** (`struct InputEvent`, 32 bytes) have a class:
@@ -18,7 +18,9 @@ The serial console stays as it was ([chapter 3](03-console.md)): the Shell reads
   - `IECLASS_BUTTON`: `ie_Code` 0 is the left button, 1 the right, 2 the middle.
   - `IECLASS_MOVE`: the mouse moved `ie_X`, `ie_Y`, down being +y.
   Each carries `ie_Qualifier`, the modifiers held then (a boot report's first byte: `IEQ_LSHIFT`, `IEQ_RCTRL` and so on) and `IEQ_CAPSLOCK`, and `ie_Time`, as `CurrentTime` had it when `input` wrote it. The modifiers come as keys too (`0xe0` to `0xe7`).
-- **Repeat** is `input`'s own: a key that types something, held 500 ms, repeats every 33 ms, each with `IEF_REPEAT`, until it's let go or another goes down. Boot keyboards don't repeat by themselves.
+- **Repeat** is `input`'s own: a key that types something, held for the repeat's delay (500 ms by default), repeats at its rate (30 a second), each with `IEF_REPEAT`, until it's let go or another goes down. Boot keyboards don't repeat by themselves.
+- **Settings** (V8 step 7): `struct InputPrefs`, the repeat's delay (`ip_RepeatDelay`, 150 to 1500 ms) and rate (`ip_RepeatRate`, 2 to 50 a second), and the pointer's speed (`ip_PointerSpeed`, 25 to 400%) and acceleration (`ip_PointerAccel`, 100 to 400%). `INPUT_GET` gives them in `im_Prefs`; `INPUT_SET` takes them all at once, and refuses the lot (`ERR_BADARG`) if any is out of its range. A move is scaled by the speed, and a fast one (`INPUT_ACCEL_FROM`, 6, or more in one report) by the acceleration too; what's left of a pixel is kept for the next move, so at 100% and 100% every move is as it came. Prefs sets them ([Libraries ch. 16](../libraries/16-workbench.md)).
+- **Saved settings.** `input` reads `SYS:Prefs/Env-Archive/input.prefs` (`planar/prefs.h`) when it starts, with a task of its own that waits for dos: it may start before any disk is up. They're taken unless a client has set some meanwhile; a tag out of its range is left at its default. So a setting Prefs saved is back after `input` dies and hwdb starts it again.
 - **When a driver goes**, dead or not, its devices go with it, and every key they held is let go: the client sees each one come up. When it comes back it attaches them again.
 - **Caps Lock** is kept by `input`, not the keyboard: its light isn't set.
 
@@ -61,7 +63,18 @@ for (;;) {
 
 A client that should notice `input` going looks at `PortGone(&mp)` now and then (with a deadline on `WaitAddr`), and connects again: the Shell tries every half second. intuition is told at once, by its connection's signal. It lets go of the ring, waits for input's port with a task of its own, and opens the ring again, the pointer where it was (V7 step 5). The keyboards and mice come back a little after, as xhci tells the new input of them: what's sent before is lost. A client that held the ring and died is let go of when input sees its connection go, so the next one may find it busy for a moment: intuition, starting, tries again for a second.
 
-intuition reads the ring with a task of its own waiting in `WaitAddr` on `ir_Head`, which signals intuition's main task. Mouse moves are clamped to the screen, with no acceleration.
+intuition reads the ring with a task of its own waiting in `WaitAddr` on `ir_Head`, which signals intuition's main task. It clamps the pointer to the screen; the moves' speed and acceleration are `input`'s.
+
+Settings, from `conformance/window.c`:
+```c
+m->im_Op = INPUT_GET;                   /* on a connection to "input" */
+DoMsgUntil(&mp, &m->im_Msg, CurrentTime() + 1000 * MS);
+p = m->im_Prefs;                        /* in force now */
+p.ip_PointerSpeed = INPUT_SPEED_DEFAULT;
+m->im_Op = INPUT_SET;
+m->im_Prefs = p;                        /* all four, each in its range */
+DoMsgUntil(&mp, &m->im_Msg, CurrentTime() + 1000 * MS);
+```
 
 ## Rules
 
@@ -69,6 +82,7 @@ intuition reads the ring with a task of its own waiting in `WaitAddr` on `ir_Hea
 - Copy an event out before using it, and check `ir_Head` after: the slot may have been written again meanwhile.
 - `im_Task` must be the client's own task, for `INPUT_OPEN`: the server maps the ring into it.
 - A driver's `im_Device` numbers are its own: two drivers may use the same ones.
+- `INPUT_SET` takes every field: get them first, and change the one you mean.
 
 ## The drivers
 

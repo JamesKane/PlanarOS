@@ -1,6 +1,6 @@
 # 13. intuition: windows on the screen
 
-*Written, V7 step 3; input, focus, the chrome and dragging, V7 step 4; servers dying, V7 step 5; the screen bar, menus, resizing and requesters, V8 step 4; the system menu's Shell, V8 step 5.*
+*Written, V7 step 3; input, focus, the chrome and dragging, V7 step 4; servers dying, V7 step 5; the screen bar, menus, resizing and requesters, V8 step 4; the system menu's Shell, V8 step 5; settings and the backdrop window, V8 step 7.*
 
 intuition puts windows on the screen. A program draws a window's pixels with gfx.library (chapter 12) into bitmaps of its own, and presents each frame. intuition composes the screen from every window's latest frame, on the CPU, and shows it. A window's pixels never cross IPC: intuition reads them where the program drew them, shared read-only ([docs §13.1](../../docs/13-workbench.md)). Around them it draws the window's chrome, its own pixels. It holds the mouse and the keyboard, moves the pointer, and drags and depth-arranges windows itself, telling each program what it asked to hear. It never writes a program's memory, and never waits for one.
 
@@ -8,16 +8,17 @@ There are two parts:
 - **intuition, the server** (`servers/intuition`), display's client. It composes into two full-screen buffers of display's, shown in turn on plane 1, over the console on plane 0. The pointer is plane 2. When intuition goes, the console shows again.
 - **intuition.library**, the program's side, reached through `IIntuition`. Its functions are in `planar/intuition.h` and `lib/intuition`. It keeps no state: the connection is the caller's `Intuition`, and each window the caller's `Window`.
 
-hwdb starts intuition at boot once display has a screen, and keeps it as it keeps input: started again 10 ms after it ends, later each time if it keeps ending at once. intuition has the mouse and the keyboard, and the console Shell reads the serial line alone (`Shell SERIAL`, [dos ch. 2](../dos/02-shell.md)). `nointuition` on the kernel's command line is the way back to V7's boot: no desktop, and the Shell with the keyboard. In the kill test hwdb starts intuition for its window test alone. If another program holds input's ring when intuition starts, intuition goes on without the mouse and keys, and says so.
+hwdb starts intuition at boot once display has a screen, with the Workbench ([chapter 16](16-workbench.md)), and keeps it as it keeps input: started again 10 ms after it ends, later each time if it keeps ending at once. intuition has the mouse and the keyboard, and the console Shell reads the serial line alone (`Shell SERIAL`, [dos ch. 2](../dos/02-shell.md)). `nointuition` on the kernel's command line is the way back to V7's boot: no desktop, and the Shell with the keyboard. In the kill test hwdb starts intuition for its window test alone. If another program holds input's ring when intuition starts, intuition goes on without the mouse and keys, and says so.
 
 ## Concepts
 
-- **The screen** is the Workbench's, the only one, the size of display's output: 1280×800 on RV64 QEMU, 800×600 on AArch64's, 1920×1080 on the boards. Its backdrop is `bg.backdrop.base` (§13.2), flat for now.
+- **The screen** is the Workbench's, the only one, the size of display's output: 1280×800 on RV64 QEMU, 800×600 on AArch64's, 1920×1080 on the boards. Its backdrop is `bg.backdrop.base`'s first colour (§13.2), flat: on the desktop the Workbench's backdrop window covers it, with the gradient and its planes.
 - **The screen bar** is its top `INTUI_SCREENBAR` (28) rows, intuition's, in front of every window: the Planar mark and **PlanarOS**, which open the system menu; the active window's menu titles; and the clock.
 - **A window** is a rectangle on the screen, anywhere, on it or off its edges. Its **inside** is the top left of one of its **buffers**: one or two bitmaps of the program's, from `AllocBitMap`. Around the inside is its **chrome**, intuition's: a title bar, gadgets and a frame, unless it's opened `WFLG_BORDERLESS`. Windows are opaque in V7.
 - **The pointer** is intuition's, moved by the mouse, and at the screen's centre when intuition starts. The window a button is pressed over becomes the **active** one, and the keys go to it.
 - **A frame** is what a window shows. The program draws it in the window's back buffer and presents it, saying what changed since the last frame. Frames are numbered from 1, in `w_Frame`.
-- **Depth.** A window comes to the front of the screen at its first frame, and is in front of all those that came before it.
+- **Depth.** A window comes to the front of the screen at its first frame, and is in front of all those that came before it. A `WFLG_BACKDROP` window (V8 step 7) comes in behind every other, and stays there: a click makes it the active window without raising it.
+- **Settings** (V8 step 7): `struct IntuiPrefs`, the pointer's size, and the HUD and backdrop colours that the Workbench draws. [GetPrefs](../autodocs/intuition.md#intuitiongetprefs) reads them and `SetPrefs` sets them, as Prefs does; a window that asks for `IDCMP_NEWPREFS` is told when they change. intuition reads its saved ones (`intuition.prefs`) when it starts.
 - **The sync words.** Each window has a cache line of a page intuition shares read-only with the program, `w_Sync`, as display's sync page is for planes:
   - `is_Safe`, the last frame intuition has composed: it reads nothing of the window's other buffer any more.
   - `is_Disp`, the last frame on the screen, and `is_DispTime`, the vblank it latched at;
@@ -260,6 +261,7 @@ So intuition composes into whichever display says is faster (`DISPLAYI_CACHED`, 
 - **Ask with `EasyRequest` on a connection nothing else uses meanwhile**: its answer comes on it, and another call there would take it.
 - **Open everything again after `ERR_PORT_DIED`.** Close the `Intuition`, open it again, and open the windows again with `OpenWindowTags`: the old `Window`s are refused.
 - **Read events often.** A program that leaves them loses mouse moves first, but past 111 keys and buttons it loses those too.
+- **`SetPrefs` sets every field.** `GetPrefs` first, then change the one you mean.
 
 ## Differences from the RKM
 
@@ -285,4 +287,4 @@ So intuition composes into whichever display says is faster (`DISPLAYI_CACHED`, 
 
 ## Functions used
 
-[ChangeWindowBuffers](../autodocs/intuition.md#intuitionchangewindowbuffers), [ClearMenuStrip](../autodocs/intuition.md#intuitionclearmenustrip), [CloseIntuition](../autodocs/intuition.md#intuitioncloseintuition), [CloseWindow](../autodocs/intuition.md#intuitionclosewindow), [EasyRequest](../autodocs/intuition.md#intuitioneasyrequest), [GetIntuiEvent](../autodocs/intuition.md#intuitiongetintuievent), [OpenIntuition](../autodocs/intuition.md#intuitionopenintuition), [OpenWindowTagList](../autodocs/intuition.md#intuitionopenwindowtaglist), [PresentWindow](../autodocs/intuition.md#intuitionpresentwindow), [SetMenuStrip](../autodocs/intuition.md#intuitionsetmenustrip), [WaitIntuiEvent](../autodocs/intuition.md#intuitionwaitintuievent), [WaitSafe](../autodocs/intuition.md#intuitionwaitsafe); [AllocBitMap](../autodocs/gfx.md#gfxallocbitmap), [BltBitMap](../autodocs/gfx.md#gfxbltbitmap), [ShareArea](../autodocs/exec.md#execsharearea), [WaitAddr](../autodocs/exec.md#execwaitaddr).
+[ChangeWindowBuffers](../autodocs/intuition.md#intuitionchangewindowbuffers), [ClearMenuStrip](../autodocs/intuition.md#intuitionclearmenustrip), [CloseIntuition](../autodocs/intuition.md#intuitioncloseintuition), [CloseWindow](../autodocs/intuition.md#intuitionclosewindow), [EasyRequest](../autodocs/intuition.md#intuitioneasyrequest), [GetIntuiEvent](../autodocs/intuition.md#intuitiongetintuievent), [GetPrefs](../autodocs/intuition.md#intuitiongetprefs), [OpenIntuition](../autodocs/intuition.md#intuitionopenintuition), [OpenWindowTagList](../autodocs/intuition.md#intuitionopenwindowtaglist), [PresentWindow](../autodocs/intuition.md#intuitionpresentwindow), [SetMenuStrip](../autodocs/intuition.md#intuitionsetmenustrip), [WaitIntuiEvent](../autodocs/intuition.md#intuitionwaitintuievent), [WaitSafe](../autodocs/intuition.md#intuitionwaitsafe); [AllocBitMap](../autodocs/gfx.md#gfxallocbitmap), [BltBitMap](../autodocs/gfx.md#gfxbltbitmap), [ShareArea](../autodocs/exec.md#execsharearea), [WaitAddr](../autodocs/exec.md#execwaitaddr).

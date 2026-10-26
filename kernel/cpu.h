@@ -50,6 +50,7 @@ struct cpu {
     _Atomic uint64_t switches;  /* task switches here (cpu_count) */
     _Atomic uint64_t crossings; /* of those, into another process's domain */
     _Atomic uint64_t handoffs;  /* tasks handed this CPU (cpu_count) */
+    _Atomic uint64_t idle_ticks;    /* asleep in sched_idle with nothing to run: time_now()'s */
 
     /* The run queue (kernel/sched.c): one FIFO per priority, and a bit
      * per non-empty one. */

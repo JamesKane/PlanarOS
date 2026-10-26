@@ -197,5 +197,7 @@ uint64_t sched_switches(void);
 uint64_t sched_crossings(void);    /* switches between processes' domains */
 uint64_t sched_steals(void);
 uint64_t sched_handoffs(void);
+/* Time every CPU has slept in sched_idle, in time_now()'s ticks (V8 step 7). */
+uint64_t sched_idle_ticks(void);
 
 #endif /* KERNEL_SCHED_H */

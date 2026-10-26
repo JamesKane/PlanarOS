@@ -70,8 +70,10 @@ enum : uint8_t {
 };
 
 /* UIA_Pane: what a group is drawn on. A split pane's children are dark
- * and light; the root, if it says nothing, light. */
-enum : uint8_t { UIPANE_NONE = 0, UIPANE_DARK = 1, UIPANE_LIGHT = 2 };
+ * and light; the root, if it says nothing, light. UIPANE_BACKFILL (V8
+ * step 7) is the caller's own: ui_Backfill draws it, and its text is as
+ * on a dark pane. */
+enum : uint8_t { UIPANE_NONE = 0, UIPANE_DARK = 1, UIPANE_LIGHT = 2, UIPANE_BACKFILL = 3 };
 
 constexpr Tag UIA_Dummy = TAG_USER + 0x600;
 constexpr Tag UIA_Label = UIA_Dummy + 1;    /* const char *: a label, a button's or a toggle's, a badge's lines */
@@ -143,6 +145,10 @@ struct UI {
     struct GfxPoint ui_Points[40];      /* a path's, while drawing */
     uint8_t ui_Verbs[24];
     struct UIGadget ui_Gadget[1 + UI_GADGETS];  /* [0] unused */
+    /* V8 step 7: a UIPANE_BACKFILL pane's rectangle r drawn by the caller,
+     * in ui_RPort, clipped as ui.library has it; nullptr, left as it is. */
+    void (*ui_Backfill)(struct UI *ui, struct GfxRect r);
+    void *ui_UserData;                  /* the caller's */
 };
 
 /*

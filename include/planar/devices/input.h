@@ -21,6 +21,15 @@
  * Keys are the HID keyboard page's usages (USB HID Usage Tables §10),
  * with the character each types on a US layout. input repeats a held
  * key that types one, as a keyboard's own typematic would.
+ *
+ * Its settings (V8 step 7) are anyone's to read and set, as Prefs does:
+ * INPUT_GET and INPUT_SET, with an InputPrefs, each field held to its
+ * range (a set out of one is refused whole). A mouse's moves are scaled
+ * by the pointer's speed, and a fast one (INPUT_ACCEL_FROM or more in a
+ * report) by its acceleration too, the fractions kept for the next.
+ * input reads its saved settings at start (SYS:Prefs/Env-Archive/
+ * input.prefs, planar/prefs.h) once dos is there, unless a client has
+ * set them first.
  */
 #ifndef PLANAR_DEVICES_INPUT_H
 #define PLANAR_DEVICES_INPUT_H
@@ -36,6 +45,8 @@ constexpr unsigned INPUT_REPORT_MAX = 16;  /* bytes of a report: a boot one's 8 
 enum : uint32_t {
     INPUT_OPEN = 1,         /* a client's: im_Task in; im_Ring out; ERR_BUSY if another has it */
     INPUT_INFO = 2,         /* anyone's: im_Keyboards, im_Mice, im_Held, im_Events out */
+    INPUT_GET = 3,          /* anyone's: im_Prefs out (V8 step 7) */
+    INPUT_SET = 4,          /* anyone's: im_Prefs in; ERR_BADARG if a field's out of its range */
     INPUT_ATTACH = 0x100,   /* a driver's: its device im_Device is an im_Kind */
     INPUT_DETACH = 0x101,   /* a driver's: im_Device went */
     INPUT_REPORT = 0x102,   /* a driver's: im_Len bytes of im_Device's report, in im_Data */
@@ -43,6 +54,20 @@ enum : uint32_t {
 
 /* InputMsg.im_Kind */
 enum : uint32_t { INPUT_KEYBOARD = 1, INPUT_MOUSE = 2 };
+
+/* input's settings, and their ranges. */
+struct InputPrefs {
+    uint32_t ip_RepeatDelay;            /* ms a key's held before it repeats */
+    uint32_t ip_RepeatRate;             /* its repeats a second */
+    uint32_t ip_PointerSpeed;           /* % of a mouse's move the pointer moves */
+    uint32_t ip_PointerAccel;           /* % more again of a fast one */
+};
+
+constexpr uint32_t INPUT_DELAY_MIN = 150, INPUT_DELAY_MAX = 1500, INPUT_DELAY_DEFAULT = 500;
+constexpr uint32_t INPUT_RATE_MIN = 2, INPUT_RATE_MAX = 50, INPUT_RATE_DEFAULT = 30;
+constexpr uint32_t INPUT_SPEED_MIN = 25, INPUT_SPEED_MAX = 400, INPUT_SPEED_DEFAULT = 100;
+constexpr uint32_t INPUT_ACCEL_MIN = 100, INPUT_ACCEL_MAX = 400, INPUT_ACCEL_DEFAULT = 100;
+constexpr int32_t INPUT_ACCEL_FROM = 6;     /* |x| + |y| of a report, for it to be fast */
 
 struct InputMsg {
     struct Message im_Msg;
@@ -57,6 +82,7 @@ struct InputMsg {
     uint32_t im_Held;                   /* INPUT_INFO: 1 if a client has the ring */
     uint32_t im_Pad;
     uint64_t im_Events;                 /* INPUT_INFO: written to the ring, ever */
+    struct InputPrefs im_Prefs;         /* INPUT_GET, INPUT_SET */
 };
 
 /* InputEvent.ie_Class */

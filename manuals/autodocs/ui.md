@@ -1,6 +1,6 @@
 # ui: gadgets in the caller's window
 
-*Checked against V8 step 6.*
+*Checked against V8 step 6; the backfill, step 7.*
 
 ui.library's functions, in alphabetical order. The header is `planar/ui.h`. They're a shared library's, called through `IUI` (`struct UIIFace`, the "main" interface, version 1, of ui.library 8). The same functions by the same names are in `lib/ui`, for the host's test. The library keeps nothing of its own: a `struct UI` is the caller's, gadgets and all, and it draws through the caller's gfx.library. One task uses a UI at a time.
 
@@ -42,7 +42,7 @@ A split pane's first child is drawn on the dark pane, and its second on the ligh
   - `UIA_Align` -- a group's children across it, or one child's own: `UIALIGN_FILL` (a column's default), `UIALIGN_START`, `UIALIGN_CENTER` (a row's), `UIALIGN_END`.
   - `UIA_Spacing`, `UIA_Margin` -- a group's between its children (8) and around them (0).
   - `UIA_Width`, `UIA_Height` -- the least size, over the gadget's own.
-  - `UIA_Pane` -- what a group's drawn on: `UIPANE_DARK` or `UIPANE_LIGHT`; `UIPANE_NONE`, its group's (the root's, light).
+  - `UIA_Pane` -- what a group's drawn on: `UIPANE_DARK` or `UIPANE_LIGHT`; `UIPANE_NONE`, its group's (the root's, light); `UIPANE_BACKFILL` (V8 step 7), the caller's own: wherever ui.library would fill that pane it calls `ui_Backfill` with the rectangle, clipped as it draws, and its text is as on a dark pane. With no `ui_Backfill`, nothing's drawn there.
 
 **RESULT**
 The gadget's number, or 0 if the UI has `UI_GADGETS` already, `kind` isn't one, `parent` isn't a group that's been added, a split pane has its two, or the root's added twice.

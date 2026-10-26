@@ -1,8 +1,8 @@
 # dos: dos.library
 
-*Checked against V6; the deadlines, step 7; a console window's console, V8 step 5.*
+*Checked against V6; the deadlines, step 7; a console window's console, V8 step 5; long names and saved settings, V8 step 7.*
 
-The file calls, the loader, command lines and paths, and the console, in alphabetical order. The names are the RKM's (V6 step 6, [docs §17.4.4](../../docs/17-c-runtime-and-libraries.md)). The header is `planar/dos.h`; the code is `lib/dos/`, the archive `libdos.a`, linked into the commands (`cmd/`), hwdb, the GPU drivers and `dos*` conformance programs (`mk/user.mk`). None is a kernel call. The file calls each send one message to the `dos` server and wait (a trap when the server's asleep). `ReadArgs`, `AddPart`, `FilePart` and `PathPart` work on strings only and never ask the server. The volume is [DOS](../dos/README.md).
+The file calls, the loader, command lines and paths, and the console, in alphabetical order. The names are the RKM's (V6 step 6, [docs §17.4.4](../../docs/17-c-runtime-and-libraries.md)). The header is `planar/dos.h`; the code is `lib/dos/`, the archive `libdos.a`, linked into the commands (`cmd/`), hwdb, input, intuition, the Workbench, Prefs, the GPU drivers, and the `dos*` and `window` conformance programs (`mk/user.mk`). None is a kernel call. The file calls each send one message to the `dos` server and wait (a trap when the server's asleep). `ReadArgs`, `AddPart`, `FilePart` and `PathPart` work on strings only and never ask the server. The volume is [DOS](../dos/README.md).
 
 A path is `VOLUME:dir/file`, or under an assign: `SYS:`, the volume holding `EFI/planar`; `C:`, `SYS:EFI/planar/C`; and `S:`, `SYS:EFI/planar/S` (V8 step 5). Case doesn't matter.
 
@@ -70,7 +70,7 @@ int64_t DeletePath(struct Dos *dos, const char *path);
 ```
 
 **FUNCTION**
-`CreateDir` makes an empty directory, whose parent must exist. `DeletePath` deletes a file, or a directory with nothing in it.
+`CreateDir` makes an empty directory, whose parent must exist, named as [OpenFile](#dosopenfile) names a file it makes: long names too (V8 step 7). `DeletePath` deletes a file, or a directory with nothing in it, and its long name's entries.
 
 **RESULT**
 0, or an error: `ERR_EXISTS` (it's there already; a directory not empty), `ERR_BUSY` (the file is open), `ERR_RIGHTS`, `ERR_NOTFOUND`.
@@ -266,7 +266,7 @@ The file's number (0 or more), or an error. `CloseFile` gives 0 or `ERR_BADHANDL
 
 **NOTES**
 - A client's files close when its connection does.
-- A made file gets an 8.3 name; a name that doesn't fit, or mixes case in a part, gives `ERR_BADARG` ([DOS ch. 1](../dos/01-files-and-programs.md)).
+- A made file gets an 8.3 name if one holds it in one case, and a long name with a short alias otherwise (V8 step 7); a name that's neither, past ASCII or with `"*/:<>?\|`, gives `ERR_BADARG` ([DOS ch. 1](../dos/01-files-and-programs.md)).
 - The RKM's `Open` gives a `BPTR` filehandle with a position. Planar's is a number, and each read names its offset.
 
 **BUGS**
@@ -412,6 +412,48 @@ The bytes moved, or an error. A read gives fewer than `length` at the end of the
 
 **BUGS**
 None known.
+
+---
+
+## dos/ReadPrefs
+
+**NAME**
+ReadPrefs, WritePrefs -- a server's saved settings, read and written (V8 step 7)
+
+**SYNOPSIS**
+```c
+#include <planar/prefs.h>
+int64_t ReadPrefs(struct Dos *dos, const char *server, struct TagItem *tags, uint32_t max);
+int64_t WritePrefs(struct Dos *dos, const char *server, const struct TagItem *tags);
+```
+
+**FUNCTION**
+A server's settings file, `SYS:Prefs/Env-Archive/<server>.prefs`: a `PrefsHeader` (`ph_Magic` `PREFS_MAGIC`, `ph_Version` 1, `ph_Count`) and `ph_Count` `TagItem`s, up to `PREFS_TAGS` (16). `ReadPrefs` fills `tags` with up to `max - 1` of the file's, in its order, ended by `TAG_END`. `WritePrefs` writes `tags`, up to its `TAG_END`, making `SYS:Prefs` and `SYS:Prefs/Env-Archive` first if they aren't there.
+
+The tags are `PREFS_*`, each server's own range: input's `PREFS_RepeatDelay`, `PREFS_RepeatRate`, `PREFS_PointerSpeed`, `PREFS_PointerAccel`; intuition's `PREFS_Hud`, `PREFS_PointerSize`, `PREFS_BackdropTop`, `PREFS_BackdropBottom`.
+
+**INPUTS**
+- `server` -- its name: `"input"`, `"intuition"`.
+- `tags`, `max` -- room for the tags read, the end's among them.
+
+**RESULT**
+`ReadPrefs`: how many tags, or `ERR_NOTFOUND` (none saved), `ERR_BADARG` (not a prefs file: another magic, version 0, more than 16 tags, or cut short), or the file calls' errors. `WritePrefs`: 0, `ERR_BADARG` (more than 16 tags), `ERR_FULL` (written short), or the file calls' errors.
+
+**EXAMPLE**
+From `servers/input/main.c`, at its start:
+```c
+if (OpenDosUntil(&dos, SIG_DOS, DEADLINE_NONE) == 0) {
+    n = ReadPrefs(&dos, "input", t, PREFS_TAGS + 1);
+    CloseDos(&dos);
+}
+```
+
+**NOTES**
+- A reader takes the tags it knows, each held to its range, and passes over the rest: a later version's file is read as far as it goes.
+- Planar's own. The RKM's Prefs editors wrote IFF files to `ENVARC:`, copied to `ENV:` at boot; here each server reads its own, so a setting is back after the server's death.
+
+**BUGS**
+A file written shorter than it was keeps its old bytes past the end: the header's count says where it stops.
 
 ---
 

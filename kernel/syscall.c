@@ -12,6 +12,7 @@
 #include "kprintf.h"
 #include "ktime.h"
 #include "lease.h"
+#include "pmm.h"
 #include "port.h"
 #include "process.h"
 #include "prof.h"
@@ -321,6 +322,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
             .si_Calls = syscall_count(), .si_Interrupts = irq_count(),
             .si_Switches = sched_switches(), .si_Crossings = sched_crossings(),
             .si_Quarantined = lease_quarantined(),
+            .si_IdleNanos = time_to_us(sched_idle_ticks()) * 1000, .si_CPUs = cpus_online(),
+            .si_Pages = pmm_total(), .si_FreePages = pmm_free_pages(),
         };
 
         return arch_copy_to_user(a[0], &si, sizeof si) ? 0 : ERR_BADADDR;

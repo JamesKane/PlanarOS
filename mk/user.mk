@@ -2,7 +2,7 @@
 # bundle. Included by mk/arch-<arch>.mk after it sets USER_FLAGS.
 #
 # - conformance/NAME.c: a test program, one file each; blk* ones link
-#   the block class's library (lib/blk), dos* ones dos.library (lib/dos),
+#   the block class's library (lib/blk), dos* ones and window dos.library (lib/dos),
 #   clib* ones C's library (lib/clib), with its headers.
 # - servers/NAME/ and drv/NAME/: a server or a driver, every .c in its
 #   directory but host.c and test.c (the host's harnesses). Drivers also
@@ -164,7 +164,7 @@ $(patsubst %,$(BUILD)/user/%.elf,$(USER_CPROGS)): $(BUILD)/user/%.elf: $(BUILD)/
 		$(USER_RT) $(USER_BLK) $(USER_DOS) $(USER_CLIB) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) \
 		$(USER_BUILTINS) arch/$(ARCH)/user/user.ld
 	$(CC) $(USER_LDFLAGS) $(USER_RT) $< $(if $(filter blk%,$*),$(USER_BLK)) \
-	  $(if $(filter dos%,$*),$(USER_DOS)) $(if $(filter clib clib%,$*),$(USER_CLIB)) \
+	  $(if $(filter dos% window,$*),$(USER_DOS)) $(if $(filter clib clib%,$*),$(USER_CLIB)) \
 	  $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $@
 	$(check_tls)
 
@@ -180,7 +180,8 @@ define user_dir_prog
 $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$$(wildcard $(2)/*.c))) \
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA) $(USER_CLIB)) \
 	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) \
-	$(if $(filter servers/hwdb servers/conwin drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
+	$(if $(filter servers/hwdb servers/conwin servers/input servers/intuition servers/workbench servers/prefs \
+	  drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
 $(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) \
 		arch/$(ARCH)/user/user.ld
 	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $$@

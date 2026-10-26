@@ -14,6 +14,11 @@
  * holds it, so it outlives intuition's deaths. It's let go of when it
  * ends, and ended when hwdb stops.
  *
+ * V8 step 7: on the desktop, the Workbench is started with intuition
+ * and kept as it is, until it Quits (ends with 0). Its Tools menu's
+ * Prefs is hwdb's to start (HWDB_NEW_PREFS), one at a time, and held as
+ * a Shell's conwin is, so it outlives the Workbench.
+ *
  * The test (killtest.c's T_WINDOW), on a machine with a screen, with
  * conformance/window.c as the client. hwdb watches intuition with
  * INTUI_INFO on a connection of its own, and display's buffers with
@@ -47,6 +52,7 @@ void *memset(void *dst, int c, size_t n);
 constexpr uint64_t INTUITION_COSTS = 1;   /* servers/intuition/main.c's */
 
 static void shells_keep(void);
+static void workbench_keep(void);
 
 static struct {
     bool wanted;
@@ -61,6 +67,7 @@ void intuition_keep(void)
     int64_t p;
 
     shells_keep();
+    workbench_keep();
     if (hwdb.stopping && ik.proc) {
         CloseHandle(ik.proc);       /* which ends it */
         ik.proc = 0;
@@ -89,9 +96,53 @@ void intuition_keep(void)
     ik.starts++;
 }
 
+static struct {
+    bool wanted;
+    Handle proc;
+    uint64_t due, started, delay;
+} wb;
+
 uint64_t intuition_due(void)
 {
-    return ik.wanted && !ik.proc ? ik.due : 0;
+    uint64_t a = ik.wanted && !ik.proc ? ik.due : 0, b = wb.wanted && !wb.proc ? wb.due : 0;
+
+    return !a ? b : !b ? a : a < b ? a : b;
+}
+
+/* The Workbench, kept as intuition is while it's wanted; its Quit (0)
+ * says it no longer is. */
+static void workbench_keep(void)
+{
+    struct ProcessInfo pi;
+    int64_t p;
+
+    if (hwdb.stopping && wb.proc) {
+        CloseHandle(wb.proc);
+        wb.proc = 0;
+    }
+    if (wb.proc && QueryProcess(wb.proc, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+        if (pi.pi_State == PROCS_EXITED && pi.pi_ExitCode == 0) {
+            say("hwdb: the Workbench quit");
+            wb.wanted = false;
+        } else if (wb.wanted) {
+            say("hwdb: the Workbench ended: restarting it");
+        }
+        CloseHandle(wb.proc);
+        wb.proc = 0;
+        wb.delay = hwdb.now - wb.started < 1000 * MS && wb.delay ? wb.delay * 2 : 10 * MS;
+        if (wb.delay > 1000 * MS)
+            wb.delay = 1000 * MS;
+        wb.due = hwdb.now + wb.delay;
+    }
+    if (!wb.wanted || hwdb.stopping || wb.proc || hwdb.now < wb.due)
+        return;
+    if ((p = CreateProcess("workbench", 0, SIG_DEAD, 0)) < 0) {
+        say("hwdb: the Workbench couldn't be started");
+        wb.due = hwdb.now + 1000 * MS;
+        return;
+    }
+    wb.proc = (Handle)p;
+    wb.started = hwdb.now;
 }
 
 /* Wanted from now on, or not: then killed, and not started again. */
@@ -122,8 +173,10 @@ void intuition_desktop(void)
 {
     if (hwdb.test || !hwdb.desktop || ik.wanted || hwdb.stopping || !display_unit())
         return;
-    say("hwdb: the desktop: intuition started, with the keyboard; the Shell on the serial line");
+    say("hwdb: the desktop: intuition and the Workbench started, with the keyboard; the Shell on the serial line");
     intuition_want(true);
+    wb.wanted = true;
+    workbench_keep();
 }
 
 /* --- Shells in windows (V8 step 5): a conwin each, hwdb's own. --- */
@@ -131,11 +184,17 @@ void intuition_desktop(void)
 constexpr unsigned SHELLS = 8;      /* conwin's con.1 to con.8 */
 
 static Handle shells[SHELLS];
+static Handle prefs;                /* Tools' Prefs (V8 step 7) */
 
 /* Those that ended let go of; all ended when hwdb stops. */
 static void shells_keep(void)
 {
     struct ProcessInfo pi;
+
+    if (prefs && (hwdb.stopping || (QueryProcess(prefs, &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
+        CloseHandle(prefs);
+        prefs = 0;
+    }
 
     for (unsigned i = 0; i < SHELLS; i++)
         if (shells[i] && (hwdb.stopping || (QueryProcess(shells[i], &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
@@ -163,6 +222,30 @@ int64_t intuition_new_shell(void)
         return 0;
     }
     return ERR_FULL;
+}
+
+/* --- Prefs (V8 step 7): one, hwdb's own, as a Shell's conwin is. --- */
+
+int64_t intuition_new_prefs(void)
+{
+    struct ProcessInfo pi;
+    int64_t p;
+
+    if (prefs && (hwdb.stopping || (QueryProcess(prefs, &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
+        CloseHandle(prefs);
+        prefs = 0;
+    }
+    if (hwdb.stopping)
+        return ERR_BUSY;
+    if (prefs)
+        return ERR_EXISTS;
+    if ((p = CreateProcess("prefs", 0, SIG_DEAD, 0)) < 0) {
+        say("hwdb: Tools' Prefs couldn't be started");
+        return p;
+    }
+    prefs = (Handle)p;
+    say("hwdb: Tools' Prefs started");
+    return 0;
 }
 
 unsigned intuition_shells(void)
@@ -331,11 +414,17 @@ static void lines(void)
             "under its Shell, the window and its console gone");
         say("V8.6 ui ok: ui.library's gadgets in a window, every one, read back as the host draws "
             "them; clicked, dragged and typed through, each change as the host's, and read back again");
+        say("V8.7 workbench ok: the backdrop and dos's volumes as icons, read back as drawn; a volume "
+            "opened by a double click, and a drawer from its list, each window listing what dos lists");
+        say("V8.7 prefs ok: Tools' Prefs; the repeat rate and the pointer's speed set by clicks, input "
+            "agreeing and a move scaled; the HUD on, intuition agreeing; saved, and in force again "
+            "after input's and intuition's deaths");
     } else {
         say("V7.4 input: not exercised: nobody moved the mouse, or intuition had no input");
         say("V8.4 screen bar, menus and resize: not exercised: nobody moved the mouse");
         say("V8.5 shell window: not exercised: nobody moved the mouse");
         say("V8.6 ui: not exercised: nobody moved the mouse");
+        say("V8.7 workbench and prefs: not exercised: nobody moved the mouse");
     }
     say("V7.5 supervision ok: kill-window: a killed client's two windows gone from the screen, its "
         "Areas unshared, intuition's handles and pages back where they were");
@@ -365,6 +454,7 @@ bool window_test(void)
             say("V8.4 screen bar, menus and resize: not exercised: no screen here");
             say("V8.5 shell window: not exercised: no screen here");
             say("V8.6 ui: not exercised: no screen here");
+            say("V8.7 workbench and prefs: not exercised: no screen here");
             return true;
         }
         /* display's own count first: what intuition takes must come back. */

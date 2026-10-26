@@ -201,13 +201,14 @@ bool display_ask(void);             /* ask again; true once the answer is in */
 /* --- intuition (intuition.c): the server kept going while it's wanted; the window test. --- */
 
 void intuition_keep(void);          /* started, and again when it ends, while wanted; ended when stopping */
-void intuition_desktop(void);       /* the system's: wanted once display is up, unless "nointuition" */
-uint64_t intuition_due(void);       /* when it's to start again; 0 if running or not wanted */
+void intuition_desktop(void);       /* the system's, with the Workbench: once display is up, unless "nointuition" */
+uint64_t intuition_due(void);       /* when it or the Workbench is to start again; 0 if neither */
 void intuition_conn_down(void);
 void intuition_conn_serve(struct MsgPort *mp);
 int64_t intuition_kill_client(uint64_t conn);   /* HWDB_KILL_CLIENT: its client on 'conn', ended */
 int64_t intuition_new_shell(void);  /* HWDB_NEW_SHELL: a conwin started, and its Shell; hwdb's to end */
 unsigned intuition_shells(void);    /* conwins running */
+int64_t intuition_new_prefs(void);  /* HWDB_NEW_PREFS: Prefs started, one at most; ERR_EXISTS if it's running */
 bool window_test(void);             /* the kill test's window step: true when it's over */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */

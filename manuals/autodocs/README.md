@@ -106,6 +106,7 @@
 | GetGlyphMetrics | [font](font.md#fontgetglyphmetrics) | library, through `IFont` |
 | GetInterface | [exec](exec.md#execgetinterface) | library, through `IExec` |
 | GetIntuiEvent | [intuition](intuition.md#intuitiongetintuievent) | library, through `IIntuition` |
+| GetPrefs, SetPrefs | [intuition](intuition.md#intuitiongetprefs) | library, through `IIntuition` |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
 | GetTagData | [utility](utility.md#utilitygettagdata) | library |
@@ -156,6 +157,7 @@
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
 | ReadFile, WriteFile | [dos](dos.md#dosreadfile) | library |
 | ReadLog | [lease](lease.md#leasereadlog) | kernel |
+| ReadPrefs, WritePrefs | [dos](dos.md#dosreadprefs) | library |
 | RectFill | [gfx](gfx.md#gfxrectfill) | library, through `IGfx` |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |

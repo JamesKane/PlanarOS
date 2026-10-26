@@ -1,8 +1,8 @@
 # intuition: windows on the screen
 
-*Checked against V8 step 4.*
+*Checked against V8 step 4; settings and backdrop windows, V8 step 7.*
 
-intuition.library's functions, in alphabetical order. The header is `planar/intuition.h`. They're a shared library's, called through `IIntuition` (`struct IntuitionIFace`, the "main" interface, version 1, of intuition.library 8; a program opening version 7 gets the same table, V8 step 4's four calls at its end). Each works on the caller's own `Intuition`, the connection to the intuition server, or a `Window` on it. They keep no state of their own but a page per connection, the caller's, which says how far it has read its events. One task at a time may use an `Intuition` and its windows. [Libraries ch. 13](../libraries/13-intuition.md) is the guide to them.
+intuition.library's functions, in alphabetical order. The header is `planar/intuition.h`. They're a shared library's, called through `IIntuition` (`struct IntuitionIFace`, the "main" interface, version 1, of intuition.library 8; a program opening version 7 gets the same table, V8 step 4's four calls and step 7's two at its end). Each works on the caller's own `Intuition`, the connection to the intuition server, or a `Window` on it. They keep no state of their own but a page per connection, the caller's, which says how far it has read its events. One task at a time may use an `Intuition` and its windows. [Libraries ch. 13](../libraries/13-intuition.md) is the guide to them.
 
 ---
 
@@ -229,6 +229,7 @@ An event is one of the IDCMP classes its window asked for with `WA_IDCMP`:
 - `IDCMP_CLOSEWINDOW` -- its close gadget was clicked. Close the window with `CloseWindow`, within a second.
 - `IDCMP_MENUPICK` -- an item of its menu strip was chosen ([SetMenuStrip](#intuitionsetmenustrip)): `iev_Code` the RKM's packed number (`MENUNUM`, `ITEMNUM`; `SUBNUM` is `NOSUB`), and `iev_Char` 1 if a `CHECKIT` item is checked now, 0 if not.
 - `IDCMP_NEWSIZE` -- the window was resized by its size gadget: `iev_MouseX` and `iev_MouseY` are its inside's new width and height, as its sync words' `is_Width` and `is_Height` are. Give it buffers of that size with [ChangeWindowBuffers](#intuitionchangewindowbuffers).
+- `IDCMP_NEWPREFS` -- intuition's settings changed (V8 step 7): read them with [GetPrefs](#intuitiongetprefs).
 
 Otherwise `iev_MouseX` and `iev_MouseY` are where the pointer was, in the window's inside's coordinates: (0, 0) is the top left pixel of its buffers. `iev_Qualifier` is input's `IEQ_*` (the modifier keys), with `IEQ_LEFTBUTTON`, `IEQ_RBUTTON` and `IEQ_MIDBUTTON` for the buttons held and `IEQ_REPEAT` for a key's repeat. `iev_Time` is when input had it, `CurrentTime()`'s.
 
@@ -263,6 +264,49 @@ None known.
 
 **SEE ALSO**
 [WaitIntuiEvent](#intuitionwaitintuievent), [OpenWindowTagList](#intuitionopenwindowtaglist), [CloseWindow](#intuitionclosewindow).
+
+---
+
+## intuition/GetPrefs
+
+**NAME**
+GetPrefs, SetPrefs -- intuition's settings, read and set (V8 step 7)
+
+**SYNOPSIS**
+```c
+#include <planar/intuition.h>
+int64_t GetPrefs(struct Intuition *in, struct IntuiPrefs *prefs);
+int64_t SetPrefs(struct Intuition *in, const struct IntuiPrefs *prefs);
+```
+
+**FUNCTION**
+`GetPrefs` copies intuition's settings into `prefs`. `SetPrefs` puts all of them in force at once, and tells every window that asked for `IDCMP_NEWPREFS`:
+- `ip_Hud` -- 1: the Workbench shows its CPU and memory badge.
+- `ip_PointerSize` -- `INTUI_POINTER_AUTO` (twice the size on a screen of 1600 by 900 or more), `INTUI_POINTER_SMALL` or `INTUI_POINTER_LARGE`. intuition's own: the sprite shown changes at once.
+- `ip_BackdropTop`, `ip_BackdropBottom` -- the Workbench's backdrop gradient, XRGB: §13.2's `INTUI_BACKDROP_TOP` and `INTUI_BACKDROP_BOTTOM` by default.
+
+intuition reads its saved settings when it starts (`SYS:Prefs/Env-Archive/intuition.prefs`, [ReadPrefs](dos.md#dosreadprefs)): at once if dos is there, else once it is, unless a client has set them first.
+
+**INPUTS**
+- `in` -- an open `Intuition`.
+- `prefs` -- the settings: every field, each in its range.
+
+**RESULT**
+0, `ERR_BADARG` (`SetPrefs`: a field out of its range: `ip_Hud` past 1, `ip_PointerSize` past 2, a colour past `0xffffff`; nothing changes), or `ERR_TIMEOUT` and `ERR_PORT_DIED` as every call.
+
+**EXAMPLE**
+From `servers/workbench/main.c`, on `IDCMP_NEWPREFS`:
+```c
+if (wb.intuition->GetPrefs(&wb.in, &p) != 0)
+    return;
+hud = p.ip_Hud != wb.prefs.ip_Hud;
+```
+
+**NOTES**
+- The RKM's `GetPrefs` and `SetPrefs` copied a `struct Preferences` of everything; these are intuition's few, and input's settings are input's (`INPUT_GET`, [Devices ch. 7](../devices/07-input.md)).
+
+**BUGS**
+None known.
 
 ---
 
@@ -340,7 +384,7 @@ The window's inside is the top left `WA_Width` by `WA_Height` of the bitmap pres
   - `WA_Left`, `WA_Top` -- where the window's top left goes on the screen, its chrome's. 0 by default. Either may be negative, or past the screen's edge, by up to 16384.
   - `WA_Width`, `WA_Height` -- the inside's size, no larger than either bitmap's. The first bitmap's by default.
   - `WA_Title` -- `const char *`: the title bar's, 31 bytes at most, cut short where the gadgets begin. "" by default.
-  - `WA_Flags` -- `WFLG_*`, the RKM's: `WFLG_DRAGBAR` (dragged by its title bar), `WFLG_DEPTHGADGET`, `WFLG_CLOSEGADGET`, `WFLG_SIZEGADGET` (resized by its bottom right corner: `IDCMP_NEWSIZE`), `WFLG_BORDERLESS` (no chrome: the inside alone, as in V7 step 3), `WFLG_ACTIVATE` (the active window at its first frame). None by default: a title bar and a frame, with no gadgets, that can't be dragged.
+  - `WA_Flags` -- `WFLG_*`, the RKM's: `WFLG_DRAGBAR` (dragged by its title bar), `WFLG_DEPTHGADGET`, `WFLG_CLOSEGADGET`, `WFLG_SIZEGADGET` (resized by its bottom right corner: `IDCMP_NEWSIZE`), `WFLG_BORDERLESS` (no chrome: the inside alone, as in V7 step 3), `WFLG_ACTIVATE` (the active window at its first frame), `WFLG_BACKDROP` (V8 step 7: behind every other window always, and not raised by a click: the Workbench's). None by default: a title bar and a frame, with no gadgets, that can't be dragged.
   - `WA_MinWidth`, `WA_MinHeight`, `WA_MaxWidth`, `WA_MaxHeight` -- the inside's size a resize is held to. 1, 1, and the screen's by default (0 is the screen's).
   - `WA_IDCMP` -- the IDCMP classes the window's events are wanted for ([GetIntuiEvent](#intuitiongetintuievent)). None by default.
 
@@ -365,7 +409,7 @@ if (OpenWindowTags(IIntuition, &in, &w, { WA_Left, 64 }, { WA_Top, 48 },
 ```
 
 **NOTES**
-- **Differs from the RKM:** the caller provides the `Window` and the bitmaps, and the result is an error, not a `Window *`. There's no `NewWindow`. Of `WA_Flags`, only the six above; iconify, zoom and the border scrollers aren't built (v8-plan decision 9). The window's size is its inside's, not its outside's, and so are its limits.
+- **Differs from the RKM:** the caller provides the `Window` and the bitmaps, and the result is an error, not a `Window *`. There's no `NewWindow`. Of `WA_Flags`, only the seven above; iconify, zoom and the border scrollers aren't built (v8-plan decision 9). The window's size is its inside's, not its outside's, and so are its limits.
 - A window's top left may be under the screen bar, which is shown over it; a drag keeps its title bar below the bar.
 - The window is opaque in V7: an ARGB bitmap's alpha is ignored.
 - intuition describes each buffer itself, from what this sends: the address, the row stride, the width and the height, checked against the Area holding them. The `BitMap` in the Area isn't read.

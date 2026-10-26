@@ -15,10 +15,17 @@
  * means more were held than it can say: that report is ignored.
  *
  * Caps Lock is input's own: the keyboard's light isn't set.
+ *
+ * Its settings (V8 step 7): the repeat's delay and rate, and the
+ * pointer's speed and acceleration, by INPUT_GET and INPUT_SET. A task
+ * of its own waits for dos and reads the saved ones, input.prefs
+ * (planar/prefs.h), once; they're taken unless a client has set them
+ * meanwhile.
  */
 #include <stddef.h>
 
 #include <planar/devices/input.h>
+#include <planar/prefs.h>
 #include <planar/syscalls.h>
 
 void *memset(void *dst, int c, size_t n);
@@ -27,11 +34,11 @@ void *memcpy(void *restrict dst, const void *restrict src, size_t n);
 constexpr int64_t SIG_ACCEPT = 16;
 constexpr int64_t SIG_CONN = 17;
 constexpr int64_t SIG_TIMER = 18;
+constexpr int64_t SIG_PREFS = 19;       /* the loader's: the saved settings read */
+constexpr int64_t SIG_DOS = 16;         /* the loader's own, for its connection */
 constexpr unsigned CONNS = 16;
 constexpr unsigned DEVICES = 16;         /* attached, every driver's */
 constexpr uint64_t MS = 1000000;
-constexpr uint64_t REPEAT_DELAY = 500 * MS;
-constexpr uint64_t REPEAT_EVERY = 33 * MS;
 
 static struct {
     Handle port;
@@ -49,7 +56,18 @@ static struct {
         uint64_t at;                    /* when it next repeats; 0 if none */
         int dev;
     } rep;
-} in = { .holder = -1, .rep = { .dev = -1 } };
+    struct InputPrefs prefs;
+    bool set;                           /* by a client: the saved ones aren't taken */
+    int32_t rest_x, rest_y;             /* a move's hundredths of a pixel not yet moved */
+    Handle task;
+} in = { .holder = -1, .rep = { .dev = -1 },
+         .prefs = { INPUT_DELAY_DEFAULT, INPUT_RATE_DEFAULT, INPUT_SPEED_DEFAULT, INPUT_ACCEL_DEFAULT } };
+
+/* The loader's: the saved settings, and whether they've been read. */
+static struct {
+    struct InputPrefs prefs;
+    volatile uint64_t done;
+} saved;
 
 static struct device {
     bool used;
@@ -133,7 +151,7 @@ static void key(int d, uint16_t code, bool down, uint16_t qual)
     post(IECLASS_KEY, code, down ? 0 : IEF_UP, qual, ch, 0, 0);
     if (down && ch) {
         in.rep = (typeof(in.rep)){ .code = code, .qual = qual, .ch = ch,
-                                   .at = CurrentTime() + REPEAT_DELAY, .dev = d };
+                                   .at = CurrentTime() + in.prefs.ip_RepeatDelay * MS, .dev = d };
     } else if ((!down && in.rep.code == code && in.rep.dev == d) || (down && code < IEKEY_LCTRL)) {
         in.rep.at = 0;                  /* let go, or another key: no repeat */
     }
@@ -160,6 +178,28 @@ static void keyboard(int d, const uint8_t *r)
     memcpy(v->last, r, 8);
 }
 
+/* A move, scaled by the pointer's speed and, if it's fast, its
+ * acceleration; what's left of a pixel kept for the next. At 100% and
+ * 100% it's as it came. */
+static void moved(int32_t x, int32_t y)
+{
+    int64_t ax = (int64_t)x * in.prefs.ip_PointerSpeed, ay = (int64_t)y * in.prefs.ip_PointerSpeed;
+    int32_t dx, dy;
+
+    if ((x < 0 ? -x : x) + (y < 0 ? -y : y) >= INPUT_ACCEL_FROM) {
+        ax = ax * in.prefs.ip_PointerAccel / 100;
+        ay = ay * in.prefs.ip_PointerAccel / 100;
+    }
+    in.rest_x += (int32_t)ax;
+    in.rest_y += (int32_t)ay;
+    dx = in.rest_x / 100;
+    dy = in.rest_y / 100;
+    in.rest_x -= dx * 100;
+    in.rest_y -= dy * 100;
+    if (dx || dy)
+        post(IECLASS_MOVE, 0, 0, in.caps, 0, dx, dy);
+}
+
 static void mouse(int d, const uint8_t *r, uint32_t len)
 {
     struct device *v = &dev[d];
@@ -168,7 +208,7 @@ static void mouse(int d, const uint8_t *r, uint32_t len)
         if ((v->last[0] ^ r[0]) & 1u << b)
             post(IECLASS_BUTTON, (uint16_t)b, r[0] & 1u << b ? 0 : IEF_UP, in.caps, 0, 0, 0);
     if (len >= 3 && (r[1] || r[2]))
-        post(IECLASS_MOVE, 0, 0, in.caps, 0, (int8_t)r[1], (int8_t)r[2]);
+        moved((int8_t)r[1], (int8_t)r[2]);
     v->last[0] = r[0];
 }
 
@@ -210,6 +250,56 @@ static int64_t take_ring(unsigned c, struct InputMsg *m)
     return 0;
 }
 
+/* --- Settings. --- */
+
+static bool prefs_ok(const struct InputPrefs *p)
+{
+    return p->ip_RepeatDelay >= INPUT_DELAY_MIN && p->ip_RepeatDelay <= INPUT_DELAY_MAX &&
+           p->ip_RepeatRate >= INPUT_RATE_MIN && p->ip_RepeatRate <= INPUT_RATE_MAX &&
+           p->ip_PointerSpeed >= INPUT_SPEED_MIN && p->ip_PointerSpeed <= INPUT_SPEED_MAX &&
+           p->ip_PointerAccel >= INPUT_ACCEL_MIN && p->ip_PointerAccel <= INPUT_ACCEL_MAX;
+}
+
+static void prefs_take(const struct InputPrefs *p)
+{
+    in.prefs = *p;
+    in.rest_x = in.rest_y = 0;
+}
+
+/* The saved settings, read once dos is there: on a task of its own, so
+ * input serves meanwhile. Each tag held to its range; one out of it is
+ * left at its default. */
+static void loader(uint64_t)
+{
+    struct TagItem t[PREFS_TAGS + 1];
+    struct InputPrefs p = { INPUT_DELAY_DEFAULT, INPUT_RATE_DEFAULT, INPUT_SPEED_DEFAULT, INPUT_ACCEL_DEFAULT };
+    struct Dos dos;
+    int64_t n = 0;
+
+    if (OpenDosUntil(&dos, SIG_DOS, DEADLINE_NONE) == 0) {
+        n = ReadPrefs(&dos, "input", t, PREFS_TAGS + 1);
+        CloseDos(&dos);
+    }
+    for (int64_t i = 0; i < n; i++) {
+        struct InputPrefs q = p;
+        uint32_t v = (uint32_t)t[i].ti_Data;
+
+        if (t[i].ti_Tag == PREFS_RepeatDelay)
+            q.ip_RepeatDelay = v;
+        else if (t[i].ti_Tag == PREFS_RepeatRate)
+            q.ip_RepeatRate = v;
+        else if (t[i].ti_Tag == PREFS_PointerSpeed)
+            q.ip_PointerSpeed = v;
+        else if (t[i].ti_Tag == PREFS_PointerAccel)
+            q.ip_PointerAccel = v;
+        if (prefs_ok(&q))
+            p = q;
+    }
+    saved.prefs = p;
+    __atomic_store_n(&saved.done, n > 0 ? 2 : 1, __ATOMIC_RELEASE);
+    Signal(in.task, 1ULL << SIG_PREFS);
+}
+
 static void message(unsigned c, struct InputMsg *m)
 {
     struct InputMsg q;
@@ -229,6 +319,17 @@ static void message(unsigned c, struct InputMsg *m)
         }
         m->im_Held = in.holder >= 0;
         m->im_Events = in.events;
+        break;
+    case INPUT_GET:
+        m->im_Prefs = in.prefs;
+        break;
+    case INPUT_SET:
+        if (!prefs_ok(&q.im_Prefs)) {
+            m->im_Msg.mn_Error = (int32_t)ERR_BADARG;
+            break;
+        }
+        prefs_take(&q.im_Prefs);
+        in.set = true;
         break;
     case INPUT_ATTACH:
         if ((q.im_Kind != INPUT_KEYBOARD && q.im_Kind != INPUT_MOUSE) ||
@@ -308,17 +409,26 @@ int main(uint64_t)
         return 1;
     }
     in.port = (Handle)h;
+    in.task = FindTask(nullptr);
+    if (CreateTask(loader, 0) < 0)
+        say("input: no task to read the saved settings: the defaults kept");
     for (;;) {
         uint64_t before = in.events;
-        uint64_t now;
+        uint64_t now, mask = 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_PREFS;
 
         if (in.rep.at) {
             ArmTimer(in.rep.at, SIG_TIMER);
-            WaitPorts(in.conn, in.nconns,
-                      1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_TIMER);
+            WaitPorts(in.conn, in.nconns, mask | 1ULL << SIG_TIMER);
             ArmTimer(0, 0);
         } else {
-            WaitPorts(in.conn, in.nconns, 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN);
+            WaitPorts(in.conn, in.nconns, mask);
+        }
+        if (__atomic_load_n(&saved.done, __ATOMIC_ACQUIRE) == 2) {
+            if (!in.set) {
+                prefs_take(&saved.prefs);
+                say("input: the saved settings taken");
+            }
+            saved.done = 1;
         }
         for (struct MsgPort extra; ;) {
             struct MsgPort *mp = in.nconns < CONNS ? &in.conn[in.nconns] : &extra;
@@ -344,7 +454,7 @@ int main(uint64_t)
         now = CurrentTime();
         if (in.rep.at && now >= in.rep.at) {
             post(IECLASS_KEY, in.rep.code, IEF_REPEAT, in.rep.qual, in.rep.ch, 0, 0);
-            in.rep.at = now + REPEAT_EVERY;
+            in.rep.at = now + 1000 * MS / in.prefs.ip_RepeatRate;
         }
         if (in.events != before)
             wake();

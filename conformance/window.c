@@ -64,6 +64,17 @@
  *    dragged and typed through as uiwin.h's script says, each event into
  *    HandleUIEvent and its damage presented, each step's change as the
  *    host's (lib/ui/test.c), and read back again.
+ * 6d. V8 step 7: the Workbench (a child of this program's), its backdrop
+ *    and dos's volumes' icons read back as wb.h draws them; the first
+ *    volume opened by a double click, its window's list read back as
+ *    wb.h draws what dos lists there (as List lists it), and a drawer in
+ *    it opened from its list the same way. Then Tools' Prefs from the
+ *    screen bar's menu (hwdb starts it): its repeat rate and pointer
+ *    speed set by clicks on their sliders (each value as this program's
+ *    copy of the window takes the same click), input's INPUT_GET
+ *    agreeing and a move scaled by the speed; the HUD turned on, and
+ *    intuition's GetPrefs agreeing; Save, and the files read back. The
+ *    pointer's speed put back, and the Workbench ended.
  * 7. kill-window: a client (this program again, KILLED) with two windows
  *    over one of this one's, killed. They're gone from the screen by the
  *    next latch but one, and intuition lets go of their bitmaps, which
@@ -83,18 +94,24 @@
  *    old connection left mapped; the third is the cue again, to kill
  *    display. Frames presented while it's away are safe at once, and
  *    shown once it's back. Then input is killed: its ring is opened
- *    again, the pointer where it was, and (SURVIVE_MOUSE, if 5 ran) a
- *    click heard after. Exits 0, or the failed check's number.
+ *    again, the pointer where it was, and (SURVIVE_MOUSE, if 5 ran) the
+ *    settings 6d saved in force again, read by input and intuition at
+ *    their starts, then put back to their defaults and the files
+ *    removed; and a click heard after. Exits 0, or the failed check's number.
  */
 #include <stddef.h>
 
 #include <planar/devices/display.h>
+#include <planar/devices/input.h>
 #include <planar/intuition.h>
+#include <planar/prefs.h>
 #include <planar/syscalls.h>
 #include <planar/ui.h>
 
 #include "../servers/conwin/conwin.h"
 #include "../servers/intuition/pointer.h"
+#include "../servers/prefs/prefswin.h"
+#include "../servers/workbench/wb.h"
 #include "log.h"
 #include "shellwin.h"
 #include "typescene.h"
@@ -103,6 +120,7 @@
 void *memset(void *dst, int c, size_t n);
 
 constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23, SIG_CONWIN = 24;  /* 22 is intuition.library's */
+constexpr int64_t SIG_DOS = 25, SIG_INPUT = 26, SIG_WB = 27;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FRAMES = 120, TIMED = 10;
 constexpr unsigned PACED = 600, PACED_READ = 30;     /* a board's, 10 s at 60 Hz; QEMU's */
@@ -830,10 +848,13 @@ static int64_t info(struct IntuiMsg *m)
     return e;
 }
 
-/* The pointer to (x, y), asked for 100 pixels at a time: false if it
- * didn't move within 2 s of asking (nobody's there to move it). */
+/* The pointer to (x, y), asked for 100 pixels at a time (QEMU's mouse
+ * reports one at once, 127 at most): false if it didn't move within 2 s
+ * of asking (nobody's there to move it). The asks are paced to the
+ * kernel's log rate (20 lines a second after 32), so none is dropped. */
 static bool point_at(int32_t x, int32_t y)
 {
+    static uint64_t asked;
     struct IntuiMsg *m = in.in_Call;
 
     for (unsigned tries = 0; tries < 40; tries++) {
@@ -848,6 +869,9 @@ static bool point_at(int32_t x, int32_t y)
         dy = y - ptr_y;
         dx = dx > 100 ? 100 : dx < -100 ? -100 : dx;
         dy = dy > 100 ? 100 : dy < -100 ? -100 : dy;
+        if (CurrentTime() - asked < 50 * MS)
+            nap((asked + 50 * MS - CurrentTime()) / MS + 1);
+        asked = CurrentTime();
         KPrintF("window: send move %ld %ld", (int64_t)dx, (int64_t)dy);
         was_x = ptr_x;
         was_y = ptr_y;
@@ -1601,6 +1625,301 @@ static int ui_half(bool readable)
     return 0;
 }
 
+/* --- 6d: the Workbench and Prefs (V8 step 7). --- */
+
+/* The checksum DISPLAY_READ gives of w by h of a bitmap at (x, y). */
+static uint32_t crc_rect(const struct BitMap *bm, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h)
+{
+    static uint32_t table[256];
+    uint32_t crc = ~0u;
+
+    if (!table[1])
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+
+            for (unsigned k = 0; k < 8; k++)
+                c = c >> 1 ^ (0xedb88320u & -(c & 1));
+            table[i] = c;
+        }
+    for (uint32_t y = y0; y < y0 + h; y++) {
+        const uint32_t *row = (const uint32_t *)((const uint8_t *)bm->bm_BaseAddr + (uint64_t)y * bm->bm_BytesPerRow);
+
+        for (uint32_t x = x0; x < x0 + w; x++) {
+            uint32_t px = row[x] & 0xffffff;
+
+            for (unsigned k = 0; k < 32; k += 8)
+                crc = crc >> 8 ^ table[(crc ^ px >> k) & 0xff];
+        }
+    }
+    return ~crc;
+}
+
+static struct Dos wdos;
+
+/* input's settings: INPUT_GET or INPUT_SET, on a connection made for it. */
+static int64_t input_prefs(uint32_t op, struct InputPrefs *p)
+{
+    struct MsgPort mp;
+    struct InputMsg *m;
+    int64_t e;
+
+    if ((e = ConnectPort(&mp, "input", SIG_INPUT, 2, 2 * sizeof *m)) != 0)
+        return e;
+    e = ERR_NOMEM;
+    if ((m = AllocMsg(&mp, sizeof *m))) {
+        memset(m, 0, sizeof *m);
+        m->im_Msg.mn_Length = sizeof *m;
+        m->im_Op = op;
+        m->im_Prefs = *p;
+        if ((e = DoMsgUntil(&mp, &m->im_Msg, CurrentTime() + 1000 * MS)) == 0 && (e = m->im_Msg.mn_Error) == 0)
+            *p = m->im_Prefs;
+    }
+    ClosePort(&mp);
+    return e;
+}
+
+/* input's settings as 'want' says, within 'ms'. */
+static bool input_is(uint32_t delay, uint32_t rate, uint32_t speed, uint64_t ms)
+{
+    uint64_t until = CurrentTime() + ms * MS;
+    struct InputPrefs p = {};
+
+    do
+        if (input_prefs(INPUT_GET, &p) == 0 && p.ip_RepeatDelay == delay && p.ip_RepeatRate == rate &&
+            p.ip_PointerSpeed == speed)
+            return true;
+        else
+            nap(10);
+    while (CurrentTime() < until);
+    KPrintF("window: input's settings are delay %lu, rate %lu, speed %lu; not %lu, %lu, %lu",
+            (uint64_t)p.ip_RepeatDelay, (uint64_t)p.ip_RepeatRate, (uint64_t)p.ip_PointerSpeed, (uint64_t)delay,
+            (uint64_t)rate, (uint64_t)speed);
+    return false;
+}
+
+static bool hud_is(uint32_t hud, uint64_t ms)
+{
+    uint64_t until = CurrentTime() + ms * MS;
+    struct IntuiPrefs p = {};
+
+    do
+        if (IIntuition->GetPrefs(&in, &p) == 0 && p.ip_Hud == hud)
+            return true;
+        else
+            nap(10);
+    while (CurrentTime() < until);
+    return false;
+}
+
+/* A window of the Workbench's, w by h inside, at (x, y) of its chrome,
+ * read back as wb.h draws path's entries: how many, or -1. */
+static int drawer_is(bool readable, const char *path, int32_t x, int32_t y, struct UI *ui, struct wb_drawer *d)
+{
+    struct BitMap *bm;
+    struct RastPort rp;
+    bool ok;
+
+    if (wb_read(&wdos, path, d) != 0 || IUI->InitUI(ui, IGfx) != 0 || !wb_drawer_build(IUI, ui, d) ||
+        !(bm = IGfx->AllocBitMap(WB_DRAWER_W, WB_DRAWER_H, PIXFMT_XRGB8888, 0, nullptr)))
+        return -1;
+    IGfx->InitRastPort(&rp, bm);
+    ui->ui_RPort = &rp;
+    IUI->LayoutUI(ui, WB_DRAWER_W, WB_DRAWER_H);
+    IUI->DrawUI(ui);
+    ok = drawn_as(readable, x + (int32_t)INTUI_BORDER, y + (int32_t)INTUI_TITLEBAR, WB_DRAWER_W, WB_DRAWER_H,
+                  crc_rect(bm, 0, 0, WB_DRAWER_W, WB_DRAWER_H), 5000, path);
+    ui->ui_RPort = nullptr;
+    IGfx->FreeBitMap(bm);
+    return ok ? (int)d->count : -1;
+}
+
+/* A click on Prefs' window, given to this program's copy of it too:
+ * the change that gives. */
+static bool prefs_click(struct UI *ui, uint32_t gadget, int32_t dx, int32_t dy, struct UIChange *c)
+{
+    struct IntuiEvent ev = { CurrentTime(), IDCMP_MOUSEBUTTONS, 1, SELECTDOWN, 0, 0, 0, 0 };
+    struct UIChange got;
+
+    pw_point(ui, gadget, dx, dy, &ev.iev_MouseX, &ev.iev_MouseY);
+    *c = (struct UIChange){};
+    if (!point_at(PW_LEFT + (int32_t)INTUI_BORDER + ev.iev_MouseX, PW_TOP + (int32_t)INTUI_TITLEBAR + ev.iev_MouseY))
+        return false;
+    click();
+    if (IUI->HandleUIEvent(ui, &ev, &got))
+        *c = got;
+    ev.iev_Code = SELECTUP;
+    if (IUI->HandleUIEvent(ui, &ev, &got))
+        *c = got;
+    nap(300);                           /* Prefs' own, set before what's next */
+    return c->uc_Gadget == gadget;
+}
+
+static int workbench_half(bool readable)
+{
+    static struct wb_icon icons[WB_VOLUMES];
+    static struct wb_drawer d;
+    static struct UI ui;
+    struct IntuiMsg *m = in.in_Call;
+    struct IntuiEvent ev;
+    struct TextFont *sans;
+    struct BitMap *bm;
+    struct RastPort rp;
+    struct InputPrefs ip = {}, was;
+    struct IntuiPrefs np = {};
+    struct TagItem t[PREFS_TAGS + 1];
+    struct UIChange c;
+    struct GfxRect lr;
+    uint32_t bw = in.in_Width, bh = in.in_Height - INTUI_SCREENBAR, rate, speed;
+    int32_t x0, y0, x1, y1, px0;
+    int64_t proc;
+    unsigned n, k;
+    int count;
+
+    while (IIntuition->GetIntuiEvent(&in, &ev))
+        ;
+    CHECK(OpenDosUntil(&wdos, SIG_DOS, CurrentTime() + 5000 * MS) == 0);
+    CHECK((n = wb_volumes(&wdos, icons, WB_VOLUMES)) > 0);
+    CHECK(input_prefs(INPUT_GET, &ip) == 0 && IIntuition->GetPrefs(&in, &np) == 0);
+    CHECK(ip.ip_PointerSpeed == INPUT_SPEED_DEFAULT && np.ip_Hud == 0);
+    was = ip;
+
+    /* The backdrop and the volumes, read back with the pointer at the
+     * screen's top right, on the screen bar but for a column. */
+    CHECK((proc = CreateProcess("workbench", 0, SIG_WB, 0)) > 0);
+    CHECK(windows_are(1, 10000));
+    CHECK((sans = IGfx->OpenTextFont(&(struct TextAttr){ "System Sans", 13, 0, 0 })));
+    CHECK((bm = IGfx->AllocBitMap(bw, bh, PIXFMT_XRGB8888, 0, nullptr)));
+    IGfx->InitRastPort(&rp, bm);
+    wb_backdrop(IGfx, &rp, bw, bh, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM);
+    for (unsigned i = 0; i < n; i++)
+        wb_icon_draw(IGfx, &rp, sans, &icons[i]);
+    CHECK(point_at((int32_t)bw - 1, 0));
+    CHECK(drawn_as(readable, 0, INTUI_SCREENBAR, bw - 1, bh, crc_rect(bm, 0, 0, bw - 1, bh), 5000,
+                   "the Workbench's backdrop and volumes"));
+    IGfx->FreeBitMap(bm);
+    KPrintF("window: the Workbench: its backdrop and dos's %lu volumes' icons, read back as wb.h draws them",
+            (uint64_t)n);
+
+    /* The first volume opened by a double click: its window lists what dos does. */
+    CHECK(point_at(icons[0].x + WB_ICON / 2, INTUI_SCREENBAR + icons[0].y + WB_ICON / 2));
+    click();
+    click();
+    CHECK(windows_are(2, 5000));
+    {
+        char path[WB_NAME + 1];
+
+        SNPrintf(path, sizeof path, "%s:", icons[0].name);
+        wb_drawer_at(0, &x0, &y0);
+        CHECK(point_at(x0 - 20, y0 + 20));      /* off its window */
+        CHECK((count = drawer_is(readable, path, x0, y0, &ui, &d)) >= 0);
+        KPrintF("window: the Workbench: %s opened by a double click, its window listing its %lu entries as dos "
+                "lists them", path, (uint64_t)count);
+
+        /* A drawer in it, opened from its list the same way. */
+        for (k = 0; k < d.count && !d.dir[k]; k++)
+            ;
+        CHECK(k < d.count);
+        lr = ui.ui_Gadget[WB_D_LIST].g_Rect;
+        CHECK(point_at(x0 + (int32_t)INTUI_BORDER + lr.MinX + 40,
+                       y0 + (int32_t)INTUI_TITLEBAR + lr.MinY + 2 + 1 + (int32_t)k * 22 + 11));
+        click();
+        click();
+        CHECK(windows_are(3, 5000));
+        IUI->FreeUI(&ui);
+        SNPrintf(path, sizeof path, "%s:%s", icons[0].name, d.label[k]);
+        path[wb_len(path) - 1] = 0;     /* the label's '/' */
+        wb_drawer_at(1, &x1, &y1);
+        CHECK(point_at(x0 - 20, y0 + 20));
+        CHECK((count = drawer_is(readable, path, x1, y1, &ui, &d)) >= 0);
+        IUI->FreeUI(&ui);
+        KPrintF("window: the Workbench: the drawer %s opened from its list, its %lu entries as dos lists them", path,
+                (uint64_t)count);
+    }
+
+    /* Tools' Prefs, from the screen bar: the strip's third menu. */
+    CHECK(info(m) == 0 && m->im_TitleX[3]);
+    CHECK(point_at(m->im_TitleX[3], INTUI_SCREENBAR / 2));
+    click();
+    CHECK(menu_is(4) && info(m) == 0 && m->im_ItemY[1]);       /* Tools, the bar's fourth title */
+    CHECK(point_at((m->im_MenuRect.MinX + m->im_MenuRect.MaxX) / 2, m->im_ItemY[1]));
+    click();
+    CHECK(windows_are(4, 5000));
+    CHECK(IUI->InitUI(&ui, IGfx) == 0 && pw_build(IUI, &ui, &ip, &np, "", ""));
+    IUI->LayoutUI(&ui, PW_WIDTH, PW_HEIGHT);
+
+    /* The repeat rate, then the pointer's speed: each a click on its slider. */
+    CHECK(prefs_click(&ui, PW_RATE, -30, 11, &c));
+    rate = (uint32_t)c.uc_Value;
+    CHECK(rate != INPUT_RATE_DEFAULT && input_is(was.ip_RepeatDelay, rate, INPUT_SPEED_DEFAULT, 2000));
+    CHECK(prefs_click(&ui, PW_SPEED, -20, 11, &c));
+    speed = (uint32_t)c.uc_Value;
+    CHECK(speed > 200 && input_is(was.ip_RepeatDelay, rate, speed, 2000));
+    CHECK(info(m) == 0);
+    px0 = ptr_x;
+    KPrintF("window: send move 10 0");
+    for (uint64_t until = CurrentTime() + 2000 * MS; info(m) == 0 && ptr_x == px0;)
+        CHECK(CurrentTime() < until);
+    nap(100);
+    CHECK(info(m) == 0);
+    if (ptr_x - px0 != (int32_t)(10 * speed / 100))
+        KPrintF("window: a move of 10 at %lu%% moved the pointer %ld", (uint64_t)speed, (int64_t)(ptr_x - px0));
+    CHECK(ptr_x - px0 == (int32_t)(10 * speed / 100));
+    /* Back to as it was, so the pointer goes where it's asked to again;
+     * Prefs still has 'speed', to save. */
+    ip = (struct InputPrefs){ was.ip_RepeatDelay, rate, INPUT_SPEED_DEFAULT, was.ip_PointerAccel };
+    CHECK(input_prefs(INPUT_SET, &ip) == 0);
+
+    /* The HUD on; then Save. */
+    CHECK(prefs_click(&ui, PW_HUD, -20, 13, &c) && c.uc_Value == 1 && hud_is(1, 2000));
+    CHECK(point_at(x0 - 20, y0 + 20));
+    nap(1200);                          /* the HUD's first reading */
+    KPrintF("window: send screendump workbench");
+    nap(300);
+    CHECK(prefs_click(&ui, PW_SAVE, 30, 13, &c));
+    CHECK(windows_are(3, 5000));
+    IUI->FreeUI(&ui);
+    CHECK(ReadPrefs(&wdos, "input", t, PREFS_TAGS + 1) == 4 && t[1].ti_Tag == PREFS_RepeatRate &&
+          t[1].ti_Data == rate && t[2].ti_Tag == PREFS_PointerSpeed && t[2].ti_Data == speed);
+    CHECK(ReadPrefs(&wdos, "intuition", t, PREFS_TAGS + 1) == 4 && t[0].ti_Tag == PREFS_Hud && t[0].ti_Data == 1);
+    KPrintF("window: Prefs: the repeat rate %lu and the pointer's speed %lu%% set by clicks, input agreeing and a "
+            "move of 10 moving it %ld; the HUD on, intuition agreeing; saved, and read back",
+            (uint64_t)rate, (uint64_t)speed, (int64_t)(10 * speed / 100));
+
+    /* As they were, for what's next; the files stay, for the second round. */
+    CHECK(input_prefs(INPUT_SET, &was) == 0);
+    np.ip_Hud = 0;
+    CHECK(IIntuition->SetPrefs(&in, &np) == 0);
+    CloseHandle((Handle)proc);
+    CHECK(windows_are(0, 5000));
+    CloseDos(&wdos);
+    IGfx->CloseTextFont(sans);
+    while (IIntuition->GetIntuiEvent(&in, &ev))
+        ;
+    return 0;
+}
+
+/* SURVIVE_MOUSE's: 6d's saved settings in force again after input's and
+ * intuition's deaths; then put back, and the files gone. */
+static int saved_back(void)
+{
+    struct TagItem t[PREFS_TAGS + 1];
+    struct InputPrefs ip = { INPUT_DELAY_DEFAULT, INPUT_RATE_DEFAULT, INPUT_SPEED_DEFAULT, INPUT_ACCEL_DEFAULT };
+    struct IntuiPrefs np = { 0, INTUI_POINTER_AUTO, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM };
+
+    CHECK(OpenDosUntil(&wdos, SIG_DOS, CurrentTime() + 5000 * MS) == 0);
+    CHECK(ReadPrefs(&wdos, "input", t, PREFS_TAGS + 1) == 4);
+    CHECK(t[2].ti_Data != INPUT_SPEED_DEFAULT);
+    CHECK(input_is((uint32_t)t[0].ti_Data, (uint32_t)t[1].ti_Data, (uint32_t)t[2].ti_Data, 5000));
+    CHECK(hud_is(1, 1000));
+    KPrintF("window: input and intuition killed: each took its saved settings at its start (the pointer's speed "
+            "%lu%%, the HUD on)", t[2].ti_Data);
+    CHECK(input_prefs(INPUT_SET, &ip) == 0 && IIntuition->SetPrefs(&in, &np) == 0);
+    CHECK(DeletePath(&wdos, "SYS:Prefs/Env-Archive/input.prefs") == 0 &&
+          DeletePath(&wdos, "SYS:Prefs/Env-Archive/intuition.prefs") == 0);
+    CloseDos(&wdos);
+    return 0;
+}
+
 /* 6, the other end: a window, then nothing ever again. */
 static int stopped(void)
 {
@@ -1893,6 +2212,8 @@ static int survive(bool mouse)
         for (until = CurrentTime() + 30000 * MS; info(m) == 0 && m->im_InputOpens == opens; nap(10))
             CHECK(CurrentTime() < until);
         CHECK(m->im_Input && ptr_x == px && ptr_y == py);
+        if (mouse && (r = saved_back()))
+            return r;
         /* The mouse is input's again once xhci has told it of it, a
          * little after: until then a move is lost, and asked for again. */
         for (until = CurrentTime() + 10000 * MS; mouse && !point_at(380, 280);)
@@ -1968,7 +2289,8 @@ int main(uint64_t arg)
     ends();
     if (input && input != NO_INPUT)
         return input;
-    if (!input && ((r = desktop_half(readable)) || (r = shell_half(readable)) || (r = ui_half(readable))))
+    if (!input && ((r = desktop_half(readable)) || (r = shell_half(readable)) || (r = ui_half(readable)) ||
+                   (r = workbench_half(readable))))
         return r;
     if ((r = kill_window(readable)))
         return r;

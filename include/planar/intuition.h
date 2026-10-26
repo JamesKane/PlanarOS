@@ -47,10 +47,17 @@
  * buffers of the new size with ChangeWindowBuffers. EasyRequest asks the
  * user something in a small window intuition draws and owns.
  *
+ * V8 step 7: intuition's settings (IntuiPrefs: the HUD, the pointer's
+ * size, the backdrop's colours), read and set by anyone with GetPrefs and
+ * SetPrefs, as Prefs does, each held to its range. Each window that asked
+ * for IDCMP_NEWPREFS hears when they change. intuition reads its saved
+ * ones at start (SYS:Prefs/Env-Archive/intuition.prefs, planar/prefs.h).
+ * A WFLG_BACKDROP window, the Workbench's, stays behind every other.
+ *
  * The client's side is intuition.library: IIntuition's OpenIntuition,
  * OpenWindowTagList, PresentWindow, WaitSafe, CloseWindow,
  * GetIntuiEvent and WaitIntuiEvent, SetMenuStrip, ChangeWindowBuffers
- * and EasyRequest, over the messages below. Its state is the caller's:
+ * EasyRequest, GetPrefs and SetPrefs, over the messages below. Its state is the caller's:
  * an Intuition for the connection, a Window for each window.
  */
 #ifndef PLANAR_INTUITION_H
@@ -90,7 +97,20 @@ enum : uint32_t {
     INTUI_MENUS = 6,    /* im_Window, and IntuiAck's ia_Strip: its menu strip (ms_Menus 0: none) */
     INTUI_REBUFFER = 7, /* im_Window, its new buffers in im_Buffers and im_Buffer, im_Width, im_Height */
     INTUI_REQUEST = 8,  /* im_Window (0: none), IntuiAck's ia_Request; answered once chosen: im_Index */
+    INTUI_GETPREFS = 9, /* im_Prefs out (V8 step 7) */
+    INTUI_SETPREFS = 10,    /* im_Prefs in; ERR_BADARG if a field's out of its range */
 };
+
+/* intuition's settings (V8 step 7). */
+struct IntuiPrefs {
+    uint32_t ip_Hud;                    /* 1: the Workbench shows its CPU and memory badge */
+    uint32_t ip_PointerSize;            /* INTUI_POINTER_* */
+    uint32_t ip_BackdropTop;            /* the Workbench's backdrop gradient, XRGB */
+    uint32_t ip_BackdropBottom;
+};
+
+enum : uint32_t { INTUI_POINTER_AUTO = 0, INTUI_POINTER_SMALL = 1, INTUI_POINTER_LARGE = 2 };
+constexpr uint32_t INTUI_BACKDROP_TOP = 0x182038, INTUI_BACKDROP_BOTTOM = 0x272248;  /* §13.2's */
 
 /* A buffer of a window: memory of the client's, shared with intuition
  * (its INTUI_INFO's im_Server) read-only before INTUI_OPEN. Its top
@@ -145,6 +165,7 @@ struct IntuiMsg {
     struct GfxRect im_MenuRect;         /* the open menu's panel */
     int32_t im_ItemY[16];               /* its first items' middles */
     struct GfxRect im_ReqButton[4];     /* the front requester's buttons, from the left */
+    struct IntuiPrefs im_Prefs;         /* INTUI_GETPREFS, INTUI_SETPREFS */
 };
 
 /* A window's sync words: a cache line of its connection's page. */
@@ -168,6 +189,7 @@ constexpr uint32_t IDCMP_MOUSEMOVE = 0x00000010;       /* the active window's: t
 constexpr uint32_t IDCMP_MENUPICK = 0x00000100;        /* iev_Code the item chosen (MENUNUM ...) */
 constexpr uint32_t IDCMP_CLOSEWINDOW = 0x00000200;     /* the close gadget was clicked */
 constexpr uint32_t IDCMP_RAWKEY = 0x00000400;          /* iev_Code a key's usage, | RAWKEY_UP */
+constexpr uint32_t IDCMP_NEWPREFS = 0x00004000;        /* intuition's settings changed: GetPrefs */
 constexpr uint32_t IDCMP_ACTIVEWINDOW = 0x00040000;
 constexpr uint32_t IDCMP_INACTIVEWINDOW = 0x00080000;
 constexpr uint32_t IDCMP_VANILLAKEY = 0x00200000;      /* iev_Code the character a key typed */
@@ -317,6 +339,7 @@ constexpr uint32_t WFLG_SIZEGADGET = 0x00000001;    /* resized by its bottom rig
 constexpr uint32_t WFLG_DRAGBAR = 0x00000002;       /* dragged by its title bar */
 constexpr uint32_t WFLG_DEPTHGADGET = 0x00000004;
 constexpr uint32_t WFLG_CLOSEGADGET = 0x00000008;
+constexpr uint32_t WFLG_BACKDROP = 0x00000100;       /* behind every other window, always (V8 step 7) */
 constexpr uint32_t WFLG_BORDERLESS = 0x00000800;    /* no chrome: its inside alone */
 constexpr uint32_t WFLG_ACTIVATE = 0x00001000;      /* the active window at its first frame */
 
@@ -366,6 +389,9 @@ struct IntuitionIFace {
     int64_t (*ClearMenuStrip)(struct Window *w);
     int64_t (*ChangeWindowBuffers)(struct Window *w, struct BitMap *bm, struct BitMap *back);
     int64_t (*EasyRequest)(struct Intuition *in, struct Window *w, const struct EasyStruct *es);
+    /* V8 step 7 */
+    int64_t (*GetPrefs)(struct Intuition *in, struct IntuiPrefs *prefs);
+    int64_t (*SetPrefs)(struct Intuition *in, const struct IntuiPrefs *prefs);
 };
 
 /* The tags as arguments: OpenWindowTags(IIntuition, &in, &w, { WA_Width, 320 }, ...). */
@@ -385,5 +411,7 @@ int64_t SetMenuStrip(struct Window *w, const struct NewMenu *menus);
 int64_t ClearMenuStrip(struct Window *w);
 int64_t ChangeWindowBuffers(struct Window *w, struct BitMap *bm, struct BitMap *back);
 int64_t EasyRequest(struct Intuition *in, struct Window *w, const struct EasyStruct *es);
+int64_t GetPrefs(struct Intuition *in, struct IntuiPrefs *prefs);
+int64_t SetPrefs(struct Intuition *in, const struct IntuiPrefs *prefs);
 
 #endif /* PLANAR_INTUITION_H */

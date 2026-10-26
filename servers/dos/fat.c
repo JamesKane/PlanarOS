@@ -730,6 +730,93 @@ static bool to_short(const char *name, unsigned len, uint8_t out[11], uint8_t *n
     return true;
 }
 
+/* A long name's: printable ASCII but what FAT forbids in one, no more
+ * than 255, not ending in a dot or a space. Characters past ASCII wait. */
+static bool long_ok(const char *name, unsigned len)
+{
+    if (len == 0 || len > 255 || name[len - 1] == '.' || name[len - 1] == ' ')
+        return false;
+    for (unsigned i = 0; i < len; i++) {
+        char c = name[i];
+
+        if ((unsigned char)c < 32 || (unsigned char)c > 126 || c == '"' || c == '*' || c == '/' || c == ':' ||
+            c == '<' || c == '>' || c == '?' || c == '\\' || c == '|')
+            return false;
+    }
+    return true;
+}
+
+/* A long name's short one, "BASIS~N.EXT": its first six characters
+ * that may be in one, upper case, and its last extension's three. */
+static void alias(const char *name, unsigned len, unsigned n, uint8_t out[11])
+{
+    static const char bad[] = " .\"*+,/:;<=>?[\\]|";
+    unsigned dot = len, b = 0, x = 0;
+    char tail[4];
+    unsigned t = 0;
+
+    for (unsigned i = 0; i < len; i++)
+        if (name[i] == '.')
+            dot = i;
+    fill(out, ' ', 11);
+    for (unsigned i = 0; i < dot && b < 6; i++) {
+        bool ok = true;
+
+        for (unsigned k = 0; bad[k]; k++)
+            ok &= name[i] != bad[k];
+        if (ok)
+            out[b++] = (uint8_t)upper(name[i]);
+    }
+    if (b == 0)
+        out[b++] = '_';
+    for (unsigned i = dot + 1; i < len && x < 3; i++) {
+        bool ok = true;
+
+        for (unsigned k = 0; bad[k]; k++)
+            ok &= name[i] != bad[k];
+        if (ok)
+            out[8 + x++] = (uint8_t)upper(name[i]);
+    }
+    do
+        tail[t++] = (char)('0' + n % 10);
+    while ((n /= 10) && t < 3);
+    if (b + 1 + t > 8)
+        b = 8 - 1 - t;
+    out[b++] = '~';
+    while (t)
+        out[b++] = (uint8_t)tail[--t];
+}
+
+/* Whether a short name is in the directory starting at cluster dc. */
+static int64_t short_taken(struct fat_vol *v, uint32_t dc, const uint8_t name[11], bool *taken)
+{
+    *taken = false;
+    for (uint32_t pos = 0; pos < 1u << 16; pos++) {
+        uint64_t s;
+        uint32_t off;
+        uint8_t *p;
+        int64_t e = entry_at(v, dc, pos, &s, &off);
+
+        if (e == ERR_NOTFOUND)
+            return 0;
+        if (e || (e = sector(v, s, &p)))
+            return e;
+        if (p[off] == 0x00)
+            return 0;
+        if (p[off] != 0xe5 && (p[off + 11] & 0x3f) != ATTR_LFN) {
+            bool same = true;
+
+            for (unsigned i = 0; i < 11; i++)
+                same &= p[off + i] == name[i];
+            if (same) {
+                *taken = true;
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
 /* The parent's node and the last part of 'path'. */
 static int64_t split(struct fat_vol *v, const char *path, struct fat_node *parent,
                      const char **leaf, unsigned *len)
@@ -760,8 +847,8 @@ int64_t fat_create(struct fat_vol *v, const char *path, bool dir, struct fat_nod
 {
     struct fat_node parent, other;
     const char *leaf;
-    unsigned len;
-    uint8_t name[11], nt;
+    unsigned len, lfn = 0, run = 0;
+    uint8_t name[11], nt = 0;
     uint32_t pc, pos;
     int64_t e;
 
@@ -769,13 +856,26 @@ int64_t fat_create(struct fat_vol *v, const char *path, bool dir, struct fat_nod
         return ERR_RIGHTS;
     if ((e = split(v, path, &parent, &leaf, &len)))
         return e;
-    if (!to_short(leaf, len, name, &nt))
-        return ERR_BADARG;
     if ((e = find(v, &parent, leaf, len, &other)) != ERR_NOTFOUND)
         return e ? e : ERR_EXISTS;
     pc = parent.first ? parent.first : v->root;
+    /* A name 8.3 can't hold is a long one (V8 step 7), with a short alias. */
+    if (!to_short(leaf, len, name, &nt)) {
+        bool taken = true;
 
-    /* A free entry, or a new cluster on the end of the directory. */
+        if (!long_ok(leaf, len))
+            return ERR_BADARG;
+        for (unsigned n = 1; taken && n < 1000; n++) {
+            alias(leaf, len, n, name);
+            if ((e = short_taken(v, pc, name, &taken)))
+                return e;
+        }
+        if (taken)
+            return ERR_EXISTS;
+        lfn = (len + 12) / 13;
+    }
+
+    /* lfn + 1 free entries in a row, or new clusters on the end of the directory. */
     for (pos = 0;; pos++) {
         uint64_t s;
         uint32_t off;
@@ -795,10 +895,36 @@ int64_t fat_create(struct fat_vol *v, const char *path, bool dir, struct fat_nod
         }
         if (e || (e = sector(v, s, &p)))
             return e;
-        if (p[off] == 0x00 || p[off] == 0xe5)
+        run = p[off] == 0x00 || p[off] == 0xe5 ? run + 1 : 0;
+        if (run == lfn + 1)
             break;
     }
-    *out = (struct fat_node){ .dir = dir, .date = DATE_2026, .entry_dir = pc, .entry_pos = pos };
+    /* The long name's entries, its last part first, then the short one. */
+    for (unsigned k = 0; k < lfn; k++) {
+        static const uint8_t at[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+        unsigned part = lfn - k;    /* 1 is the name's start */
+        uint64_t s;
+        uint32_t off;
+        uint8_t *p, *d;
+
+        if ((e = entry_at(v, pc, pos - lfn + k, &s, &off)) || (e = sector(v, s, &p)))
+            return e;
+        d = p + off;
+        fill(d, 0, 32);
+        d[0] = (uint8_t)(part | (k == 0 ? 0x40 : 0));
+        d[11] = ATTR_LFN;
+        d[13] = checksum(name);
+        for (unsigned i = 0; i < 13; i++) {
+            unsigned c = (part - 1) * 13 + i;
+            uint16_t ch = c < len ? (uint8_t)leaf[c] : c == len ? 0 : 0xffff;
+
+            put16(d + at[i], ch);
+        }
+        if ((e = store(v, s)))
+            return e;
+    }
+    *out = (struct fat_node){ .dir = dir, .date = DATE_2026, .entry_dir = pc, .entry_pos = pos,
+                              .lfn = (uint8_t)lfn };
     copy(out->name, leaf, len);
     out->name[len] = '\0';
     if (dir) {

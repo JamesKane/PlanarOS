@@ -46,6 +46,14 @@
  * no CloseWindow within the deadline, which asks whether to close it,
  * and on Close asks hwdb to end its client (HWDB_KILL_CLIENT).
  *
+ * V8 step 7: intuition's settings, GetPrefs and SetPrefs: the pointer's
+ * size, its own (two sprites, either shown), and the HUD and the
+ * backdrop's colours, the Workbench's, which each window asking for
+ * IDCMP_NEWPREFS is told have changed. The saved ones are read at start
+ * (intuition.prefs, planar/prefs.h): at once if dos is there, else by a
+ * task of its own once it is. A WFLG_BACKDROP window is kept behind the
+ * others, and a click doesn't raise it.
+ *
  * When a client goes, closed or dead, its windows go and intuition lets
  * go of their buffers' Areas. hwdb starts intuition when it's wanted
  * (decision 4): its test now, and in V8 the Workbench; then it keeps it,
@@ -65,6 +73,7 @@
 #include <planar/devices/input.h>
 #include <planar/drv.h>
 #include <planar/intuition.h>
+#include <planar/prefs.h>
 #include <planar/syscalls.h>
 
 #include "bar.h"
@@ -80,7 +89,7 @@ int memcmp(const void *a, const void *b, size_t n);
 
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_LATCH = 18, SIG_DISPLAY = 19;
 constexpr int64_t SIG_INPUT = 20, SIG_INPUT_PORT = 21, SIG_TIMER = 22;
-constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24, SIG_CALL = 25;
+constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24, SIG_CALL = 25, SIG_PREFS = 26;
 constexpr int64_t SIG_AWAIT = 16;               /* an awaiting task's own, for its connection */
 constexpr unsigned CONNS = 16;
 constexpr uint64_t MS = 1000000;
@@ -166,8 +175,8 @@ static struct {
     struct DisplayMsg *dm;
     const struct DisplaySync *ds;
     uint32_t width, height;
-    uint32_t buf[2], pointer;
-    struct BitMap sbm[2], pbm;
+    uint32_t buf[2], pointer[2];    /* the pointer's sprites: 1x and 2x */
+    struct BitMap sbm[2], pbm[2];
     unsigned back;
     int32_t px, py;
     bool flipping, pointer_moved;
@@ -220,7 +229,11 @@ static struct {
     uint64_t move_at, flip_move_at;     /* the oldest move not yet committed, and in the flip */
     uint64_t moves, move_nanos, move_max, read_max;
     uint64_t last_move, gaps[4];        /* input's ie_Time of the last move read, and the gaps since */
-} it;
+
+    /* V8 step 7: the settings. */
+    struct IntuiPrefs prefs;
+    bool prefs_set;                     /* by a client: the saved ones aren't taken */
+} it = { .prefs = { 0, INTUI_POINTER_AUTO, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM } };
 
 static void say(const char *s)
 {
@@ -363,12 +376,13 @@ static void screen_down(void)
     for (unsigned b = 0; b < 2; b++)
         if (it.sbm[b].bm_BaseAddr)
             ReleaseArea(it.sbm[b].bm_BaseAddr);
-    if (it.pbm.bm_BaseAddr)
-        ReleaseArea(it.pbm.bm_BaseAddr);
+    for (unsigned b = 0; b < 2; b++)
+        if (it.pbm[b].bm_BaseAddr)
+            ReleaseArea(it.pbm[b].bm_BaseAddr);
     if (it.ds)
         ReleaseArea(it.ds);
     ClosePort(&it.dp);
-    it.sbm[0] = it.sbm[1] = it.pbm = (struct BitMap){ 0 };
+    it.sbm[0] = it.sbm[1] = it.pbm[0] = it.pbm[1] = (struct BitMap){ 0 };
     it.ds = nullptr;
     it.dm = nullptr;
     it.flipping = false;
@@ -405,14 +419,16 @@ static int64_t screen_up(uint64_t deadline)
         if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, it.cached ? DISPLAYA_CACHED : 0, &it.buf[b],
                        &it.sbm[b])) != 0)
             return e;
-    uint32_t ps = pointer_scale(it.width, it.height);
+    /* Both sprites, 1x and 2x: the setting picks (V8 step 7). */
+    for (uint32_t ps = 1; ps <= 2; ps++) {
+        struct BitMap *pbm = &it.pbm[ps - 1];
 
-    if ((e = alloc(POINTER_SIZE * ps, POINTER_SIZE * ps, DISPLAY_ARGB8888, 0, &it.pointer, &it.pbm)) != 0)
-        return e;
-    for (uint32_t y = 0; y < POINTER_SIZE * ps; y++)
-        for (uint32_t x = 0; x < POINTER_SIZE * ps; x++)
-            ((uint32_t *)((uint8_t *)it.pbm.bm_BaseAddr + y * it.pbm.bm_BytesPerRow))[x] =
-                pointer_pixel(x / ps, y / ps);
+        if ((e = alloc(POINTER_SIZE * ps, POINTER_SIZE * ps, DISPLAY_ARGB8888, 0, &it.pointer[ps - 1], pbm)) != 0)
+            return e;
+        for (uint32_t y = 0; y < POINTER_SIZE * ps; y++)
+            for (uint32_t x = 0; x < POINTER_SIZE * ps; x++)
+                ((uint32_t *)((uint8_t *)pbm->bm_BaseAddr + y * pbm->bm_BytesPerRow))[x] = pointer_pixel(x / ps, y / ps);
+    }
     if (first) {
         it.px = (int32_t)it.width / 2;
         it.py = (int32_t)it.height / 2;
@@ -556,6 +572,14 @@ static void rearm(void)
     ArmTimer(t, SIG_TIMER);
 }
 
+/* The pointer's sprite, as the setting says: by the screen's size, or either. */
+static uint32_t sprite(void)
+{
+    uint32_t ps = it.prefs.ip_PointerSize ? it.prefs.ip_PointerSize : pointer_scale(it.width, it.height);
+
+    return it.pointer[ps - 1];
+}
+
 static void frame(void)
 {
     bool compose;
@@ -603,7 +627,7 @@ static void frame(void)
         taken();
         it.dm->dm_Set[n++] = (struct DisplayPlane){ 1, it.buf[it.back], 0, 0 };
     }
-    it.dm->dm_Set[n++] = (struct DisplayPlane){ 2, it.pointer, it.px, it.py };
+    it.dm->dm_Set[n++] = (struct DisplayPlane){ 2, sprite(), it.px, it.py };
     it.dm->dm_Count = n;
     if ((e = display(DISPLAY_COMMIT)) == ERR_PORT_DIED) {
         display_lost();
@@ -1045,7 +1069,8 @@ static int64_t present(unsigned c, const struct IntuiMsg *q)
     w->frame = q->im_Frame;
     layout(w);
     if (!w->shown) {
-        if (!(w->shown = ic_add(&it.screen, &w->icw))) {
+        if (!(w->shown = w->ch.flags & WFLG_BACKDROP ? ic_add_back(&it.screen, &w->icw)
+                                                      : ic_add(&it.screen, &w->icw))) {
             w->icw.nparts = 0;
             return ERR_FULL;
         }
@@ -1707,6 +1732,94 @@ static int64_t events(unsigned c, const struct IntuiMsg *q, struct IntuiMsg *m)
     return 0;
 }
 
+/* --- Settings (V8 step 7). --- */
+
+static bool prefs_ok(const struct IntuiPrefs *p)
+{
+    return p->ip_Hud <= 1 && p->ip_PointerSize <= INTUI_POINTER_LARGE && p->ip_BackdropTop <= 0xffffff &&
+           p->ip_BackdropBottom <= 0xffffff;
+}
+
+/* New settings in force: the pointer's sprite, and every window that
+ * asked told. */
+static void prefs_take(const struct IntuiPrefs *p)
+{
+    it.prefs = *p;
+    it.pointer_moved = true;
+    for (unsigned i = 0; i < IC_WINDOWS; i++)
+        if (it.win[i].used && !it.win[i].removed && it.win[i].idcmp & IDCMP_NEWPREFS)
+            post(&it.win[i], IDCMP_NEWPREFS, 0, 0, 0, CurrentTime());
+}
+
+/* The saved ones, each tag held to its range: true if there were any. */
+static bool prefs_read(struct Dos *dos, struct IntuiPrefs *p)
+{
+    struct TagItem t[PREFS_TAGS + 1];
+    int64_t n = ReadPrefs(dos, "intuition", t, PREFS_TAGS + 1);
+
+    for (int64_t i = 0; i < n; i++) {
+        struct IntuiPrefs q = *p;
+        uint32_t v = (uint32_t)t[i].ti_Data;
+
+        if (t[i].ti_Tag == PREFS_Hud)
+            q.ip_Hud = v;
+        else if (t[i].ti_Tag == PREFS_PointerSize)
+            q.ip_PointerSize = v;
+        else if (t[i].ti_Tag == PREFS_BackdropTop)
+            q.ip_BackdropTop = v;
+        else if (t[i].ti_Tag == PREFS_BackdropBottom)
+            q.ip_BackdropBottom = v;
+        if (prefs_ok(&q))
+            *p = q;
+    }
+    return n > 0;
+}
+
+static struct {
+    struct IntuiPrefs prefs;
+    volatile uint64_t done;             /* 2: read, to be taken */
+} saved;
+
+/* dos wasn't there at start: waited for by a task of its own. */
+static void loader(uint64_t)
+{
+    struct Dos dos;
+    struct IntuiPrefs p = it.prefs;
+    bool any = false;
+
+    if (OpenDosUntil(&dos, SIG_AWAIT, DEADLINE_NONE) == 0) {
+        any = prefs_read(&dos, &p);
+        CloseDos(&dos);
+    }
+    saved.prefs = p;
+    __atomic_store_n(&saved.done, any ? 2 : 1, __ATOMIC_RELEASE);
+    Signal(it.task, 1ULL << SIG_PREFS);
+}
+
+static void prefs_up(void)
+{
+    struct Dos dos;
+
+    if (OpenDosUntil(&dos, SIG_CALL, 0) == 0) {
+        if (prefs_read(&dos, &it.prefs))
+            say("intuition: the saved settings taken");
+        CloseDos(&dos);
+    } else if (CreateTask(loader, 0) < 0) {
+        say("intuition: no task to read the saved settings: the defaults kept");
+    }
+}
+
+static void prefs_loaded(void)
+{
+    if (__atomic_load_n(&saved.done, __ATOMIC_ACQUIRE) != 2)
+        return;
+    saved.done = 1;
+    if (it.prefs_set)
+        return;
+    prefs_take(&saved.prefs);
+    say("intuition: the saved settings taken");
+}
+
 /* INFO's places on the screen, for tests that click them. */
 static void places(struct IntuiMsg *m)
 {
@@ -1796,6 +1909,17 @@ static void message(unsigned c, struct IntuiMsg *m)
         break;
     case INTUI_REQUEST:
         e = requested(c, m, &q, &held);
+        break;
+    case INTUI_GETPREFS:
+        m->im_Prefs = it.prefs;
+        break;
+    case INTUI_SETPREFS:
+        if (!prefs_ok(&q.im_Prefs)) {
+            e = ERR_BADARG;
+            break;
+        }
+        it.prefs_set = true;
+        prefs_take(&q.im_Prefs);
         break;
     default:
         e = ERR_BADARG;
@@ -2107,7 +2231,7 @@ static void button(const struct InputEvent *ev)
     if (!w)
         return;
     part = chrome_hit(&w->ch, it.px - w->icw.x, it.py - w->icw.y);
-    if (part != CH_DEPTH && ic_front(&it.screen) != &w->icw)
+    if (part != CH_DEPTH && !(w->ch.flags & WFLG_BACKDROP) && ic_front(&it.screen) != &w->icw)
         ic_raise(&it.screen, &w->icw);
     if (part == CH_INSIDE) {
         it.button_to[b] = w;
@@ -2272,7 +2396,7 @@ static void costs(void)
         uint64_t seq;
 
         memset(it.dm, 0, sizeof *it.dm);
-        it.dm->dm_Set[0] = (struct DisplayPlane){ 2, it.pointer, it.px + (int32_t)i * 4, it.py };
+        it.dm->dm_Set[0] = (struct DisplayPlane){ 2, sprite(), it.px + (int32_t)i * 4, it.py };
         it.dm->dm_Count = 1;
         t = CurrentTime();
         if (display(DISPLAY_COMMIT) != 0) {
@@ -2314,6 +2438,7 @@ int main(uint64_t arg)
                            : "intuition: no screen from display");
         return 2;
     }
+    prefs_up();
     bar_up();
     input_up(CurrentTime() + 1000 * MS);
     if (arg & INTUITION_COSTS)
@@ -2332,7 +2457,9 @@ int main(uint64_t arg)
         sigs = WaitPorts(it.mp, it.nconns,
                          1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_LATCH | 1ULL << SIG_DISPLAY |
                              1ULL << SIG_INPUT | 1ULL << SIG_INPUT_PORT | 1ULL << SIG_TIMER |
-                             1ULL << SIG_DISPLAY_BACK | 1ULL << SIG_INPUT_BACK);
+                             1ULL << SIG_DISPLAY_BACK | 1ULL << SIG_INPUT_BACK | 1ULL << SIG_PREFS);
+        if (sigs & 1ULL << SIG_PREFS)
+            prefs_loaded();
         if (it.ds && PortGone(&it.dp))
             display_lost();
         else if (!it.ds && sigs & 1ULL << SIG_DISPLAY_BACK)

@@ -61,6 +61,7 @@ struct ic_screen {
     struct ic_window *z[IC_WINDOWS];    /* front first */
     unsigned nz;
     unsigned pinned;                /* z's first, kept in front */
+    unsigned backs;                 /* z's last, kept behind (V8 step 7: WFLG_BACKDROP) */
     struct ic_damage now;           /* since the last frame */
     struct ic_damage last;          /* the last frame's */
     uint64_t painted;               /* pixels written, ever */
@@ -77,17 +78,21 @@ void ic_damage_window(struct ic_screen *s, const struct ic_window *w, struct Gfx
 
 /* 'w' to the front, behind the pinned windows, or out: its rectangle
  * damaged. ic_add is false if the screen has IC_WINDOWS already. ic_pin
- * puts it in front of them all, pinned. */
+ * puts it in front of them all, pinned; ic_add_back behind them all,
+ * kept there, in front of those kept there before. */
 bool ic_add(struct ic_screen *s, struct ic_window *w);
 bool ic_pin(struct ic_screen *s, struct ic_window *w);
+bool ic_add_back(struct ic_screen *s, struct ic_window *w);
 void ic_remove(struct ic_screen *s, struct ic_window *w);
 
 /* 'w', on the screen and not pinned, to the front (behind the pinned) or
- * the back: its rectangle damaged. */
+ * the back (in front of those kept behind): its rectangle damaged. One
+ * kept behind moves among those alone. */
 void ic_raise(struct ic_screen *s, struct ic_window *w);
 void ic_lower(struct ic_screen *s, struct ic_window *w);
 
-/* The front and the back of the windows not pinned, or nullptr. */
+/* The front and the back of the windows neither pinned nor kept behind,
+ * or nullptr. */
 struct ic_window *ic_front(const struct ic_screen *s);
 struct ic_window *ic_back(const struct ic_screen *s);
 

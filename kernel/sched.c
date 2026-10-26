@@ -6,6 +6,7 @@
 #include "arch.h"
 #include "cpu.h"
 #include "kprintf.h"
+#include "ktime.h"
 #include "pmm.h"
 #include "process.h"
 #include "prof.h"
@@ -484,8 +485,12 @@ static bool steal(struct cpu *self)
 
     for (;;) {
         arch_irq_disable();
-        if (c->nr_ready == 0 && !steal(c) && !atomic_load(&c->need_resched))
+        if (c->nr_ready == 0 && !steal(c) && !atomic_load(&c->need_resched)) {
+            uint64_t t0 = time_now();
+
             arch_wait_for_interrupt();
+            atomic_fetch_add_explicit(&c->idle_ticks, time_now() - t0, memory_order_relaxed);
+        }
         arch_irq_enable();
         if (c->nr_ready)
             schedule();
@@ -813,6 +818,15 @@ uint64_t task_wait_until(uint64_t mask, uint64_t deadline_ns, struct cpu *kick)
     ktimer_stop(&self->sleep);
     task_set_signal(0, SIGF_SLEEP);
     return got & mask;
+}
+
+uint64_t sched_idle_ticks(void)
+{
+    uint64_t n = 0;
+
+    for (unsigned i = 0; i < ncpus; i++)
+        n += atomic_load_explicit(&cpus[i].idle_ticks, memory_order_relaxed);
+    return n;
 }
 
 uint64_t sched_switches(void)

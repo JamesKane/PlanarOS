@@ -195,16 +195,23 @@ static const struct pane *colours(struct UI *ui, uint32_t n)
 {
     uint32_t p = pane_of(ui, n);
 
-    return &panes[p && G(ui, p)->g_Pane == UIPANE_DARK ? 0 : 1];
+    return &panes[p && (G(ui, p)->g_Pane == UIPANE_DARK || G(ui, p)->g_Pane == UIPANE_BACKFILL) ? 0 : 1];
 }
 
 static void pane_fill(struct UI *ui, uint32_t p)
 {
     struct GfxRect r = p ? G(ui, p)->g_Rect
                          : (struct GfxRect){ 0, 0, (int32_t)ui->ui_Width - 1, (int32_t)ui->ui_Height - 1 };
-    const struct pane *c = &panes[p && G(ui, p)->g_Pane == UIPANE_DARK ? 0 : 1];
+    uint8_t kind = p ? G(ui, p)->g_Pane : ui->ui_Count && G(ui, 1)->g_Pane == UIPANE_BACKFILL ? UIPANE_BACKFILL
+                                                                                           : UIPANE_LIGHT;
+    const struct pane *c = &panes[kind == UIPANE_DARK ? 0 : 1];
     struct GfxGradient gg = { r, c->top, c->bottom, 0 };
 
+    if (kind == UIPANE_BACKFILL) {
+        if (ui->ui_Backfill)
+            ui->ui_Backfill(ui, r);
+        return;
+    }
     ui->ui_Gfx->FillGradient(ui->ui_RPort, &gg, nullptr, 0);
 }
 

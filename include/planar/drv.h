@@ -41,6 +41,7 @@ enum : uint32_t {
     HWDB_STOP = 6,          /* a started driver's: answered when it's to stop, by hm_Deadline */
     HWDB_KILL_CLIENT = 7,   /* intuition's: its client on hm_Conn isn't answering; end it (V8 step 4) */
     HWDB_NEW_SHELL = 8,     /* intuition's: the system menu's Shell; a console window started (V8 step 5) */
+    HWDB_NEW_PREFS = 9,     /* the Workbench's: Tools' Prefs started, unless it's running (V8 step 7) */
 };
 
 constexpr uint64_t DRV_STOP_MS = 1000;      /* a driver's time to stop, once asked */

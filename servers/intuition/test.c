@@ -13,7 +13,8 @@
  * reads the screen; the scalar entries, and on an Arm host NEON's too.
  * Some windows have chrome.c's chrome around them, as parts of their own,
  * in System Sans or the 8x8 font; some are resized, with a flat part
- * past their buffer; a pinned window stays in front of them all.
+ * past their buffer; a pinned window stays in front of them all, and one
+ * kept behind (WFLG_BACKDROP's, V8 step 7) behind them all.
  *
  * Then chrome.c alone: what's where on a window, and that drawing it
  * touches only its bitmaps; bar.c's screen bar, menus and requesters
@@ -148,7 +149,7 @@ static struct GfxIFace watched = { .InitBitMap = InitBitMap, .InitRastPort = Ini
 /* --- The windows, as a client keeps them. --- */
 
 struct win {
-    bool open, pinned, grown;
+    bool open, pinned, back, grown;
     struct ic_window icw;
     struct chrome ch;
     int32_t ix, iy;
@@ -219,7 +220,8 @@ static void open_win(struct ic_screen *s, struct win *v)
                                        &v->bm[0], 0, 0, 0 };
     chrome_parts(&v->ch, &v->top, &v->side, &v->icw);
     v->pinned = v == &wins[0];          /* the first: always in front, as the screen bar is */
-    v->open = v->pinned ? ic_pin(s, &v->icw) : ic_add(s, &v->icw);
+    v->back = v == &wins[WINDOWS - 1];  /* the last: always behind, as the Workbench's backdrop is */
+    v->open = v->pinned ? ic_pin(s, &v->icw) : v->back ? ic_add_back(s, &v->icw) : ic_add(s, &v->icw);
 }
 
 /* Made bigger, as a resize leaves a window until its client gives new
@@ -384,6 +386,8 @@ static int run(const char *name, const struct GfxIFace *g)
                     present(&s, v);
                 }
             }
+            if (wins[WINDOWS - 1].open && s.z[s.nz - 1] != &wins[WINDOWS - 1].icw)
+                fault = "a window in behind the one kept behind";
             if (ic_dirty(&s)) {
                 uint64_t was = s.painted, pending = ic_pending(&s);
 

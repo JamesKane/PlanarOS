@@ -196,6 +196,11 @@ struct SystemInfo {
     uint64_t si_Switches;           /* task switches */
     uint64_t si_Crossings;          /* of those, from one process's domain to another */
     uint64_t si_Quarantined;        /* DMA pages waiting for their device to stop */
+    /* V8 step 7, for the Workbench's HUD: */
+    uint64_t si_IdleNanos;          /* every CPU's time asleep with nothing to run, added up */
+    uint32_t si_CPUs;               /* online */
+    uint32_t si_Pad;
+    uint64_t si_Pages, si_FreePages;    /* memory's 4 KiB pages: all the kernel manages, and free */
 };
 
 int64_t QuerySystem(struct SystemInfo *info);

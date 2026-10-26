@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V8.6 done
+EXPECT := V8.7 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -139,7 +139,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test conwin-test ui-test font-oracle font-fuzz clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test conwin-test ui-test wb-test font-oracle font-fuzz clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -200,6 +200,7 @@ test-all:
 	@$(MAKE) --no-print-directory intuition-test
 	@$(MAKE) --no-print-directory conwin-test
 	@$(MAKE) --no-print-directory ui-test
+	@$(MAKE) --no-print-directory wb-test
 	@$(MAKE) --no-print-directory font-oracle
 	@$(MAKE) --no-print-directory font-fuzz
 
@@ -411,6 +412,23 @@ $(UI_TEST): $(GFX_SRCS) $(GFX_NEON) lib/ui/ui.c lib/ui/test.c lib/utility/tags.c
 
 ui-test: $(UI_TEST)
 	@$(UI_TEST)
+
+# The Workbench's and Prefs' drawing (servers/workbench/wb.h,
+# servers/prefs/prefswin.h) on the host with the sanitizers: the
+# backdrop and its icons, a volume's window, the HUD on the backdrop and
+# Prefs' window, scalar and NEON, against CRCs from pictures looked at once.
+WB_TEST := build/workbench/wb-test
+
+$(WB_TEST): $(GFX_SRCS) $(GFX_NEON) lib/ui/ui.c servers/workbench/test.c servers/workbench/wb.h \
+		servers/prefs/prefswin.h lib/utility/tags.c $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/utility/span.c \
+		lib/gfx/rows.h include/planar/gfx.h include/planar/ui.h include/planar/intuition.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/workbench) -Ilib/font $(if $(GFX_NEON),-DGFX_TEST_NEON) \
+	  $(GFX_SRCS) $(GFX_NEON) $(FONT_SRCS) lib/utility/span.c lib/utility/tags.c lib/ui/ui.c \
+	  servers/workbench/test.c -o $@
+
+wb-test: $(WB_TEST)
+	@$(WB_TEST)
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.

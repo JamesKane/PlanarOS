@@ -133,6 +133,14 @@ bool ic_pin(struct ic_screen *s, struct ic_window *w)
     return true;
 }
 
+bool ic_add_back(struct ic_screen *s, struct ic_window *w)
+{
+    if (!insert(s, w, s->nz - s->backs))
+        return false;
+    s->backs++;
+    return true;
+}
+
 void ic_remove(struct ic_screen *s, struct ic_window *w)
 {
     for (unsigned i = 0; i < s->nz; i++)
@@ -140,44 +148,60 @@ void ic_remove(struct ic_screen *s, struct ic_window *w)
             damage_whole(s, w);
             if (i < s->pinned)
                 s->pinned--;
+            else if (i >= s->nz - s->backs)
+                s->backs--;
             for (s->nz--; i < s->nz; i++)
                 s->z[i] = s->z[i + 1];
             return;
         }
 }
 
+/* Where 'w' may go: [*lo, *hi), the band of z it's in. */
+static bool band(const struct ic_screen *s, const struct ic_window *w, unsigned *i, unsigned *lo, unsigned *hi)
+{
+    for (*i = s->pinned; *i < s->nz; (*i)++)
+        if (s->z[*i] == w) {
+            bool back = *i >= s->nz - s->backs;
+
+            *lo = back ? s->nz - s->backs : s->pinned;
+            *hi = back ? s->nz : s->nz - s->backs;
+            return true;
+        }
+    return false;
+}
+
 void ic_raise(struct ic_screen *s, struct ic_window *w)
 {
-    for (unsigned i = s->pinned; i < s->nz; i++)
-        if (s->z[i] == w) {
-            for (; i > s->pinned; i--)
-                s->z[i] = s->z[i - 1];
-            s->z[s->pinned] = w;
-            damage_whole(s, w);
-            return;
-        }
+    unsigned i, lo, hi;
+
+    if (!band(s, w, &i, &lo, &hi))
+        return;
+    for (; i > lo; i--)
+        s->z[i] = s->z[i - 1];
+    s->z[lo] = w;
+    damage_whole(s, w);
 }
 
 void ic_lower(struct ic_screen *s, struct ic_window *w)
 {
-    for (unsigned i = s->pinned; i < s->nz; i++)
-        if (s->z[i] == w) {
-            for (; i + 1 < s->nz; i++)
-                s->z[i] = s->z[i + 1];
-            s->z[s->nz - 1] = w;
-            damage_whole(s, w);
-            return;
-        }
+    unsigned i, lo, hi;
+
+    if (!band(s, w, &i, &lo, &hi))
+        return;
+    for (; i + 1 < hi; i++)
+        s->z[i] = s->z[i + 1];
+    s->z[hi - 1] = w;
+    damage_whole(s, w);
 }
 
 struct ic_window *ic_front(const struct ic_screen *s)
 {
-    return s->nz > s->pinned ? s->z[s->pinned] : nullptr;
+    return s->nz > s->pinned + s->backs ? s->z[s->pinned] : nullptr;
 }
 
 struct ic_window *ic_back(const struct ic_screen *s)
 {
-    return s->nz > s->pinned ? s->z[s->nz - 1] : nullptr;
+    return s->nz > s->pinned + s->backs ? s->z[s->nz - 1 - s->backs] : nullptr;
 }
 
 struct ic_window *ic_at(const struct ic_screen *s, int32_t x, int32_t y)

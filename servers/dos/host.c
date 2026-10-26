@@ -94,10 +94,26 @@ static void test(struct fat_vol *v)
     CHECK(fat_truncate(v, &f, 5000) == 0 && f.size == 5000);
     CHECK(fat_read(v, &f, 0, back, sizeof back) == 5000 && memcmp(big, back, 5000) == 0);
 
-    /* Names: mixed case needs a long name, which isn't made yet. */
-    CHECK(fat_create(v, "EFI/planar/Mixed.txt", false, &f) == ERR_BADARG);
-    CHECK(fat_create(v, "EFI/planar/toolongname.txt", false, &f) == ERR_BADARG);
+    /* Names: mixed case or too long for 8.3 is a long name, with a short
+     * alias (V8 step 7), found again by it in any case. */
+    CHECK(fat_create(v, "EFI/planar/Mixed.txt", false, &f) == 0 && f.lfn == 1);
+    CHECK(fat_create(v, "EFI/planar/mixed.TXT", false, &f) == ERR_EXISTS);
+    CHECK(fat_create(v, "EFI/planar/toolongname.txt", false, &f) == 0 && f.lfn == 2);
+    CHECK(fat_create(v, "EFI/planar/toolongname.text", false, &f) == 0);
+    CHECK(fat_lookup(v, "EFI/planar/TOOLONGNAME.TEXT", &f) == 0 && strcmp(f.name, "toolongname.text") == 0);
+    CHECK(fat_create(v, "EFI/planar/Env-Archive", true, &n) == 0 && n.dir);
+    CHECK(fat_create(v, "EFI/planar/env-archive/input.prefs", false, &f) == 0);
+    CHECK(fat_write(v, &f, 0, "prefs", 5) == 5);
+    CHECK(fat_lookup(v, "EFI/planar/Env-Archive/Input.Prefs", &f) == 0 && f.size == 5 &&
+          strcmp(f.name, "input.prefs") == 0);
+    CHECK(fat_create(v, "EFI/planar/bad?.txt", false, &f) == ERR_BADARG);
+    CHECK(fat_create(v, "EFI/planar/a b.", false, &f) == ERR_BADARG);
     CHECK(fat_create(v, "EFI/nodir/x", false, &f) == ERR_NOTFOUND);
+    CHECK(fat_remove(v, "EFI/planar/Mixed.txt") == 0 && fat_lookup(v, "EFI/planar/mixed.txt", &f) == ERR_NOTFOUND);
+    CHECK(fat_remove(v, "EFI/planar/toolongname.txt") == 0);
+    CHECK(fat_remove(v, "EFI/planar/toolongname.text") == 0);
+    CHECK(fat_remove(v, "EFI/planar/Env-Archive/input.prefs") == 0);
+    CHECK(fat_remove(v, "EFI/planar/Env-Archive") == 0);
 
     /* Removing: a full directory refuses; then it all goes. */
     CHECK(fat_remove(v, "EFI/planar/many") == ERR_EXISTS);
@@ -115,6 +131,8 @@ static void test(struct fat_vol *v)
     CHECK(fat_create(v, "EFI/planar/made", true, &n) == 0);
     CHECK(fat_create(v, "EFI/planar/made/note.txt", false, &f) == 0);
     CHECK(fat_write(v, &f, 0, "written by fat.c\n", 17) == 17);
+    CHECK(fat_create(v, "EFI/planar/made/A Long Name.prefs", false, &f) == 0);
+    CHECK(fat_write(v, &f, 0, "long\n", 5) == 5);
     printf("fat-host: %d checks failed; %u clusters free\n", failures, fat_free(v));
 }
 
