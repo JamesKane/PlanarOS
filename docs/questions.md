@@ -203,11 +203,15 @@ Store icons in `.info` sidecar files (works on FAT32 and the native filesystem a
 
 Raised in §13.4 and §13.7.
 
+**Decided for V8 (2026-10-26):** neither yet. The Workbench draws the system icons as gfx paths in code; `.info` files come after V8 ([v8-plan](v8-plan.md) decision 3).
+
 **VQ33 Window translucency (`Shell` backdrop blur).**
 
 How should `intuition` implement the translucent `Shell` background before GPU composition is up on every board? *Leaning:* sample from a pre-blurred copy of the static procedural backdrop on CPU composition; optional GPU blur when `intuition` holds a queue lease.
 
 Raised in §13.5 and §13.7.
+
+**Decided for V8 (2026-10-26):** no translucency; the Shell's background is solid ([v8-plan](v8-plan.md) decision 11).
 
 **VQ34 Base system font files (`System Sans` and `System Mono`).**
 
@@ -215,11 +219,15 @@ Which permissive open-source `.ttf`/`.otf` fonts should ship in the image via `#
 
 Raised in §14.7.
 
+**Decided (2026-10-26):** Inter for `System Sans` and JetBrains Mono for `System Mono`, OFL-1.1, static TrueType instances subset for the image ([v8-plan](v8-plan.md) decision 2).
+
 **VQ35 Horizontal subpixel positioning (`1/4 px` bins) vs. whole-pixel glyph placement.**
 
 Should `font.library` cache `4×` horizontal subpixel phases (`0.0`, `0.25`, `0.5`, `0.75 px`) at small UI sizes (`12–16 px`), or snap glyph origins to integer pixels? *Leaning:* `4×` horizontal subpixel bins for `System Sans` at `12–16 px`; integer origins for `System Mono` and sizes $\ge 18\text{ px}$.
 
 Raised in §14.7.
+
+**Decided (2026-10-26):** as it leaned ([v8-plan](v8-plan.md) step 3).
 
 **VQ38 Compressed / tiled framebuffer modifiers (`MOD_AFBC_16x16`, `MOD_UBWC`) vs. linear-only surfaces in the Workbench (V7–V8).**
 

@@ -1,0 +1,149 @@
+# V8 plan: Workbench II, type and the desktop
+
+**Status: in progress (2026-10-26); decisions 1 to 11 taken as they leaned, decision 5 with the user's direction for later.** Scoped from the [roadmap's V8 row](08-roadmap.md) and its decision on §14.7, §13.2 to §13.5 (the design language, the screen bar, the chrome, `ui.library`, the core programs), §14 (`font.library`), and what V7 deferred to V8 (its decisions 3, 4 and 6). The decisions at the end are taken.
+
+**Goal (§8):** proportional type everywhere text is drawn, from a font engine Planar wrote, checked on the host against FreeType and HarfBuzz. On it, the desktop on both boards: the screen bar and its menus, `ui.library`'s gadgets, the Workbench with the volumes as icons, Prefs, and the Shell in a window. The console Shell stays on the serial line.
+
+**What's already built.**
+- **gfx.library** (V7 step 2): `BitMap` over Areas, `RastPort`, `RectFill`, `BltBitMap` (`SRC`, `SRC_OVER`), bevels, and `Text` in the 8×8 font (`lib/gfx/font8x8.c`). Scalar and SIMD (RVV, NEON) through the table, bit-exact with each other. Shared library in `libs/gfx`.
+- **intuition** (V7 steps 3 to 5): one screen composed on the CPU into plane 1, the pointer on plane 2. Client-owned window buffers, `PresentWindow` with `is_Disp` and `is_Safe`, damage. The chrome: title bar, close and depth gadgets, drag by the title. Focus, IDCMP events on a ring per connection (`MOUSEBUTTONS`, `MOUSEMOVE`, `CLOSEWINDOW`, `RAWKEY`, `VANILLAKEY`, `ACTIVEWINDOW`, `INACTIVEWINDOW`). Supervision: `kill-window`, and intuition, display and input each killed under a client. A frame no client waits for is put off to just before the vblank; the screen buffers' memory is per board (decision 3).
+- **intuition starts on demand** (V7 decision 4): the boards boot to the console Shell, which holds input's ring.
+- **dos** reads and writes FAT32, with `ReadArgs` and the volumes `SYS:` and the rest. The Shell (`cmd/shell.c`) writes to `con.0` through `lib/dos/con.c`, and reads keys from the serial console and input's ring.
+- **On the host**: FreeType 26.6 and HarfBuzz 14.6 (Homebrew, `pkg-config`), and fontTools 4.62 for subsetting.
+
+**Not built, and needed here:**
+- Any font engine, any font file, and any text but 8×8.
+- Paths, gradients, and blending a coverage mask: gfx.library draws rectangles and bitmaps alone.
+- Menus, the screen bar, requesters, a resizable window, and settings on any server: input's repeat and pointer speed are constants, and neither display nor power has anything a user would set.
+- A console that isn't `con.0`: the Shell can't run in a window.
+- A program that's a desktop: nothing lists volumes on the screen.
+
+**Exit (§8):**
+- `font.library` passes §14.5's oracle (passes 1 to 4) on the host against FreeType and HarfBuzz, over the corpus of decision 2's fonts, and its fuzzer (pass 5) under ASan and UBSan, with no finding in an hour's run.
+- Text is drawn in `System Sans` and `System Mono` by gfx.library, bit-exact on scalar, RVV and NEON, and blended in linear light (§14.3.4).
+- The desktop on both boards: the screen bar with its menus and clock; the Workbench with `dos`'s volumes as icons, a volume opened to a window of its files; Prefs changing input and intuition live, and saving to `SYS:Prefs/Env-Archive/` (decision 5); the Shell in a window, on the USB keyboard, its commands' output in `System Mono`.
+- A window resized by its corner, and its client told.
+- The kill test passes 10 runs in a row on each board, with the desktop's programs killed under it (step 8).
+- The manuals are current (roadmap rule): *Libraries* chapters on `font.library`, `ui.library` and the Workbench; `font.md` and `ui.md` in the autodocs; gfx, intuition, input and the Shell's chapters for what changed.
+
+Each step ends with `make test-all` green and a `V8.n done` line in the transcript.
+
+| Step | Content |
+|---|---|
+| **1. font.library I: outlines and coverage** | The fonts chosen, subset and embedded; SFNT, `head`, `maxp`, `cmap`, `hhea`/`hmtx`, `OS/2`, `post`, `name`, `loca`/`glyf`; the coverage rasteriser; oracle passes 1, 3 and 4; the fuzzer |
+| **2. font.library II: shaping** | UTF-8, `GDEF`, `GSUB` (`liga`, `tnum`, `pnum`), `GPOS` pair kerning and `kern` format 0, line measuring and breaking; oracle pass 2; the fuzzer over the layout tables |
+| **3. gfx.library II: type and paths** | Coverage masks blended in linear light; glyph runs and a glyph cache; filled paths and gradients on the same rasteriser; SIMD through the table; `libs/font` |
+| **4. intuition III: the screen bar, menus and requesters** | The chrome and titles in `System Sans`; the screen bar and clock; menu strips and `IDCMP_MENUPICK`; resizing and `IDCMP_NEWSIZE`; `EasyRequest`; intuition the boards' default, the keyboard its |
+| **5. The Shell in a window** | A console window serving the console protocol in `System Mono`, with scrollback; the Shell started in one from the screen bar |
+| **6. ui.library** | §13.3's six gadgets, retained, in the caller's domain; layout; events from IDCMP |
+| **7. The Workbench and Prefs** | The backdrop; volumes as icons; a volume's window; Prefs on `ui.library`, with settings ops on input and intuition, saved and loaded at start |
+| **8. Supervision and the boards** | The kill test's desktop phase; costs of text and of a frame with text on both boards; 10 runs in a row on each, transcripts kept |
+
+Steps 1 and 2 are host work, and need nothing else. Step 3 needs 1. Step 4 needs 3. Steps 5 and 6 need 4 and are independent of each other. Step 7 needs 6. Step 8 needs all of them, and both boards, one at a time. Nothing before step 8 needs a board.
+
+**Size.** By §14.7's estimate, `font.library` is 4,000 to 6,000 lines written from the specification (decision 1), and about 1,900 on a base. The rest is perhaps 7,000: gfx's paths and runs 1,500, intuition's additions 2,000, the console window 800, `ui.library` 1,500, the Workbench and Prefs 1,500. That's larger than V7. If it runs long, step 5's end is a place to stop: type everywhere and the Shell in a window, the Workbench left for a V8.5 (decision 10).
+
+## 1. font.library I: outlines and coverage
+
+`lib/font`, compiled into `libs/font` as V6 step 4's shared libraries are, and into the host oracle unchanged.
+
+- **The fonts** (decision 2): `System Sans` and `System Mono`, static TrueType instances, subset with fontTools to §14.3.1's repertoire (Basic Latin, Latin-1, general punctuation, the euro and trademark, box drawing and blocks, U+FFFD), keeping `GSUB`, `GPOS`, `GDEF` and `kern`, and dropping hinting (`fpgm`, `prep`, `cvt `, `gasp`) and variations. The subset files are built by `tools/font-subset.py` from the originals, which sit in `tools/font-oracle/corpus/` with their licences. The subsets are embedded in the library's image with `#embed`, as read-only data, so every process maps them once (§14.1's zero copy, without a file to load).
+- **Reading tables in place** through V6's checked big-endian readers (`utility.library`'s `Span`). Every offset, length, index and recursion depth is checked before use; anything wrong is `ERR_BADFONT` (§14.1.3). A table the engine doesn't use is never read.
+- **Tables:** the SFNT directory (`0x00010000` and `true`; `OTTO` and collections `ERR_UNSUPPORTED`, decision 1), `head`, `maxp`, `cmap` (formats 4 and 12, in §14.3.2's order of preference), `hhea` and `hmtx`, `OS/2`, `post`, `name`, `loca` and `glyf` (simple and composite, composites 16 deep at most).
+- **The rasteriser:** quadratic curves flattened to 0.125 px, exact signed area coverage per pixel, non-zero winding, A8 out. In fixed point (26.6 coordinates, 16.16 areas), so the host, RVV and NEON agree to the bit, and the oracle's tolerance is spent on FreeType's rounding, not ours. Its accumulation sweep is scalar here and SIMD in step 3, where gfx.library's table chooses it. Where the rasteriser lives is decision 6.
+- **The API** is §14.6's, in the tree's style: an interface table `IFont`, named in RKM's manner where an Amiga name fits (`OpenFont` over an Area, `CloseFont`, `FontExtent`), with §14.6's structures. Sizes are 26.6 fixed point, not `float`. It's settled in this step and written down in the autodoc as it's built.
+- **The oracle** (`tools/font-oracle/`, `make font-oracle`): a host program linking `lib/font` with the host's FreeType and HarfBuzz, never Planar's images. Passes 1 (metrics, exact), 3 (outlines, exact in font units) and 4 (A8 at 12, 13, 16, 24 and 48 px: boxes within 1 px; every pixel within 2/255, 99.8% within 1/255), over the corpus's every printable glyph.
+- **The fuzzer** (`tools/font-fuzz/`, `make font-fuzz`): mutations of table offsets, `cmap` segments, composite indices (cycles included) and `loca`, under ASan and UBSan. Every input ends in `FONT_OK`, `ERR_BADFONT` or `ERR_UNSUPPORTED`, in bounded time. libFuzzer if the host's clang has it, a seeded mutator of our own otherwise.
+
+**Tested by:** `make font-oracle` and a short `make font-fuzz` in `make test-all`'s host tests; the long fuzz run by hand before the exit. On QEMU, `fonttest` opens both embedded fonts through `IFont` from two processes and rasterises a glyph, checking its A8's CRC-32 against the host's: `V8.1 font ok`.
+
+## 2. font.library II: shaping
+
+- **`ShapeRun`** (§14.3.3): UTF-8 decoded with U+FFFD for bad sequences; codepoints outside Latin set `FONT_WARN_STUB_SHAPER` and map 1:1 (§14.4's stub); `cmap`; `GSUB` with `latn` and `DFLT`, `ENG ` and `dflt`, lookup types 1 (`tnum`, `pnum`), 4 (`liga`) and 7; advances from `hmtx`; `GPOS` lookup types 2 (pair formats 1 and 2) and 9, or `kern` format 0 where `GPOS` has no `kern`; `GDEF`'s classes for `IgnoreMarks`. Allocation-free, into the caller's `GlyphRun`.
+- **Lines:** a run's width, and breaking at spaces, tabs, newlines, hyphens and soft hyphens (§14.3.3 stage 5), line height from `OS/2` or `hhea` as `USE_TYPO_METRICS` says.
+- **§14.4's stubs** in `lib/font/stubs.c`, each a typed hook that does the fallback and sets its warning.
+- **Oracle pass 2** against `hb_shape` with matching features: §14.5's torture strings, ligatures, the HUD's punctuation, `tnum` on and off. Glyph IDs exact; positions within 1 font unit.
+- **The fuzzer** gains `GSUB`, `GPOS`, `GDEF` and `kern` mutations: class matrices, coverage tables, extension offsets pointing at themselves.
+
+**Tested by:** the oracle and fuzzer as in step 1. `V8.2 shaping ok` from `fonttest` shaping the torture string on QEMU, against the host's positions.
+
+## 3. gfx.library II: type and paths
+
+- **Masks:** `BltMask` blends an A8 coverage mask in a pen's colour, in linear light through a 256-entry sRGB-to-linear table and a 4,096-entry return (§14.3.4), so light text on slate and dark text on silver keep one weight. Scalar and SIMD, bit-exact.
+- **Glyph runs:** `TextRun` draws a shaped `GlyphRun` at a baseline, through a per-process glyph cache keyed by font, size, glyph and subpixel phase (decision 4 and VQ35's 4 phases for `System Sans` at 12 to 16 px, whole pixels otherwise). `TextAttr` and `SetFont` select a face and size into a `RastPort`, as the RKM has it; the 8×8 `Text` stays, as the console's and as a fallback.
+- **Paths:** `FillPath` (lines, quadratics, cubics; non-zero or even-odd) into a `RastPort` in a pen, with anti-aliased edges; `FillGradient`, a vertical or horizontal two-stop gradient over a rectangle or path, for the bars, the backdrop and the gadgets (§13.2's every `→`). Rounded rectangles as a path helper.
+- **The sweep** of the rasteriser goes SIMD through gfx's table (VQ22's way), and font.library's `RasterizeGlyph` gets it from there (decision 6).
+- **`libs/font`** on both ISAs, reached as `IFont`. gfx.library opens it when a `RastPort` is given a font, so a program that draws no text doesn't map it.
+
+**Tested by:** `make gfx-test` grows masks, runs and paths, scalar against RVV and NEON, bit-exact, and against a float reference within 1/255. On QEMU, `gfxtest` draws a line of `System Sans`, a gradient and a filled path into a window and reads the screen back (`DISPLAY_READ`) against the host's CRC: `V8.3 type ok`.
+
+## 4. intuition III: the screen bar, menus and requesters
+
+- **Titles and chrome in `System Sans`**, 13 px, bold for the active title (§13.2's typography). The chrome is drawn in gfx's gradients and bevels to §13.3's sizes; the 8×8 chrome goes.
+- **The screen bar** (§13.3): the top 28 px, intuition's. The Planar mark (a path), **PlanarOS**, the active window's menu strip, and at the right the clock (the time of day from the RTC's driver, redrawn each minute). Windows can't be dragged under it.
+- **Menus.** A client gives its window a menu strip (`SetMenuStrip`, the RKM's name: menus of items, each a label, an optional key and a flag or two, sent to intuition and kept there). The right button, or a click on a title in the bar, opens it; intuition draws and tracks it on its own, as it does the chrome, so a hung client's menus still open. A choice is `IDCMP_MENUPICK` with the menu and item. The system menu (the mark): About, and Shell (step 5). Reboot and Shutdown wait for power to have them.
+- **Resizing.** A size gadget in the bottom right corner (`WFLG_SIZEGADGET`). intuition drags an outline (one plane-1 frame each), and at the release sends `IDCMP_NEWSIZE`. The client allocates buffers of the new size and gives them with `ChangeWindowBuffers`, presenting the first frame in them; until then intuition shows the old buffer clipped, or the backdrop beyond it. Limits with `WA_MinWidth` and the like. Border scrollers, iconify and zoom stay out (§13.3 has them; decision 9).
+- **Requesters.** `EasyRequest` (the RKM's): a small window intuition draws and owns, with a title, a body and up to three buttons, answered with the one chosen. intuition's own use is V7 decision 6's: a window that isn't closed within the deadline after its close gadget asks *"Program not answering. Close it?"*, and on *Close* asks hwdb to kill the process, through a new request on its connection (hwdb has the right, and says so in the log).
+- **The keyboard and the default boot** (V7 decision 4's other half): on the boards, hwdb starts intuition at boot (`intuition` on the command line becomes the default, `nointuition` the way back). intuition holds input's ring; the console Shell reads only the serial line.
+
+**Tested by:** `window.c` grows a menu strip (opened, chosen, read back by CRC on QEMU), a resize (the new size reported, the old buffers released by `kill-window`'s counts), and `EasyRequest` answered by clicks injected through QMP, as V7's tests inject them. `V8.4 screen bar ok`, `V8.4 menus ok`, `V8.4 resize ok`.
+
+## 5. The Shell in a window
+
+- **The console window** (`servers/conwin`, decision 7): a process that opens a window and serves the console protocol `con.0` serves (`DrvRequest`'s `DRV_READ` and `DRV_WRITE`), on a port of its own name (`con.<n>`). It draws in `System Mono` 13 px on `pane.terminal.bg`, the prompt colour by an escape sequence the Shell writes, a block cursor, and scrollback (a ring of lines, scrolled by keys until there are scrollers: decision 9). Keys come as `IDCMP_VANILLAKEY` and `RAWKEY`. A resize reflows nothing: lines are cut at the width, as a terminal does.
+- **The Shell** takes its console's name from its arguments (`Shell CON con.1`) and otherwise uses `con.0`, as now. `lib/dos/con.c` gets the name. The system menu's *Shell* starts a `conwin`, which starts a Shell on its port.
+- **When either dies:** a Shell's death closes its window; a `conwin`'s death gives the Shell `ERR_PORT_DIED` and it ends (no one's typing at it). Neither touches intuition.
+
+**Tested by:** a script run by a Shell in a window on QEMU, its output read back by CRC; `conwin` killed under it, and the window gone at the next latch. `V8.5 shell window ok`.
+
+## 6. ui.library
+
+`lib/ui`, as `libs/ui`, `IUI`: a retained gadget toolkit in the caller's domain (§13.1), drawn with gfx.library into the caller's window and driven by its IDCMP events. No shared state with intuition: a gadget is the client's pixels.
+
+- **§13.3's six:** `UI_SplitPane`, `UI_Divider`, `UI_Toggle` (its three variants), `UI_Slider`, `UI_Segmented`, and `UI_HudBadge`. Plus what Prefs and the Workbench need and the six don't name: a push button, a label, a list (for a drawer's files), and a text field (decision 8).
+- **Layout:** rows and columns with spacing and alignment, from §13.2's sizes, so a window's gadgets reflow at `IDCMP_NEWSIZE`.
+- **Events:** `HandleUIEvent` takes an `IntuiEvent` and says which gadget changed and its value; it redraws what changed and returns the damage, for `PresentWindow`.
+- **Themes:** §13.2's tokens as one table, light and dark panes.
+
+**Tested by:** a host test drawing each gadget in each state into bitmaps, against references kept as CRCs (each reviewed once by eye, from a PNG the test writes), and driving them with synthetic events. `uitest` on QEMU: a window of every gadget, clicked through. `V8.6 ui ok`.
+
+## 7. The Workbench and Prefs
+
+- **The Workbench** (`cmd/workbench`, started by intuition at boot on the boards, kept by hwdb as intuition is; decision 5's supervision): a borderless window at the back covering the screen below the bar.
+  - The backdrop: §13.2's gradient and planes, as paths. Drawn once, at the screen's size.
+  - The volumes `dos` lists (`RAM:`, `SYS:`, the rest), as icons in a column on the left, with labels (§13.5). An icon's drawing is decision 3's.
+  - Selecting (one click) and opening (two): a volume opens to a window of its files, a `ui.library` list, from which a drawer opens another and a program in `C:` is started with no arguments. Copy, rename, delete and the trash wait.
+  - Its menus: Workbench (About, Execute Command…, Quit), Window (Open Parent, Close), Tools (Shell, Prefs). Execute Command takes a line in a text field and runs it as the Shell would.
+  - The `UI_HudBadge`, CPU and memory at 1 Hz from `QuerySystem`, if Prefs turns it on.
+- **Prefs** (`cmd/prefs`): one window, `UI_SplitPane`, of what decision 5 settles. Each change goes to its server at once. *Save* writes `SYS:Prefs/Env-Archive/<server>.prefs` (a small tagged binary, `TagItem`s, versioned); each server reads its own at start and after a restart, so a setting survives a server's death.
+- **Settings ops** on the servers decision 5 names: `INPUT_SET` and `INPUT_GET` (key repeat delay and rate, pointer speed and acceleration), `INTUI_SET` (the HUD, the pointer's size, the backdrop's colours), each checked and bounded by its server.
+
+**Tested by:** `workbench` on QEMU showing `dos`'s volumes, read back by CRC; a volume opened by injected double-click and its window's list checked against `List`; Prefs changing the repeat rate and the pointer's speed through injected events, and input's `INPUT_GET` agreeing; *Save*, input killed, and the setting back after its restart. `V8.7 workbench ok`, `V8.7 prefs ok`.
+
+## 8. Supervision and the boards
+
+- **The kill test's `T_DESKTOP` phase:** the Workbench, Prefs, a `conwin` and its Shell, and intuition, each killed with the desktop up. The Workbench comes back with its icons; Prefs' saved settings are in force after input's and intuition's restarts; the screen never goes dark.
+- **Costs on both boards:** a 13 px glyph rasterised and cached; a line of 80 characters drawn from the cache; a full screen of the Shell's text; a frame of the Workbench with a window dragged over it. Against V7's frame budget: a drag over the desktop still misses no vblank on the CIX, and the RV2's misses are counted.
+- **The boards' desktop by hand:** the volumes on both (the CIX's NVMe, the RV2's SD), Prefs changing the repeat rate with a hand on the keyboard, the Shell in a window running `List`.
+- **10 runs in a row** on each board, transcripts to `docs/boards/<board>/v8-kill-test/`.
+
+## Sources
+
+- §13 (the Workbench), §14 (the font engine), §16.3 (presentation), the roadmap's replan after V5.
+- ISO/IEC 14496-22:2019 and the OpenType specification 1.9.1; Apple's TrueType Reference Manual for `glyf`, `loca`, `cmap` and `kern`.
+- The RKM's Libraries volume for `SetMenuStrip`, `EasyRequest`, `TextAttr` and the size gadget's names, as V7 took its names.
+- FreeType and HarfBuzz as the oracle only (§14.5): never read for the implementation.
+
+## Decisions
+
+1. **§14.7: from scratch or on a base.** Clean-room from the specification (4,000–6,000 lines), as principle 1 says; or `libschrift` (ISC, 1,450 lines) hardened, plus `GPOS` kerning and `GSUB` 1 and 4 of our own (1,900 lines). *Leaning:* clean-room, as the roadmap leaned, TrueType outlines only: `CFF ` is `ERR_UNSUPPORTED` until after V8. It's the one large piece of V8 with no hardware risk, all on the host, and the oracle makes it checkable step by step.
+2. **VQ34: the fonts.** *Leaning:* **Inter** for `System Sans` and **JetBrains Mono** for `System Mono`, both OFL-1.1, static TrueType instances (Regular and Bold of each), subset as step 1 says. Inter is drawn for screens at UI sizes, with `tnum` and `GPOS` kerning; JetBrains Mono has the box drawing and blocks the Shell needs. Step 1 checks each subset has the tables and features §14.3 tests before anything is built on it. The originals are fetched once from their releases into the corpus, with their licences.
+3. **VQ32: icons.** `.info` sidecar files with vector bytecode and a cached bitmap (§13.7's leaning), or the system icons drawn in code. *Leaning:* in code for V8: the Workbench draws §13.4's six system icons and the drawer as gfx paths at 64 px (128 at 2×), and a file or drawer without one gets a generic icon. `.info` files, and icons for programs and documents, after V8, when there's more than the system's own to show.
+4. **The glyph cache: each process's, or a shared atlas.** §14.2's atlas is intuition's (or a cache server's), mapped read-only by every client. *Leaning:* each process's, in gfx.library, for V8: no new protocol, and a dead client takes its cache with it. Step 8 measures what a client's first line of text costs on the RV2; a shared atlas follows if that's more than a frame.
+5. **What Prefs changes live, and who keeps Prefs' files.** The roadmap's exit says "Prefs changing input, display and power live". But display never sets a mode (the CIX's DPU can't be reset, and a mode change through its PS185 is untried), and power has nothing a user sets (no DVFS). *Leaning:* **input** (key repeat delay and rate, pointer speed and acceleration) and **intuition** (the pointer's size, the HUD badge, the backdrop's colours), each through a settings op, saved to `SYS:Prefs/Env-Archive/`; **display and power** shown read-only (the mode and refresh; power's domains, clocks and votes from `POWER_QUERY`). The roadmap's exit is reworded to match. *Taken so, with the user's direction for later:* display's pane is to choose among the resolutions the monitor supports (its EDID's modes) once display can set a mode, and power's is to choose a profile once power has performance control. Each stays read-only until its subsystem exists.
+6. **Where the rasteriser lives.** In font.library, with gfx.library's paths calling it; or in gfx.library, with font.library's `RasterizeGlyph` calling gfx's. *Leaning:* gfx.library. Paths are its job (§13.1's table), its table already chooses SIMD, and font.library stays parsing and shaping. The oracle builds `lib/gfx`'s rasteriser into the host program beside `lib/font`.
+7. **Who serves a windowed Shell's console.** intuition, as §13.5 has it (a pseudo-console port hosted by intuition), or a process per window. *Leaning:* a process per window (`conwin`). Text-terminal policy stays out of the compositor, a crash of one takes one window, and the Shell and its commands see the console protocol they see now.
+8. **ui.library beyond the six.** §13.3 names six gadgets, none of which is a button, a list or a text field. *Leaning:* add those four (button, label, list, text field), since the Workbench and Prefs can't be built without them, and nothing else: no menus in ui.library (intuition's), no tree views, no tabs.
+9. **The chrome V8 builds of §13.3's.** *Leaning:* the size gadget (the Shell and a volume's window need it); not border scrollers, iconify or zoom. A window's contents scroll by the client's own means (`conwin` by keys, the Workbench's list with its own slider) until scrollers come, with a mouse wheel in input.
+10. **One phase or two.** *Leaning:* one, ordered so that steps 1 to 5 (type everywhere, the screen bar and menus, the Shell in a window) are whole on their own. If V8 runs long, those are called V8 and steps 6 and 7 move to a phase of their own before the RK3588, with the roadmap changed then and not now.
+11. **VQ33: translucency.** *Leaning:* none in V8. Windows stay opaque, so decision 3 of V7 (the screen buffers' memory per board) stands. The Shell's background is solid `#121822`, as §13.7's leaning allows.
