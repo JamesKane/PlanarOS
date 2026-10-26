@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V8.1 done
+EXPECT := V8.2 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -308,21 +308,25 @@ gfx-test: $(GFX_TEST)
 	@$(GFX_TEST)
 
 # font.library (lib/font) and lib/gfx's rasteriser on the host with the
-# sanitizers, against the host's FreeType: docs §14.5's oracle, passes 1,
-# 3 and 4, over the corpus and the system fonts' subsets (v8-plan step 1).
+# sanitizers, against the host's FreeType and HarfBuzz: docs §14.5's
+# oracle, passes 1 to 4, over the corpus and the system fonts' subsets
+# (v8-plan steps 1 and 2).
 FONT_ORACLE := build/font/font-oracle
 FONT_SRCS := $(filter-out %/test.c,$(wildcard lib/font/*.c))
 FONT_FILES := $(wildcard lib/font/fonts/*.ttf)
 FONT_CORPUS := $(wildcard tools/font-oracle/corpus/*.ttf) $(FONT_FILES)
 FREETYPE_CFLAGS = $(shell pkg-config --cflags freetype2 | sed 's/-I/-isystem /g')
 FREETYPE_LIBS = $(shell pkg-config --libs freetype2)
+HARFBUZZ_CFLAGS = $(shell pkg-config --cflags harfbuzz | sed 's/-I/-isystem /g')
+HARFBUZZ_LIBS = $(shell pkg-config --libs harfbuzz)
 
 $(FONT_ORACLE): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/gfx/path.c lib/utility/span.c \
-		tools/font-oracle/oracle.c conformance/fontcheck.h include/planar/font.h include/planar/gfx.h \
-		include/planar/utility.h
+		tools/font-oracle/oracle.c tools/font-oracle/shaping.c tools/font-oracle/oracle.h \
+		conformance/fontcheck.h include/planar/font.h include/planar/gfx.h include/planar/utility.h
 	@mkdir -p $(dir $@)
-	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font -Iconformance) $(FREETYPE_CFLAGS) $(FONT_SRCS) lib/gfx/path.c \
-	  lib/utility/span.c tools/font-oracle/oracle.c $(FREETYPE_LIBS) -o $@
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font -Iconformance) $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
+	  $(FONT_SRCS) lib/gfx/path.c lib/utility/span.c tools/font-oracle/oracle.c tools/font-oracle/shaping.c \
+	  $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) -o $@
 
 font-oracle: $(FONT_ORACLE)
 	@$(FONT_ORACLE) $(FONT_CORPUS)
@@ -334,7 +338,7 @@ FONT_FUZZ := build/font/font-fuzz
 FONT_FUZZ_RUNS ?= -runs=300000
 
 $(FONT_FUZZ): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/gfx/path.c lib/utility/span.c \
-		tools/font-fuzz/fuzz.c include/planar/font.h include/planar/gfx.h
+		tools/font-fuzz/fuzz.c include/planar/font.h include/planar/gfx.h include/planar/utility.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(subst -fsanitize=,-fsanitize=fuzzer$(comma),$(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font)) \
 	  $(FONT_SRCS) lib/gfx/path.c lib/utility/span.c tools/font-fuzz/fuzz.c -o $@

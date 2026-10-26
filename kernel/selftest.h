@@ -85,6 +85,8 @@ void selftest_supervision(void);
 void selftest_debts(void);
 /* V7 step 2: gfx.library. */
 void selftest_gfx(void);
+/* V8 steps 1 and 2: font.library's outlines, then its shaping. */
 void selftest_font(void);
+void selftest_shaping(void);
 
 #endif /* KERNEL_SELFTEST_H */

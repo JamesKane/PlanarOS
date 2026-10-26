@@ -1504,6 +1504,8 @@ void selftest_tasks(void *)
     kprintf("V7.5 done\n");
     selftest_font();
     kprintf("V8.1 done\n");
+    selftest_shaping();
+    kprintf("V8.2 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -3161,6 +3163,25 @@ void selftest_font(void)
     run_each("V8.1 font", tests, 1);
     kprintf("V8.1 font ok: System Sans and System Mono opened from font.library's constants, "
             "their glyphs' outlines and coverage at 13 px as the host's oracle has them\n");
+}
+
+/*
+ * V8 step 2: shaping (conformance/shapetest.c): a text shaped in each
+ * system font through IFont, kerned, ligated and with tabular figures,
+ * and broken into lines, to the same glyphs, positions and lines the
+ * host's oracle got (fontcheck.h), where pass 2 holds them to HarfBuzz.
+ */
+void selftest_shaping(void)
+{
+    static const char *const tests[] = { "shapetest" };
+
+    if (!user_images[0].name) {
+        kprintf("V8.2 shaping skipped: no user programs\n");
+        return;
+    }
+    run_each("V8.2 shaping", tests, 1);
+    kprintf("V8.2 shaping ok: the system fonts' text shaped (kerned, figures tabular) and broken into lines "
+            "through IFont as the host's oracle has it, controls hidden, a Hebrew run stubbed\n");
 }
 
 /*

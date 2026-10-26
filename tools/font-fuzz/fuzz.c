@@ -1,14 +1,18 @@
 /*
- * tools/font-fuzz/fuzz.c -- font.library fuzzed (v8-plan step 1, §14.5's pass 5)
+ * tools/font-fuzz/fuzz.c -- font.library fuzzed (v8-plan steps 1 and 2, §14.5's pass 5)
  *
  * libFuzzer, with ASan and UBSan, from small seed fonts
  * (tools/font-fuzz/seeds, made by tools/font-subset.py). Each input is a
  * font, copied to a block of exactly its size, so a read one byte past
  * it is ASan's to catch. If it opens, everything a caller can ask of it
  * is asked: the metrics, the names, characters' glyphs, and each glyph's
- * metrics, its points, its outline at 16 px and its coverage. Every
- * answer must be one the API allows, and each call ends: a loop that
- * didn't would be libFuzzer's timeout.
+ * metrics, its points, its outline at 16 px and its coverage; and text
+ * shaped with each feature (the seeds have kerning pairs, ligatures and
+ * figures, and one a kern table and GSUB behind extensions, so GSUB,
+ * GPOS, GDEF and kern are what's mutated), some of it the input's own
+ * bytes as UTF-8, then broken into lines. Every answer must be one the
+ * API allows, and each call ends: a loop that didn't would be
+ * libFuzzer's timeout.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +48,37 @@ static bool count_point(struct font_sink *s, int32_t, int32_t, bool)
 static bool count_end(struct font_sink *)
 {
     return true;
+}
+
+/* One text shaped with features 'k' (of four), and broken into lines. */
+static void shape(const struct FontFace *face, const struct FontMetrics *m, const char *text, size_t len, unsigned k)
+{
+    static struct ShapedGlyph glyphs[512];
+    static const uint32_t features[] = { FONT_FEAT_KERN | FONT_FEAT_LIGA, FONT_FEAT_KERN | FONT_FEAT_TNUM,
+                                         FONT_FEAT_LIGA | FONT_FEAT_PNUM, 0 };
+    struct GlyphRun run = { glyphs, 512, 0, 0, 0 };
+    int64_t e = ShapeRun(face, text, len, features[k % 4], &run), sum = 0;
+
+    CHECK(e == 0 || e == ERR_BADFONT || e == ERR_UNSUPPORTED || (e == ERR_FULL && len > 512));
+    if (e != 0) {
+        CHECK(run.gr_Count == 0);
+        return;
+    }
+    CHECK(run.gr_Count <= len);
+    for (uint32_t i = 0; i < run.gr_Count; i++) {
+        CHECK(glyphs[i].sg_Glyph < m->fm_NumGlyphs);
+        CHECK(glyphs[i].sg_Cluster < len && (i == 0 || glyphs[i].sg_Cluster >= glyphs[i - 1].sg_Cluster));
+        CHECK(!(glyphs[i].sg_Flags & ~0x3fu));
+        sum += glyphs[i].sg_Advance;
+    }
+    CHECK(sum == run.gr_Advance);
+    for (uint32_t at = 0; at < run.gr_Count;) {
+        struct LineFit fit;
+
+        FitLine(face, &run, at, 40 << 6, 13 << 6, &fit);
+        CHECK(fit.lf_Count > 0 && at + fit.lf_Count <= run.gr_Count);
+        at += fit.lf_Count;
+    }
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
@@ -95,6 +130,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
     }
     CHECK(GetGlyphMetrics(&face, m.fm_NumGlyphs, &(struct GlyphMetrics){ 0 }) == ERR_BADARG);
+
+    static const char *const texts[] = {
+        "AV To ffi fl 1234 \xc3\xa9% A\xc2\xadV f\xe2\x80\x8c" "f",
+        "\t\r\nAV\xe2\x80\xa8T.o \xe2\x80\x89 \xe2\x80\x91 \xd7\xa9 e\xcc\x81 \xed\xa0\x80",
+    };
+    struct LineSpacing ls;
+
+    LineSpacing(&face, &ls);
+    for (unsigned t = 0; t < sizeof texts / sizeof texts[0]; t++)
+        shape(&face, &m, texts[t], strlen(texts[t]), (unsigned)size + t);
+    shape(&face, &m, (const char *)data + size / 2, size - size / 2 < 600 ? size - size / 2 : 600, (unsigned)size + 2);
     free(copy);
     return 0;
 }

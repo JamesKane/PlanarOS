@@ -1,14 +1,15 @@
 /*
- * tools/font-oracle/oracle.c -- font.library against FreeType (v8-plan step 1)
+ * tools/font-oracle/oracle.c -- font.library against FreeType and HarfBuzz (v8-plan steps 1 and 2)
  *
  * docs §14.5's oracle, on the host: lib/font and lib/gfx's rasteriser
- * built with the sanitizers and linked beside the host's FreeType, which
- * is only ever the reference here (§14.1: never read for the code).
+ * built with the sanitizers and linked beside the host's FreeType and
+ * HarfBuzz, only ever the reference here (§14.1: never read for the code).
  * Over every font in the corpus and the system fonts' subsets:
  *
  *   pass 1  metrics: head, hhea, OS/2 and post as FreeType reads them;
  *           each glyph's advance; every code point's glyph; the names.
  *           All exact.
+ *   pass 2  shaping, against HarfBuzz (shaping.c).
  *   pass 3  outlines: each glyph's points, on or off the curve, and its
  *           contours, in font units (exact, or within a unit where a
  *           composite's matrix rounds), and at 16 px as FreeType scales
@@ -24,7 +25,7 @@
  * Then malformed fonts made from a subset by hand: cut short at every
  * length, a composite that holds itself, a glyph past glyf's end, a bad
  * magic, CFF and a collection. Each must be an error, never a fault.
- * (Pass 2, shaping, is step 2's; pass 5, the fuzzer, is tools/font-fuzz.)
+ * (Pass 5, the fuzzer, is tools/font-fuzz.)
  */
 #include <math.h>
 #include <stdio.h>
@@ -38,9 +39,7 @@
 #include FT_ADVANCES_H
 
 #include "fontcheck.h"
-#include "sfnt.h"
-
-static unsigned failures;
+#include "oracle.h"
 
 /*
  * Against FreeType: guards against gross error, not agreement. Its
@@ -55,16 +54,7 @@ constexpr double STRAIGHT_WITHIN1 = 99.5;
 constexpr int CURVED_WORST = 40;
 constexpr double CURVED_WITHIN1 = 60.0;
 
-#define CHECK(cond, ...)                                                     \
-    do {                                                                     \
-        if (!(cond)) {                                                       \
-            if (failures++ < 40) {                                           \
-                fprintf(stderr, "font-oracle: %s:%d: ", __FILE__, __LINE__); \
-                fprintf(stderr, __VA_ARGS__);                                \
-                fputc('\n', stderr);                                         \
-            }                                                                \
-        }                                                                    \
-    } while (0)
+unsigned failures;
 
 static uint8_t *load(const char *path, size_t *len)
 {
@@ -497,6 +487,7 @@ static void one_font(FT_Library lib, const char *file)
     all_straight.worst = straight.worst > all_straight.worst ? straight.worst : all_straight.worst;
     all_curved.n += curved.n, all_curved.in1 += curved.in1;
     all_curved.worst = curved.worst > all_curved.worst ? curved.worst : all_curved.worst;
+    shaping(font, buf, len, &face);
     FT_Done_Face(ft);
     free(buf);
 }
@@ -611,6 +602,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++)
         one_font(lib, argv[i]);
     malformed(argv[argc - 1]);
+    shaping_alone();
 
     /* conformance/fontcheck.h's CRCs, which fonttest checks on QEMU. */
     static const struct fontcheck_calls calls = { SystemFont, OpenFont, MapCodepoint, GlyphOutline, PathBounds,
@@ -623,8 +615,16 @@ int main(int argc, char **argv)
         CHECK(crc && crc == fontcheck_crcs[i], "fontcheck.h: font %#x's CRC is %#010x, not %#010x", fontcheck_fonts[i],
               crc, fontcheck_crcs[i]);
     }
+    static const struct shapecheck_calls shape_calls = { SystemFont, OpenFont, ShapeRun, FitLine, LineSpacing };
+
+    for (unsigned i = 0; i < sizeof fontcheck_fonts / sizeof fontcheck_fonts[0]; i++) {
+        uint32_t crc = shapecheck_run(&shape_calls, fontcheck_fonts[i]);
+
+        CHECK(crc && crc == shapecheck_crcs[i], "fontcheck.h: font %#x's shaping CRC is %#010x, not %#010x",
+              fontcheck_fonts[i], crc, shapecheck_crcs[i]);
+    }
     if (failures == fails0)
-        printf("font-oracle: ok: fontcheck.h's CRCs, the system fonts' glyphs at 13 px\n");
+        printf("font-oracle: ok: fontcheck.h's CRCs, the system fonts' glyphs at 13 px and their text shaped\n");
     FT_Done_FreeType(lib);
     if (failures) {
         fprintf(stderr, "font-oracle: %u checks failed\n", failures);

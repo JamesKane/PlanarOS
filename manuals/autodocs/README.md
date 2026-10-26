@@ -13,7 +13,7 @@
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 | [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing (`planar/gfx.h`, `lib/gfx`) |
 | [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events (`planar/intuition.h`, `lib/intuition`) |
-| [font.md](font.md) | font.library: TrueType fonts read in place, their metrics and glyphs' outlines (`planar/font.h`, `lib/font`) |
+| [font.md](font.md) | font.library: TrueType fonts read in place, their metrics, glyphs' outlines, shaping and lines (`planar/font.h`, `lib/font`) |
 
 ## All calls
 
@@ -83,6 +83,7 @@
 | ExitTask | [exec](exec.md#execexittask) | kernel |
 | FindTagItem | [utility](utility.md#utilityfindtagitem) | library |
 | FindTask | [exec](exec.md#execfindtask) | kernel |
+| FitLine | [font](font.md#fontfitline) | library, through `IFont` |
 | FlushPort | [msg](msg.md#execflushport) | library |
 | FontInfo | [font](font.md#fontfontinfo) | library, through `IFont` |
 | FontName | [font](font.md#fontfontname) | library, through `IFont` |
@@ -107,6 +108,7 @@
 | InitRastPort | [gfx](gfx.md#gfxinitrastport) | library, through `IGfx` |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
+| LineSpacing | [font](font.md#fontlinespacing) | library, through `IFont` |
 | MapCodepoint | [font](font.md#fontmapcodepoint) | library, through `IFont` |
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
 | MapLease | [lease](lease.md#leasemaplease) | kernel |
@@ -146,6 +148,7 @@
 | ScaleUnits | [font](font.md#fontscaleunits) | library, through `IFont` |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | SetMem | [exec](exec.md#execsetmem) | library |
+| ShapeRun | [font](font.md#fontshaperun) | library, through `IFont` |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
 | Signal | [exec](exec.md#execsignal) | kernel |
 | SignalConn | [exec](exec.md#execsignalconn) | kernel |

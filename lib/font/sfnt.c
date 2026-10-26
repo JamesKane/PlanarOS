@@ -149,6 +149,15 @@ int64_t OpenFont(struct FontFace *face, struct Span file)
         !find(file, ntables, TAG('G', 'D', 'E', 'F'), &f->gdef) ||
         !find(file, ntables, TAG('k', 'e', 'r', 'n'), &f->kern))
         return ERR_BADFONT;
+    for (uint32_t i = 0; i < ntables; i++) {
+        uint32_t tag = u32(file, 12 + 16 * (uint64_t)i);
+
+        if (tag == TAG('f', 'v', 'a', 'r'))
+            f->extras |= FONT_HAS_FVAR;
+        if (tag == TAG('C', 'O', 'L', 'R') || tag == TAG('C', 'B', 'D', 'T') || tag == TAG('s', 'b', 'i', 'x') ||
+            tag == TAG('S', 'V', 'G', ' '))
+            f->extras |= FONT_HAS_COLOR;
+    }
     if (!f->glyf.sp_Len) {
         find(file, ntables, TAG('C', 'F', 'F', ' '), &cmap);
         return cmap.sp_Len ? ERR_UNSUPPORTED : ERR_BADFONT;

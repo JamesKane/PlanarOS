@@ -1,10 +1,67 @@
 # font: TrueType fonts read in place
 
-*Checked against V8 step 1.*
+*Checked against V8 step 2.*
 
 font.library's functions, in alphabetical order. The header is `planar/font.h`. They're a shared library's, called through `IFont` (`struct FontIFace`, the "main" interface, version 1, of font.library 8). The same functions by the same names are in `lib/font`, for the host's oracle and fuzzer. None traps, allocates or keeps state: a `FontFace` is the caller's, and points into the font's file, which the caller keeps. Any task can call any of them at any time.
 
 The library reads TrueType outlines (`glyf`) only, never runs hinting, and checks every read against the file's length: a malformed font is `ERR_BADFONT`, never a fault. A glyph's outline is a `GfxPath`; gfx.library's [PathMask](gfx.md#gfxpathmask) turns it into coverage. Sizes are pixels an em in 26.6 fixed point: 13 px is `13 << 6`.
+
+Text is shaped by [ShapeRun](#fontshaperun): UTF-8 to glyphs and where each goes, in the font's units, with its kerning, ligatures and figure styles. [FitLine](#fontfitline) breaks a shaped run into lines, and [LineSpacing](#fontlinespacing) says how far apart they go. Latin only: a run in another script is laid out a glyph a character, and says so.
+
+---
+
+## font/FitLine
+
+**NAME**
+FitLine -- the line a shaped run's next glyphs make, in a width
+
+**SYNOPSIS**
+```c
+#include <planar/font.h>
+void FitLine(const struct FontFace *face, struct GlyphRun *run, uint32_t first, int32_t width, uint32_t size,
+             struct LineFit *fit);
+```
+
+**FUNCTION**
+Takes glyphs from `first` on while they fit in `width` at `size`, and breaks where a line may: after a space, a tab, a hyphen or a soft hyphen, or at a newline, which always ends the line. It's greedy: the line is as long as fits. Spaces at a line's end hang past it, and aren't counted in its width. A soft hyphen is a break only if a hyphen fits after it, and then the hyphen is drawn there. A word wider than the line is cut where it stops fitting, and a line always takes one glyph at least.
+
+A tab's advance is set here, in the run (and `gr_Advance` with it): to the next stop, every eight spaces from the line's start.
+
+**INPUTS**
+- `face` -- the font the run was shaped in.
+- `run` -- from [ShapeRun](#fontshaperun). Its tabs' advances are written.
+- `first` -- the line's first glyph: 0, then each line's `first` plus its `lf_Count`.
+- `width` -- the line's width, in 26.6 pixels.
+- `size` -- pixels an em, 26.6, as the run will be drawn.
+- `fit` -- the line:
+  - `lf_Count` -- the glyphs it takes, its trailing spaces and newline among them.
+  - `lf_Width` -- its width in 26.6 pixels, without the trailing spaces, with a hyphen if it has one.
+  - `lf_Flags` -- `LINEF_END` (the run's last line), `LINEF_NEWLINE` (ended by a newline), `LINEF_HYPHEN` (broken at a soft hyphen: draw `lf_Hyphen` at its end), `LINEF_FORCED` (a word cut).
+  - `lf_Hyphen` -- the hyphen's glyph.
+
+**RESULT**
+None. `first` at the run's end or past it is a line of none, `LINEF_END`.
+
+**EXAMPLE**
+```c
+struct LineFit fit;
+
+for (uint32_t at = 0; at < run.gr_Count; at += fit.lf_Count) {
+    IFont->FitLine(&face, &run, at, 300 << 6, 13 << 6, &fit);
+    ...     /* glyphs at to at + lf_Count, a line down each time */
+}
+```
+
+**NOTES**
+- **Planar's own.**
+- `tools/font-oracle` breaks a paragraph at 53 widths in two fonts, and checks every line fits, ends where a line may, and couldn't have taken more.
+- A line's last glyph keeps the kerning it had with the next line's first, perhaps a few of the font's units.
+
+**BUGS**
+Breaks are §14.3.3's, not Unicode's line breaking (UAX #14): no break after an en dash or a slash, or before an opening bracket.
+
+**SEE ALSO**
+[ShapeRun](#fontshaperun), [LineSpacing](#fontlinespacing).
 
 ---
 
@@ -122,13 +179,13 @@ x += IFont->ScaleUnits(&face, gm.gm_Advance, 13 << 6);
 
 **NOTES**
 - **Planar's own.**
-- Shaping (V8 step 2) adjusts advances by kerning; this is the glyph's own.
+- [ShapeRun](#fontshaperun)'s advances are kerned; this is the glyph's own.
 
 **BUGS**
 None known.
 
 **SEE ALSO**
-[MapCodepoint](#fontmapcodepoint), [ScaleUnits](#fontscaleunits).
+[MapCodepoint](#fontmapcodepoint), [ScaleUnits](#fontscaleunits), [ShapeRun](#fontshaperun).
 
 ---
 
@@ -179,6 +236,47 @@ None known.
 
 **SEE ALSO**
 [PathBounds](gfx.md#gfxpathbounds), [PathMask](gfx.md#gfxpathmask), [MapCodepoint](#fontmapcodepoint).
+
+---
+
+## font/LineSpacing
+
+**NAME**
+LineSpacing -- how far apart a font's lines go
+
+**SYNOPSIS**
+```c
+#include <planar/font.h>
+void LineSpacing(const struct FontFace *face, struct LineSpacing *ls);
+```
+
+**FUNCTION**
+Fills in the font's ascent, descent and line gap, and their sum, the distance from one baseline to the next, in the font's units. They're `OS/2`'s typographic ones if its `USE_TYPO_METRICS` bit is set (and each isn't 0), else `hhea`'s (§14.3.3).
+
+**INPUTS**
+- `face` -- an open font.
+- `ls` -- where they go: `ls_Ascent` above the baseline, `ls_Descent` below it (positive), `ls_LineGap`, and `ls_Height`, the three added.
+
+**RESULT**
+None.
+
+**EXAMPLE**
+```c
+struct LineSpacing ls;
+
+IFont->LineSpacing(&face, &ls);
+y += IFont->ScaleUnits(&face, ls.ls_Height, 13 << 6);
+```
+
+**NOTES**
+- **Planar's own.**
+- As HarfBuzz's `hb_font_get_h_extents` reads them (`tools/font-oracle`, pass 2).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[FitLine](#fontfitline), [FontInfo](#fontfontinfo).
 
 ---
 
@@ -300,6 +398,69 @@ None known.
 
 **SEE ALSO**
 [FontInfo](#fontfontinfo), [GetGlyphMetrics](#fontgetglyphmetrics).
+
+---
+
+## font/ShapeRun
+
+**NAME**
+ShapeRun -- text to glyphs, and where each goes
+
+**SYNOPSIS**
+```c
+#include <planar/font.h>
+int64_t ShapeRun(const struct FontFace *face, const char *text, uint64_t len, uint32_t features,
+                 struct GlyphRun *run);
+```
+
+**FUNCTION**
+Shapes `len` bytes of UTF-8 into the caller's array (§14.3.3):
+1. Decodes it. Each ill-formed part (a cut sequence, an overlong one, a surrogate) is one U+FFFD, as Unicode's §3.9 says: the longest part that could have begun a character.
+2. Maps each character to a glyph through `cmap`. A space the font hasn't got is its space glyph at the width Unicode gives it: an em over 2 for an en space, over 5 for a thin one, a figure's for a figure space, half a space for a narrow no-break one. A no-break hyphen the font hasn't got is U+2010's glyph.
+3. Applies `GSUB`'s lookups for the features asked for: `liga`'s ligatures, `tnum`'s and `pnum`'s figures, each behind an extension or not.
+4. Gives each glyph its advance from `hmtx`, then applies `GPOS`'s `kern` (pair adjustments, by glyph or by class), or the `kern` table's format 0 if `GPOS` has no `kern`.
+
+A lookup passes over the glyphs its flags say to (GDEF's classes), and over default ignorables (a soft hyphen, ZWSP, ZWJ), so "A", soft hyphen, "V" is kerned as "AV". ZWNJ stops a ligature.
+
+Controls and default ignorables stay in the run, so that a line can break at them, but are hidden (`GLYPHF_HIDDEN`): the space glyph, with no advance. Each glyph's flags say what it is to [FitLine](#fontfitline): `GLYPHF_SPACE`, `GLYPHF_TAB`, `GLYPHF_NEWLINE` (CR LF is one, the LF's), `GLYPHF_HYPHEN`, `GLYPHF_SOFT_HYPHEN`.
+
+A character in a script that needs more than Latin's shaping (Hebrew, Arabic, Devanagari, combining marks) makes the whole run one glyph a character with `hmtx`'s advances, no lookups, and `gr_Warnings` says so: `FONT_WARN_STUB_SHAPER`, and `FONT_WARN_STUB_BIDI` too if it's written right to left (§14.4). A variable font is shaped as its default, with `FONT_WARN_STUB_VAR`; one with colour glyphs is shaped, with `FONT_WARN_STUB_COLOR`.
+
+**INPUTS**
+- `face` -- an open font.
+- `text`, `len` -- UTF-8. `len` under 2 GB.
+- `features` -- `FONT_FEAT_KERN`, `FONT_FEAT_LIGA`, `FONT_FEAT_TNUM`, `FONT_FEAT_PNUM`, or'd: `FONT_FEAT_KERN | FONT_FEAT_LIGA` for prose, `FONT_FEAT_KERN | FONT_FEAT_TNUM` for figures in columns. No other feature is applied.
+- `run` -- `gr_Glyphs` and `gr_Max`, the caller's: one `ShapedGlyph` a character is the most needed. Filled in:
+  - each glyph's `sg_Glyph`, `sg_Cluster` (the byte its first character starts at; a ligature's is its first's), `sg_Advance`, `sg_XOffset` and `sg_YOffset` (from the pen, y up), and `sg_Flags`, all in the font's units;
+  - `gr_Count`, `gr_Advance` (the advances' sum: the run's width) and `gr_Warnings`.
+
+**RESULT**
+0, or, with `gr_Count` 0:
+- `ERR_FULL` -- more characters than `gr_Max`;
+- `ERR_BADARG` -- `len` 2 GB or more;
+- `ERR_BADFONT` -- a layout table that points outside itself, or a substitute past the last glyph;
+- `ERR_UNSUPPORTED` -- more than 256 lookups for the features asked.
+
+**EXAMPLE**
+```c
+static struct ShapedGlyph glyphs[256];
+struct GlyphRun run = { glyphs, 256, 0, 0, 0 };
+
+if (IFont->ShapeRun(&face, "Waffle", 6, FONT_FEAT_KERN | FONT_FEAT_LIGA, &run) == 0)
+    width = IFont->ScaleUnits(&face, run.gr_Advance, 13 << 6);
+```
+
+**NOTES**
+- **Planar's own.** The RKM's `Text` took bytes in a bitmap font; gfx.library draws a shaped run (V8 step 3).
+- The glyphs, their clusters and where each is drawn are HarfBuzz's for the same text and features, exactly, over the corpus (`tools/font-oracle`, pass 2), but for these, on purpose: HarfBuzz gives a U+FFFD a byte of ill-formed UTF-8, and controls the font's own glyphs; ShapeRun hides controls.
+- Lookup types not built (contextual, chained, marks, cursive) are passed over, with `FONT_WARN_STUB_SHAPER`.
+- Allocates nothing.
+
+**BUGS**
+No Unicode normalisation: a character the font hasn't got isn't decomposed into one it has.
+
+**SEE ALSO**
+[FitLine](#fontfitline), [LineSpacing](#fontlinespacing), [MapCodepoint](#fontmapcodepoint), [ScaleUnits](#fontscaleunits).
 
 ---
 

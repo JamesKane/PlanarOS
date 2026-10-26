@@ -103,6 +103,8 @@ For an English UTF-8 string, `IFont->ShapeRun` executes five deterministic, allo
    - Computes line height from `OS/2` (`sTypoAscender - sTypoDescender + sTypoLineGap`) when `fsSelection & USE_TYPO_METRICS` is set, else `hhea`.
    - Breaks lines at ASCII space (`U+0020`), tab (`U+0009`), newline (`U+000A`), hyphen-minus (`U+002D`) and soft hyphen (`U+00AD`, inserting the visible hyphen glyph only when the break is taken).
 
+*Built (V8 step 2):* `ShapeRun`, `FitLine` and `LineSpacing` ([autodoc](../manuals/autodocs/font.md)). Stage 1 gives a U+FFFD for each maximal subpart of an ill-formed sequence (Unicode §3.9). Stage 3 also gives a space the font lacks its space glyph at Unicode's width, and hides controls and default ignorables (the space glyph, no advance) after stage 4, which passes over ignorables, so a soft hyphen doesn't stop a kern; ZWNJ stops a ligature. A line also breaks at the other newlines (VT, FF, NEL, U+2028, U+2029, a CR alone; CR LF is one), at U+2010 and after a ZWSP; tab stops are every eight spaces.
+
 ### 4. Analytical scanline rasteriser
 
 `IFont->RasterizeGlyph` converts a glyph's outlines into an 8-bit linear coverage bitmap (`A8`):
@@ -173,6 +175,7 @@ FreeType (`libfreetype`) and HarfBuzz (`libharfbuzz`) are **test oracles only**:
    Shapes an English test corpus—including kerning torture pairs (`"To WA VA Yo We Av T. LT P. F, Y. f” ‘A’"`), ligature sequences (`"fi fl ffi ffl ff"`), punctuation runs (`"12:38 PM — CPU 0.8% • RAM 0.00% …"`) and tabular-numeral strings (`tnum` on and off)—through both `IFont->ShapeRun` and `hb_shape()` (configured with `HB_SCRIPT_LATIN`, `hb_language_from_string("en")`, and matching `{kern, liga, tnum}` feature toggles).
    - Output `GlyphID` arrays must match **100%**.
    - Per-glyph `x_advance`, `x_offset` and `y_offset` in font design units must match **100%**, or within **$\le 1$ pixel** when scaled to 26.6 fixed-point device coordinates.
+   - *Built (V8 step 2):* glyphs, clusters and drawn positions match exactly, over 3,487 texts in 11 fonts, with every default feature HarfBuzz has and `ShapeRun` hasn't turned off. Not compared, because they differ on purpose: ill-formed UTF-8 (HarfBuzz gives a U+FFFD a byte), controls (hidden), and a hidden glyph's position ([v8-plan](v8-plan.md) step 2).
 3. **Pass 3 — Outline Decomposition Oracle**:
    Extracts unpacked contour points and composite transformations for every printable English glyph and compares them against `FT_Outline_Decompose` in font design units. Requires exact coordinate parity (or $\le 1$ font unit on 2×2 fixed-point `F2Dot14` composite transforms).
 4. **Pass 4 — Analytical Raster Oracle**:

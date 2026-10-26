@@ -1,7 +1,7 @@
 /*
  * libs/font/base.c -- font.library: its base and its interface
  *
- * V8 step 1. lib/font built as a shared library image (lib.ld), with
+ * V8 steps 1 and 2. lib/font built as a shared library image (lib.ld), with
  * utility's checked readers linked in, and the system fonts among its
  * constants (lib/font/fonts.c). It keeps no state: a FontFace is the
  * caller's. Its outlines are drawn by gfx.library (PathMask).
@@ -22,6 +22,10 @@ static const struct FontIFace main_iface = {
     .GetGlyphMetrics = GetGlyphMetrics,
     .GlyphOutline = GlyphOutline,
     .ScaleUnits = ScaleUnits,
+
+    .ShapeRun = ShapeRun,
+    .FitLine = FitLine,
+    .LineSpacing = LineSpacing,
 };
 
 static struct Interface *const interfaces[] = { (struct Interface *)&main_iface, nullptr };
@@ -29,8 +33,8 @@ static struct Interface *const interfaces[] = { (struct Interface *)&main_iface,
 static const struct Library base = {
     .lib_Name = "font.library",
     .lib_Version = 8,
-    .lib_Revision = 1,
-    .lib_IdString = "font.library 8.1 (26.10.2026)",
+    .lib_Revision = 2,
+    .lib_IdString = "font.library 8.2 (26.10.2026)",
     .lib_Interfaces = interfaces,
 };
 
