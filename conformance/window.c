@@ -10,7 +10,8 @@
  *    one not. Each presented whole, then the first in part (its back
  *    buffer brought up to date first), and the screen read back
  *    (DISPLAY_READ, where display composes it) against the windows as
- *    this program drew them over the backdrop, and the pointer.
+ *    this program drew them over the backdrop, and the pointer. The
+ *    second shows typescene.h's type, paths and gradients (V8.3).
  * 2. The refusals: a window wider or taller than its buffer, a buffer
  *    that says it's bigger than its Area, a buffer not shared, damage
  *    outside the window, a frame not above the last, a buffer that isn't
@@ -70,6 +71,7 @@
 
 #include "../servers/intuition/pointer.h"
 #include "log.h"
+#include "typescene.h"
 
 void *memset(void *dst, int c, size_t n);
 
@@ -393,7 +395,7 @@ static int two_windows(bool *readable, struct BitMap **bm)
                          { WA_Flags, WFLG_BORDERLESS }, { WA_BitMap, (uint64_t)bm[2] }) == 0);
     CHECK(wa.w_Width == 200 && wa.w_Height == 120 && wa.w_Buffers == 2 && wb.w_Buffers == 1);
     picture(&wa.w_RPort, 200, 120, 0x5b88c2, "window a");
-    picture(&wb.w_RPort, 160, 100, 0x4a5668, "window b");
+    CHECK(tc_scene(IGfx, &wb.w_RPort));     /* V8.3: type, paths and gradients, read back */
     CHECK(IIntuition->PresentWindow(&wa, nullptr, 0) == 0);
     CHECK(IIntuition->PresentWindow(&wb, nullptr, 0) == 0);
     to_front(&wa);

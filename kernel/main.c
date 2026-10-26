@@ -197,6 +197,8 @@
         kprintf("V8.1 done\n");
         kprintf("V8.2 shaping skipped: no tasks\n");
         kprintf("V8.2 done\n");
+        kprintf("V8.3 type skipped: no tasks\n");
+        kprintf("V8.3 done\n");
         arch_halt();
     }
     sched_idle();

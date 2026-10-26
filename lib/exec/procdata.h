@@ -3,9 +3,10 @@
  * process's own memory
  *
  * A shared library is code and constants (V6 step 4), so what exec
- * needs per process lives in the program: AllocVec's pool, and crt0's
+ * needs per process lives in the program: AllocVec's pool, crt0's
  * trampoline for CreateTask, which only the program can know (its
- * thread_local layout is its own). lib/rt/tls.c puts a pointer to the
+ * thread_local layout is its own), and IExec, by which gfx.library
+ * opens font.library. lib/rt/tls.c puts a pointer to the
  * program's block in the first word of every task's thread block,
  * which on Arm is at the thread pointer and on RISC-V 64 bytes below it
  * (arch/<isa>/user/procdata.c reads it).
@@ -20,6 +21,7 @@
 struct ProcessData {
     struct Pool *_Atomic pd_VecPool;    /* AllocVec's, made at its first call */
     void (*pd_TaskStart)(void);         /* crt0's _task_start */
+    struct ExecIFace *pd_IExec;         /* the program's IExec, for a library to open another (V8) */
 };
 
 #if __STDC_HOSTED__

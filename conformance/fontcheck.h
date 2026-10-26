@@ -52,7 +52,7 @@ static uint32_t fontcheck_crc32(uint32_t crc, const void *p, uint64_t n)
 }
 
 /* The CRC of fontcheck_text in font 'which', or 0 if a call failed. */
-static uint32_t fontcheck_run(const struct fontcheck_calls *c, uint32_t which)
+[[maybe_unused]] static uint32_t fontcheck_run(const struct fontcheck_calls *c, uint32_t which)
 {
     static struct GfxPoint pts[1024];
     static uint8_t verbs[1024];
@@ -110,7 +110,7 @@ static const char shapecheck_text[] =
 static const uint32_t shapecheck_crcs[] = { 0xc0b8a007, 0xe88b8eda, 0x79f72a5e, 0x79f72a5e };
 
 /* The CRC of shapecheck_text shaped in font 'which', or 0 if a call failed. */
-static uint32_t shapecheck_run(const struct shapecheck_calls *c, uint32_t which)
+[[maybe_unused]] static uint32_t shapecheck_run(const struct shapecheck_calls *c, uint32_t which)
 {
     static struct ShapedGlyph glyphs[sizeof shapecheck_text];
     static const uint32_t features[] = { FONT_FEAT_KERN | FONT_FEAT_LIGA, FONT_FEAT_KERN | FONT_FEAT_TNUM };

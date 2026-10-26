@@ -164,7 +164,10 @@ static unsigned gc_text(const struct GfxIFace *g, unsigned *cases)
 {
     static const char s[] = "Planar 7, \x01\x7f\xff~ at last";
     static const uint8_t abc[] = { 0x1f, 0x11, 0x1f, 0x0a, 0x15, 0x0a, 0x04, 0x0e, 0x1f };
-    static const struct TextFont small = { 3, 5, 'A', 'C', abc }, wide = { 8, 9, 'A', 'C', abc };
+    static const struct TextFont small = { .tf_YSize = 3, .tf_XSize = 5, .tf_LoChar = 'A', .tf_HiChar = 'C',
+                                           .tf_CharData = abc };
+    static const struct TextFont wide = { .tf_YSize = 8, .tf_XSize = 9, .tf_LoChar = 'A', .tf_HiChar = 'C',
+                                          .tf_CharData = abc };
     static const int32_t xs[] = { 0, 3, -9, -1, GC_W - 20, GC_W - 3 }, ys[] = { 1, -3, -7, GC_H - 5 };
 
     for (unsigned n = 0; n < sizeof s; n++)
@@ -275,7 +278,7 @@ static unsigned gc_bitmaps(const struct GfxIFace *g, unsigned *cases)
 }
 
 /* Every case through 'g': 0, or the line of the check that failed. */
-static unsigned gc_all(const struct GfxIFace *g, unsigned *cases)
+[[maybe_unused]] static unsigned gc_all(const struct GfxIFace *g, unsigned *cases)
 {
     unsigned r;
 

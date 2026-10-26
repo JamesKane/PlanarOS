@@ -1506,6 +1506,8 @@ void selftest_tasks(void *)
     kprintf("V8.1 done\n");
     selftest_shaping();
     kprintf("V8.2 done\n");
+    selftest_type();
+    kprintf("V8.3 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -3182,6 +3184,30 @@ void selftest_shaping(void)
     run_each("V8.2 shaping", tests, 1);
     kprintf("V8.2 shaping ok: the system fonts' text shaped (kerned, figures tabular) and broken into lines "
             "through IFont as the host's oracle has it, controls hidden, a Hebrew run stubbed\n");
+}
+
+/*
+ * V8 step 3: gfx.library's paths and type (conformance/typetest.c):
+ * masks blended in linear light, paths filled, gradients, and text in
+ * the system fonts through IGfx, against the reference and lib/gfx's
+ * scalar entries, to the bit, by the vector unit where there is one;
+ * and a scene with some of each, whose CRC is the host's. The same
+ * scene is drawn in a window and read back from the screen by the
+ * window test (V7.3 windows).
+ */
+void selftest_type(void)
+{
+    static const char *const tests[] = { "typetest" };
+
+    if (!user_images[0].name) {
+        kprintf("V8.3 type skipped: no user programs\n");
+        return;
+    }
+    run_each("V8.3 type", tests, 1);
+    kprintf("V8.3 type ok: masks blended in linear light, paths and gradients filled, System Sans and "
+            "System Mono drawn through IGfx from a glyph cache, %s, as the reference and the scalar "
+            "entries draw them; the scene as the host's\n",
+            library_vector() ? "by the vector unit" : "scalar: no vector unit");
 }
 
 /*

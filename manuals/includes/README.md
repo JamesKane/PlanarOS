@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 4.* The public headers, `include/planar/`. They are the system's C ABI ([docs §7.2](../../docs/07-language-toolchain.md)): any other language binds to Planar through them.
 
-*Checked against V5.*
+*Checked against V5; `gfx.h` and `font.h`, V8 step 3.*
 
 | Header | Contents | Used by |
 |---|---|---|
@@ -22,6 +22,8 @@
 | `planar/syscalls.h` | Kernel call numbers (`SYS_*`), errors (`ERR_NOSYS` to `ERR_TIMEOUT`) and `DEADLINE_NONE` | Stubs; any program that tests an error |
 | `planar/endian.h` | `get_be32`, `get_le64` and friends, for firmware formats | Drivers, `hwdb` |
 | `planar/utility.h` | utility.library: `struct TagItem`, `TAG_*`, `struct Hook`, the case and comparison calls, `SNPrintf`, `struct Span`, `struct Str`, `STR()`, the checked readers; `struct UtilityIFace` ([Libraries ch. 5](../libraries/05-utility.md)) | Any program |
+| `planar/gfx.h` | gfx.library: `struct BitMap`, `struct RastPort`, `struct TextFont`, `struct TextAttr`, `struct TmpRas`, `PIXFMT_*`, `BMF_*`, `BMA_*`, `BLEND_*`, `JAM1`/`JAM2`, `FPF_*`, `FSF_BOLD`; paths (`struct GfxPath`, `struct GfxPoint`, `PATH_*`, `PATHF_EVENODD`), masks (`struct GfxMask`) and gradients (`struct GfxGradient`, `GRADF_HORIZONTAL`); `struct GfxIFace` ([Libraries ch. 12](../libraries/12-gfx.md)) | Anything that draws; intuition and its clients |
+| `planar/font.h` | font.library: `struct FontFace`, `struct FontMetrics`, `struct GlyphMetrics`, `struct ShapedGlyph`, `struct GlyphRun`, `struct LineFit`, `struct LineSpacing`, `FONT_*` (faces, features, warnings), `GLYPHF_*`, `LINEF_*`, `ERR_BADFONT`, `ERR_UNSUPPORTED`; `struct FontIFace` ([Libraries ch. 14](../libraries/14-font.md)) | Programs that shape text; gfx.library |
 
 C's headers, for code written for other systems, are apart from these, in `include/clib/`: `assert.h`, `ctype.h`, `errno.h`, `inttypes.h`, `stdbit.h`, `stdio.h`, `stdlib.h` and `string.h`, which lib/clib implements ([Libraries ch. 11](../libraries/11-clib.md)). Only a program built with `-Iinclude/clib` sees them, and they're C11 as well as C23.
 

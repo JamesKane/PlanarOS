@@ -10,22 +10,22 @@
  * pixel it crosses, the part of the pixel to the line's right, and in
  * every pixel right of that, the whole height it spans. A sweep along
  * each row sums those into each pixel's coverage, clamped (non-zero
- * winding) or folded (even-odd). All of it is integer arithmetic, in
- * 1/256 px, so every CPU and the host get the same bytes.
+ * winding) or folded (even-odd): the sweep is a row kernel (rows.h), the
+ * vector unit's where there is one (V8 step 3). All of it is integer
+ * arithmetic, in 1/256 px, so every CPU and the host get the same bytes.
  *
  * Units inside: a coordinate is 24.8 (the path's 26.6 times 4), and an
  * area is in 1/(256 * 512) of a pixel, so a pixel's whole coverage is
- * COVER_FULL: a line crossing a row's full height (256) adds 256 * 512
+ * GFX_COVER_FULL (rows.h): a line crossing a row's full height (256) adds 256 * 512
  * to the pixels right of it.
  */
 #include <stddef.h>
 
-#include <planar/gfx.h>
+#include "rows.h"
 
 void *memset(void *dst, int c, size_t n);
 
 constexpr int64_t SUB = 256;                    /* subpixels a pixel */
-constexpr int64_t COVER_FULL = SUB * 2 * SUB;
 constexpr int64_t FLAT_DIV = 512;              /* a curve's lines: within 1/FLAT_DIV px of it */
 constexpr int64_t MAX_STEPS = 4096;             /* lines a curve is cut into, at most */
 
@@ -63,39 +63,70 @@ struct raster {
     bool open;
 };
 
-/* A line's piece within one row, its ys 0 to SUB within it: its area
- * into that row's pixels. Its xs are clamped to the mask: a piece left
- * of it still covers the pixels right of it, and one right of it none. */
+/* A vertical piece at x, its ys 0 to SUB within the row. */
+static void row_vertical(int32_t *row, int64_t x, int64_t ya, int64_t yb, int64_t dir)
+{
+    int64_t c = x / SUB, fx = x - c * SUB, dy = (yb - ya) * dir;
+    int64_t own = dy * (2 * SUB - 2 * fx);
+
+    row[c] += (int32_t)own;
+    row[c + 1] += (int32_t)(dy * 2 * SUB - own);
+}
+
+/*
+ * A line's piece within one row, its ys 0 to SUB within it: its area
+ * into that row's pixels. What's left of the mask is a vertical piece
+ * at its left edge, which still covers the pixels right of it, and
+ * what's right of it covers none. Where it crosses a pixel's edge, y is
+ * found from the piece's own ends, so a mask that's part of a bigger
+ * one has the same bytes there as the bigger one (FillPath's pieces).
+ */
 static void row_piece(int32_t *row, int64_t width, int64_t xa, int64_t ya, int64_t xb, int64_t yb,
                       int64_t dir)
 {
     int64_t right = width * SUB;
+#define Y_AT(x) (ya + fdiv((yb - ya) * iabs((x) - xa), iabs(xb - xa)))
 
-    xa = xa < 0 ? 0 : xa > right ? right : xa;
-    xb = xb < 0 ? 0 : xb > right ? right : xb;
-    if (xa == xb) {
-        int64_t c = xa / SUB, fx = xa - c * SUB, dy = (yb - ya) * dir;
-        int64_t own = dy * (2 * SUB - 2 * fx);
-
-        row[c] += (int32_t)own;
-        row[c + 1] += (int32_t)(dy * 2 * SUB - own);
+    if (xa == xb || (xa <= 0 && xb <= 0) || (xa >= right && xb >= right)) {
+        if (xa < right || xb < right)
+            row_vertical(row, xa < 0 ? 0 : xa > right ? right : xa, ya, yb, dir);
         return;
     }
-    /* Cell by cell from xa to xb, cut where it crosses a pixel's edge. */
     bool rightward = xb > xa;
-    int64_t c = rightward ? xa / SUB : (xa - 1) / SUB;
-    int64_t last = rightward ? (xb - 1) / SUB : xb / SUB;
-    int64_t px = xa, py = ya;
+    int64_t px = xa, py = ya, ex = xb, ey = yb;
 
+    if (rightward ? xa < 0 : xb < 0) {          /* the part left of the mask */
+        int64_t y0 = Y_AT(0);
+
+        if (rightward) {
+            row_vertical(row, 0, ya, y0, dir);
+            px = 0, py = y0;
+        } else {
+            row_vertical(row, 0, y0, yb, dir);
+            ex = 0, ey = y0;
+        }
+    }
+    if (rightward ? xb > right : xa > right) {  /* right of it: nothing */
+        if (rightward)
+            ex = right, ey = Y_AT(right);
+        else
+            px = right, py = Y_AT(right);
+    }
+    /* Cell by cell from (px, py) to (ex, ey), cut where it crosses a pixel's edge. */
+    int64_t c = rightward ? px / SUB : (px - 1) / SUB;
+    int64_t last = rightward ? (ex - 1) / SUB : ex / SUB;
+
+    if (rightward ? ex <= px : ex >= px)
+        return;
     for (;;) {
         int64_t qx, qy;
 
         if (c == last) {
-            qx = xb;
-            qy = yb;
+            qx = ex;
+            qy = ey;
         } else {
             qx = rightward ? (c + 1) * SUB : c * SUB;
-            qy = ya + fdiv((yb - ya) * iabs(qx - xa), iabs(xb - xa));
+            qy = Y_AT(qx);
         }
         int64_t dy = (qy - py) * dir;
         int64_t own = dy * (2 * SUB - (px - c * SUB) - (qx - c * SUB));
@@ -108,6 +139,7 @@ static void row_piece(int32_t *row, int64_t width, int64_t xa, int64_t ya, int64
         py = qy;
         c += rightward ? 1 : -1;
     }
+#undef Y_AT
 }
 
 /* A line, 24.8 in the mask's own coordinates: its area, row by row. */
@@ -250,8 +282,8 @@ uint64_t PathMaskScratch(uint32_t width, uint32_t height)
     return ((uint64_t)width + 2) * height * sizeof(int32_t);
 }
 
-bool PathMask(const struct GfxPath *path, uint32_t flags, struct GfxMask *mask, void *scratch,
-              uint64_t scratchSize)
+bool gfx_path_mask(const struct gfx_rows *k, const struct GfxPath *path, uint32_t flags,
+                   struct GfxMask *mask, void *scratch, uint64_t scratchSize)
 {
     struct raster r = {
         .acc = scratch, .width = mask->gm_Width, .height = mask->gm_Height, .stride = (int64_t)mask->gm_Width + 2,
@@ -293,24 +325,14 @@ bool PathMask(const struct GfxPath *path, uint32_t flags, struct GfxMask *mask, 
 #undef X
 #undef Y
     close_sub(&r);
-    for (int64_t y = 0; y < r.height; y++) {
-        const int32_t *row = r.acc + y * r.stride;
-        uint8_t *out = mask->gm_Pixels + y * mask->gm_BytesPerRow;
-        int64_t s = 0;
-
-        for (int64_t x = 0; x < r.width; x++) {
-            int64_t v;
-
-            s += row[x];
-            v = iabs(s);
-            if (flags & PATHF_EVENODD) {
-                v %= 2 * COVER_FULL;
-                v = v > COVER_FULL ? 2 * COVER_FULL - v : v;
-            } else if (v > COVER_FULL) {
-                v = COVER_FULL;
-            }
-            out[x] = (uint8_t)((v * 255 + COVER_FULL / 2) / COVER_FULL);
-        }
-    }
+    for (int64_t y = 0; y < r.height; y++)
+        k->sweep(mask->gm_Pixels + y * mask->gm_BytesPerRow, r.acc + y * r.stride, (uint64_t)r.width,
+                 flags & PATHF_EVENODD);
     return true;
+}
+
+bool PathMask(const struct GfxPath *path, uint32_t flags, struct GfxMask *mask, void *scratch,
+              uint64_t scratchSize)
+{
+    return gfx_path_mask(&gfx_rows_scalar, path, flags, mask, scratch, scratchSize);
 }

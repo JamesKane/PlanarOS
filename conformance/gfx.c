@@ -57,7 +57,7 @@ static int open_gfx(void)
     struct Library *lib;
 
     CHECK(1, (lib = IExec->OpenLibrary("gfx.library", 7)));
-    CHECK(2, lib->lib_Version == 7 && !IExec->OpenLibrary("gfx.library", 8));
+    CHECK(2, lib->lib_Version == 8 && !IExec->OpenLibrary("gfx.library", 9));
     IGfx = (struct GfxIFace *)IExec->GetInterface(lib, "main", 1);
     CHECK(3, IGfx && IGfx->Data.if_Library == lib && IGfx->Data.if_Size == sizeof(struct GfxIFace));
     CHECK(4, !IExec->GetInterface(lib, "main", 2));

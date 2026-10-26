@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V8.2 done
+EXPECT := V8.3 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -292,17 +292,22 @@ dos-lib-test: $(DOS_LIB_TEST)
 	@$(DOS_LIB_TEST)
 
 # gfx.library (lib/gfx) on the host with the sanitizers, against
-# conformance/gfxcheck.h's reference: its scalar entries, and on an Arm
-# host its NEON ones (arch/aarch64/lib/gfx.c). RVV's run in the guest.
+# conformance/gfxcheck.h's and typecheck.h's references: its scalar
+# entries, and on an Arm host its NEON ones (arch/aarch64/lib/gfx.c),
+# with lib/font for its type. RVV's run in the guest.
 GFX_TEST := build/gfx/gfx-test
+FONT_SRCS := $(filter-out %/test.c,$(wildcard lib/font/*.c))
+FONT_FILES := $(wildcard lib/font/fonts/*.ttf)
 GFX_SRCS := $(filter-out %/test.c,$(wildcard lib/gfx/*.c))
 GFX_NEON := $(if $(filter arm64 aarch64,$(shell uname -m)),arch/aarch64/lib/gfx.c)
 
 $(GFX_TEST): $(GFX_SRCS) $(GFX_NEON) lib/gfx/test.c lib/gfx/rows.h lib/gfx/font8x8.h \
-		conformance/gfxcheck.h conformance/gfxref.h include/planar/gfx.h
+		$(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/utility/span.c \
+		conformance/gfxcheck.h conformance/gfxref.h conformance/typecheck.h include/planar/gfx.h \
+		include/planar/font.h
 	@mkdir -p $(dir $@)
-	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) -Ilib/gfx $(if $(GFX_NEON),-DGFX_TEST_NEON) \
-	  $(GFX_SRCS) $(GFX_NEON) lib/gfx/test.c -o $@
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iconformance) -Ilib/gfx -Ilib/font $(if $(GFX_NEON),-DGFX_TEST_NEON) \
+	  $(GFX_SRCS) $(GFX_NEON) $(FONT_SRCS) lib/utility/span.c lib/gfx/test.c -o $@
 
 gfx-test: $(GFX_TEST)
 	@$(GFX_TEST)
@@ -312,20 +317,21 @@ gfx-test: $(GFX_TEST)
 # oracle, passes 1 to 4, over the corpus and the system fonts' subsets
 # (v8-plan steps 1 and 2).
 FONT_ORACLE := build/font/font-oracle
-FONT_SRCS := $(filter-out %/test.c,$(wildcard lib/font/*.c))
-FONT_FILES := $(wildcard lib/font/fonts/*.ttf)
 FONT_CORPUS := $(wildcard tools/font-oracle/corpus/*.ttf) $(FONT_FILES)
 FREETYPE_CFLAGS = $(shell pkg-config --cflags freetype2 | sed 's/-I/-isystem /g')
 FREETYPE_LIBS = $(shell pkg-config --libs freetype2)
 HARFBUZZ_CFLAGS = $(shell pkg-config --cflags harfbuzz | sed 's/-I/-isystem /g')
 HARFBUZZ_LIBS = $(shell pkg-config --libs harfbuzz)
 
-$(FONT_ORACLE): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/gfx/path.c lib/utility/span.c \
+# lib/gfx's rasteriser: PathMask, and the scalar row kernels it sweeps by.
+GFX_RASTER := lib/gfx/path.c lib/gfx/draw.c lib/gfx/gamma.c
+
+$(FONT_ORACLE): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h $(GFX_RASTER) lib/gfx/rows.h lib/utility/span.c \
 		tools/font-oracle/oracle.c tools/font-oracle/shaping.c tools/font-oracle/oracle.h \
 		conformance/fontcheck.h include/planar/font.h include/planar/gfx.h include/planar/utility.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font -Iconformance) $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
-	  $(FONT_SRCS) lib/gfx/path.c lib/utility/span.c tools/font-oracle/oracle.c tools/font-oracle/shaping.c \
+	  $(FONT_SRCS) $(GFX_RASTER) lib/utility/span.c tools/font-oracle/oracle.c tools/font-oracle/shaping.c \
 	  $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) -o $@
 
 font-oracle: $(FONT_ORACLE)
@@ -337,11 +343,11 @@ font-oracle: $(FONT_ORACLE)
 FONT_FUZZ := build/font/font-fuzz
 FONT_FUZZ_RUNS ?= -runs=300000
 
-$(FONT_FUZZ): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/gfx/path.c lib/utility/span.c \
+$(FONT_FUZZ): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h $(GFX_RASTER) lib/gfx/rows.h lib/utility/span.c \
 		tools/font-fuzz/fuzz.c include/planar/font.h include/planar/gfx.h include/planar/utility.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(subst -fsanitize=,-fsanitize=fuzzer$(comma),$(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font)) \
-	  $(FONT_SRCS) lib/gfx/path.c lib/utility/span.c tools/font-fuzz/fuzz.c -o $@
+	  $(FONT_SRCS) $(GFX_RASTER) lib/utility/span.c tools/font-fuzz/fuzz.c -o $@
 
 font-fuzz: $(FONT_FUZZ)
 	@rm -rf $(FONT_FUZZ).corpus && mkdir -p $(FONT_FUZZ).corpus && cp tools/font-fuzz/seeds/*.ttf $(FONT_FUZZ).corpus/

@@ -48,6 +48,7 @@ void *_tls_init(uint8_t *block, uint64_t tcb)
     const uint8_t *s = __tdata_start;
     uint8_t *d = block + tcb;
 
+    process.pd_IExec = IExec;           /* crt0 sets it first */
     *(struct ProcessData **)block = &process;
     while (s < __tdata_end)
         *d++ = *s++;

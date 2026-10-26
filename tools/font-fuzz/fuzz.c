@@ -127,6 +127,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             struct GfxMask mk = { mask, w, h, w, r.MinX, r.MinY };
 
             CHECK(PathMask(&path, g & 1 ? PATHF_EVENODD : 0, &mk, scratch, sizeof scratch));
+            /* A mask through the middle of it, its edges cut where the
+             * outline crosses them (FillPath's pieces). */
+            mk = (struct GfxMask){ mask, w / 2 + 1, h / 2 + 1, w / 2 + 1, r.MinX + (int32_t)w / 3,
+                                   r.MinY + (int32_t)h / 3 };
+            CHECK(PathMask(&path, g & 1 ? 0 : PATHF_EVENODD, &mk, scratch, sizeof scratch));
         }
     }
     CHECK(GetGlyphMetrics(&face, m.fm_NumGlyphs, &(struct GlyphMetrics){ 0 }) == ERR_BADARG);

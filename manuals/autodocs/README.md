@@ -11,7 +11,7 @@
 | [blk.md](blk.md) | The block class's client library (`planar/blk.h`, `lib/blk`) |
 | [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
-| [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing (`planar/gfx.h`, `lib/gfx`) |
+| [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing; paths, gradients and type (`planar/gfx.h`, `lib/gfx`) |
 | [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events (`planar/intuition.h`, `lib/intuition`) |
 | [font.md](font.md) | font.library: TrueType fonts read in place, their metrics, glyphs' outlines, shaping and lines (`planar/font.h`, `lib/font`) |
 
@@ -34,6 +34,7 @@
 | ArmPort | [msg](msg.md#execarmport) | library |
 | ArmTimer | [exec](exec.md#execarmtimer) | kernel |
 | BltBitMap | [gfx](gfx.md#gfxbltbitmap) | library, through `IGfx` |
+| BltMask | [gfx](gfx.md#gfxbltmask) | library, through `IGfx` |
 | BindIrq | [lease](lease.md#leasebindirq) | kernel |
 | blk_alloc | [blk](blk.md#blkblk_alloc) | library |
 | blk_close | [blk](blk.md#blkblk_close) | library |
@@ -81,6 +82,8 @@
 | ExaminePath | [dos](dos.md#dosexaminepath) | library |
 | ExitProcess | [exec](exec.md#execexitprocess) | kernel |
 | ExitTask | [exec](exec.md#execexittask) | kernel |
+| FillGradient | [gfx](gfx.md#gfxfillgradient) | library, through `IGfx` |
+| FillPath | [gfx](gfx.md#gfxfillpath) | library, through `IGfx` |
 | FindTagItem | [utility](utility.md#utilityfindtagitem) | library |
 | FindTask | [exec](exec.md#execfindtask) | kernel |
 | FitLine | [font](font.md#fontfitline) | library, through `IFont` |
@@ -106,6 +109,7 @@
 | GrantRoot | [lease](lease.md#leasegrantroot) | kernel |
 | InitBitMap | [gfx](gfx.md#gfxinitbitmap) | library, through `IGfx` |
 | InitRastPort | [gfx](gfx.md#gfxinitrastport) | library, through `IGfx` |
+| InitTmpRas | [gfx](gfx.md#gfxinittmpras) | library, through `IGfx` |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
 | LineSpacing | [font](font.md#fontlinespacing) | library, through `IFont` |
@@ -121,9 +125,11 @@
 | OpenIntuition | [intuition](intuition.md#intuitionopenintuition) | library, through `IIntuition` |
 | OpenLibrary | [exec](exec.md#execopenlibrary) | library, through `IExec` |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
+| OpenTextFont, CloseTextFont | [gfx](gfx.md#gfxopentextfont) | library, through `IGfx` |
 | OpenWindowTagList, OpenWindowTags | [intuition](intuition.md#intuitionopenwindowtaglist) | library, through `IIntuition` |
 | PathBounds | [gfx](gfx.md#gfxpathbounds) | library, through `IGfx` |
 | PathMask, PathMaskScratch | [gfx](gfx.md#gfxpathmask) | library, through `IGfx` |
+| PathRoundRect | [gfx](gfx.md#gfxpathroundrect) | library, through `IGfx` |
 | PortGone | [msg](msg.md#execportgone) | library |
 | PresentWindow | [intuition](intuition.md#intuitionpresentwindow) | library, through `IIntuition` |
 | Printf, VPrintf | [dos](dos.md#dosprintf) | library |
@@ -147,6 +153,7 @@
 | RunCommand | [dos](dos.md#dosruncommand) | library |
 | ScaleUnits | [font](font.md#fontscaleunits) | library, through `IFont` |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
+| SetFont | [gfx](gfx.md#gfxsetfont) | library, through `IGfx` |
 | SetMem | [exec](exec.md#execsetmem) | library |
 | ShapeRun | [font](font.md#fontshaperun) | library, through `IFont` |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
@@ -169,6 +176,8 @@
 | SystemFont | [font](font.md#fontsystemfont) | library, through `IFont` |
 | TagInArray | [utility](utility.md#utilitytaginarray) | library |
 | Text | [gfx](gfx.md#gfxtext) | library, through `IGfx` |
+| TextLength | [gfx](gfx.md#gfxtextlength) | library, through `IGfx` |
+| TextRun | [gfx](gfx.md#gfxtextrun) | library, through `IGfx` |
 | ToUpper, ToLower | [utility](utility.md#utilitytoupper) | library |
 | UnshareArea | [exec](exec.md#execunsharearea) | kernel |
 | Wait | [exec](exec.md#execwait) | kernel |

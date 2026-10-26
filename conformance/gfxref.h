@@ -94,8 +94,9 @@
 [[maybe_unused]] static void gr_text(struct RastPort *rp, int64_t x, int64_t y, const char *s,
                                      uint64_t n)
 {
-    static const struct TextFont eight = { 8, 8, FONT8X8_FIRST, FONT8X8_FIRST + FONT8X8_COUNT - 1,
-                                           font8x8[0] };
+    static const struct TextFont eight = { .tf_YSize = 8, .tf_XSize = 8, .tf_LoChar = FONT8X8_FIRST,
+                                           .tf_HiChar = FONT8X8_FIRST + FONT8X8_COUNT - 1,
+                                           .tf_CharData = font8x8[0] };
     const struct TextFont *f = rp->rp_Font ? rp->rp_Font : &eight;
 
     if (f->tf_XSize > 8)

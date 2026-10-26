@@ -1,14 +1,14 @@
 /*
- * lib/gfx/text.c -- Text in the 8×8 font, or a rastport's own (V7 step 2)
+ * lib/gfx/text.c -- Text in the 8×8 font, or a rastport's own bitmap font
+ * (V7 step 2); an outline font's is type.c's, which calls this for the rest
  *
  * A glyph at a time, a pixel at a time, clipped: 8 pixels a row leave a
- * vector unit nothing to do, so this is the one operation with no vector
- * entry. A character the font doesn't hold is drawn as its first glyph
+ * vector unit nothing to do, so Text's vector entry, for an outline
+ * font's sake, comes here for a bitmap font's too. A character the font doesn't hold is drawn as its first glyph
  * (the 8×8's space).
  */
-#include <planar/gfx.h>
-
 #include "font8x8.h"
+#include "rows.h"
 
 static const struct TextFont eight = {
     .tf_YSize = 8,
@@ -18,7 +18,7 @@ static const struct TextFont eight = {
     .tf_CharData = font8x8[0],
 };
 
-void Text(struct RastPort *rp, int32_t x, int32_t y, const char *string, uint64_t count)
+void gfx_text_bitmap(struct RastPort *rp, int32_t x, int32_t y, const char *string, uint64_t count)
 {
     const struct TextFont *f;
     const struct BitMap *bm;

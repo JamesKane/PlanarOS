@@ -212,10 +212,11 @@ LIB_exec_SRCS := libs/exec/base.c lib/exec/pool.c lib/exec/fmt.c lib/exec/task.c
 	lib/rt/string.c arch/$(ARCH)/user/syscalls.S
 LIB_utility_SRCS := libs/utility/base.c $(filter-out %/test.c,$(wildcard lib/utility/*.c)) \
 	lib/exec/fmt.c lib/rt/string.c
-# gfx.library's: lib/gfx, the stubs for its Areas, and the vector unit's
-# kernels, built for it (V on RISC-V), which only a hart with it runs.
+# gfx.library's: lib/gfx, the stubs for its Areas, the process data's
+# reader (it opens font.library by the program's IExec), and the vector
+# unit's kernels, built for it (V on RISC-V), which only a hart with it runs.
 LIB_gfx_SRCS := libs/gfx/base.c $(filter-out %/test.c,$(wildcard lib/gfx/*.c)) \
-	arch/$(ARCH)/lib/gfx.c lib/rt/string.c arch/$(ARCH)/user/syscalls.S
+	arch/$(ARCH)/lib/gfx.c lib/rt/string.c arch/$(ARCH)/user/syscalls.S arch/$(ARCH)/user/procdata.c
 $(BUILD)/libs/arch/$(ARCH)/lib/gfx.o: LIB_CFLAGS := $(USER_CFLAGS)
 # intuition.library's: lib/intuition, and what it calls linked in: the
 # messages (lib/exec/msg.c), tag lists (lib/utility/tags.c) and the stubs.
