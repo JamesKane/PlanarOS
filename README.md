@@ -9,7 +9,19 @@ Planar is an operating system for one person and one machine. It turns a modern 
 - **Small kernel, everything else in user mode.** The kernel schedules, protects and routes messages. Drivers, filesystems, display and networking are ordinary programs.
 - **Real hardware first.** It targets RISC-V and Arm boards with real GPUs and NPUs: the Orange Pi RV2, CIX P1, RK3588 and Qualcomm SC8280XP. Every cost claim is measured on the board.
 
+![Planar's desktop on QEMU: the screen bar with its clock, the Workbench's backdrop with the volumes as icons and its CPU and memory badge, a volume's window, and Prefs](docs/images/workbench.png)
+
+*The desktop on QEMU (riscv64, 1280×800), from the window test's screendump: the screen bar, the Workbench with `dos`'s volumes and its HUD, a volume's window, and Prefs. Every pixel is drawn by Planar's own font engine, gfx.library and ui.library, and composed by intuition on the CPU.*
+
 Today Planar boots on QEMU (riscv64 and aarch64), on the Orange Pi RV2, and on the CIX P1 (Orange Pi 6 Plus) through UEFI and ACPI. It has SMP scheduling across core classes (all 12 of the CIX's big and little cores), user processes in their own protection domains, and zero-copy IPC with connections, rings and `DoMsg` ([V1](docs/v1-plan.md), [V2](docs/v2-plan.md), [V3](docs/v3-plan.md)). Its address space is identity-mapped: an address is the physical address ([VQ3](docs/vq3-results.md)). Its drivers run in user mode: hwdb starts them in its device graph's order and restarts them when they're killed, and under ACPI, acpid runs ACPICA in user mode to describe the namespace, so the same drivers bind as through the device tree. Each board boots from its own storage (NVMe on the CIX, the SD card on the RV2) through FAT32 to a Shell on its screen ([V4](docs/v4-plan.md)). Apps run GPU work from queues of their own: on the CIX's Mali-G720 with no kernel call or server on a job's path, and on the RV2's BXE-2-32 through a server queue with the same API. Both boards scan out natively with planes and flips at vblank, take USB keyboards and mice, and power their devices through a `power` server ([V5](docs/v5-plan.md)).
+
+On top of that sit Commodore's libraries, scaled up: `exec.library`, `utility.library` and `dos.library` as shared libraries reached through interface tables, with supervision that restarts any server and lets its clients reconnect ([V6](docs/v6-plan.md)). intuition composes windows from the programs' own bitmaps with no copy over IPC, and gfx.library draws them ([V7](docs/v7-plan.md)). V8, in progress, adds type and the desktop ([V8](docs/v8-plan.md)):
+- a TrueType font engine written from the specification and checked against FreeType and HarfBuzz, with text blended in linear light;
+- the screen bar with its menus and clock, resizable windows and requesters;
+- the Shell in a window;
+- `ui.library`'s gadgets;
+- the Workbench, with the volumes as icons;
+- Prefs, whose settings go to input and intuition live and are saved for them to read at their next start.
 
 The design builds on [Omega](../omega/) and [PlanOmega](../PlanOmega/), which proved the single address space and Exec-style IPC on the RV2. It started from the *Design Specification for a Lightweight, Flat-Memory Operating System* ([vision](docs/00-vision.md)).
 
@@ -42,7 +54,8 @@ make run                      # boot it in QEMU (Ctrl-A X quits)
 make PLATFORM=qemu-virt-a64 run
 make PLATFORM=hosted run      # or: build/hosted/planar some.dtb
 make PLATFORM=... test        # boot and check the transcript (tools/boot-check.py)
-make test-all                 # every platform that runs here: 10 boots, compare-hw, hwdb-test
+make test-all                 # every platform that runs here: 10 boots, compare-hw, and the host tests
+make ui-test wb-test          # ui.library, and the Workbench's and Prefs' drawing, on the host
 make check                    # portable code must not test arch or platform; no match-table ties
 make hwdb-test                # hwdb's device graph on the captured trees and tables
 make PLATFORM=ky-x1 test      # the RV2, over the serial console
@@ -63,7 +76,7 @@ make vq3                      # the VQ3 soak of Areas under memory pressure
 
 ## Planar and the web
 
-Don't expect a modern browser. Networking isn't in any roadmap phase yet. The `net` server (wired Ethernet only: RTL8125 and the K1 EMAC, no Wi-Fi) is marked "later", and its TCP/IP stack is still open (VQ15). Nothing yet covers TLS, DNS, an entropy source, or reading the real-time clock, and certificates can't be checked without the time. When those arrive, the realistic target is a curl-class client: an app fetching HTTPS from endpoints you chose, built on lwIP, a small TLS library and a thin POSIX layer. Chromium, Firefox and WebKit are out of reach. They need POSIX, Mesa-class GPU userspace and a sandbox, and the vision rules out all three as design drivers (§0.3). Treat anything that serves the internet with care too: the design has no adversary model (P1), so there's no ASLR, no stack canaries and no sandboxing, and some drivers get unconfined DMA. Protection domains contain bugs, not attackers. Put Planar behind a trusted LAN or a proxy.
+Don't expect a modern browser. Networking isn't in any roadmap phase yet. The `net` server (wired Ethernet only: RTL8125 and the K1 EMAC, no Wi-Fi) is marked "later", and its TCP/IP stack is still open (VQ15). Nothing yet covers TLS, DNS or an entropy source. The real-time clock is read now (the screen bar's clock), which certificates will need. When those arrive, the realistic target is a curl-class client: an app fetching HTTPS from endpoints you chose, built on lwIP, a small TLS library and a thin POSIX layer. Chromium, Firefox and WebKit are out of reach. They need POSIX, Mesa-class GPU userspace and a sandbox, and the vision rules out all three as design drivers (§0.3). Treat anything that serves the internet with care too: the design has no adversary model (P1), so there's no ASLR, no stack canaries and no sandboxing, and some drivers get unconfined DMA. Protection domains contain bugs, not attackers. Put Planar behind a trusted LAN or a proxy.
 
 ## Design documents
 
@@ -86,10 +99,19 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 15. [Audio and DSP subsystem](docs/15-audio-dsp.md): scaling up Amiga `audio.device`, AHI and `realtime.library` with zero-copy voice/stream rings, SIMD `dsp.library`, hardware DSP queue leases and click-free crash recovery (proposed).
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
 17. [C23 runtime, `libc`, and Commodore V36–V40 libraries](docs/17-c-runtime-and-libraries.md): scaling up `exec.library` (`CreatePool`, `AllocVec`, `RawDoFmt`), `utility.library` (`TagItem`, `Hook`, 64-bit `Span`/`Str` slices), and `dos.library` (`ReadArgs`) to replace PDP-11 `libc` assumptions, with opt-in `lib/clib` and vendored `compiler-rt` 128-bit builtins (proposed).
-18. Phase plans, each with what was built and measured: [V1](docs/v1-plan.md) (the SAS core, and the kernel's upper-half decision), [V2](docs/v2-plan.md) (IPC), [V3](docs/v3-plan.md) (the CIX P1, ACPI, core classes), [V4](docs/v4-plan.md) (drivers and servers, storage, the Shell), [V5](docs/v5-plan.md) (GPU queue leases, scanout, power, input); [V6](docs/v6-plan.md) proposed.
-19. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
-20. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
-21. [Open questions](docs/questions.md): the question register.
+18. [PlanarBASIC](docs/18-planar-basic.md): interactive Workbench scripting and a system FFI, after AmigaBASIC (proposed).
+19. Phase plans, each with what was built and measured:
+    - [V1](docs/v1-plan.md): the SAS core, and the kernel's upper-half decision.
+    - [V2](docs/v2-plan.md): IPC.
+    - [V3](docs/v3-plan.md): the CIX P1, ACPI, core classes.
+    - [V4](docs/v4-plan.md): drivers and servers, storage, the Shell.
+    - [V5](docs/v5-plan.md): GPU queue leases, scanout, power, input.
+    - [V6](docs/v6-plan.md): libraries, interfaces, supervision.
+    - [V7](docs/v7-plan.md): windows.
+    - [V8](docs/v8-plan.md): type and the desktop.
+20. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
+21. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
+22. [Open questions](docs/questions.md): the question register.
 
 ## Status
 
@@ -101,6 +123,9 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 | V3. The CIX P1 through UEFI and ACPI, 12 cores in two classes, Arm costs, VQ3 | 2026-10-20 |
 | V4. User-mode drivers under hwdb and acpid, the kill test, NVMe and SD, FAT32, a Shell on the framebuffer | 2026-10-20 |
 | V5. GPU queue leases on both boards, native scanout, `power`, USB input, futexes | 2026-10-22 |
+| V6. Foundations: §17's libraries, interface tables and the shared library region, `init` and supervision, deadlines | 2026-10-22 |
+| V7. Workbench I: intuition, windows from client-owned bitmaps, gfx.library, input and focus, servers dying under it | Built on QEMU and both boards; the CIX's 10-run kill test waits |
+| V8. Workbench II: `font.library`, type and paths, the screen bar and menus, the Shell in a window, `ui.library`, the Workbench and Prefs | In progress: steps 1 to 7 built on QEMU |
 
 Decided so far (the full register is [questions.md](docs/questions.md)):
 - Copy what we can from omega (VQ1).
@@ -113,4 +138,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V6, foundations ([plan](docs/v6-plan.md), proposed): §17's C runtime and libraries, interface tables and the shared library region, and the supervision the design set asks for (`init`, ports that survive a restart, deadlines, a graceful `STOP`), with the RV2's `dos` stall carried from V5. Then the Workbench in two phases, V7 (windows) and V8 (type and the desktop).
+Next: V8's step 8 on the boards ([plan](docs/v8-plan.md#8-supervision-and-the-boards)): the kill test with the desktop's programs killed under it, and the costs of text and of a frame with text, 10 runs in a row on each board. Before V8's exit, its font fuzzer must also run an hour with no finding. Then V7's remaining board checks close it.
