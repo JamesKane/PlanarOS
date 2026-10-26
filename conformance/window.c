@@ -158,6 +158,7 @@ static int64_t read_screen(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_
 static struct Intuition in;
 static struct Window wa, wb;
 static int32_t ptr_x, ptr_y;        /* the pointer, as intuition last said */
+static uint32_t ptr_scale = 1;      /* its sprite's, from the screen's size (pointer.h) */
 
 /* Another client's window, a flat colour: the stopped client's, and
  * the killed one's two. */
@@ -271,7 +272,8 @@ static uint32_t screen_px(int32_t x, int32_t y)
 {
     uint32_t p;
 
-    if (x >= ptr_x && y >= ptr_y && (p = pointer_pixel((uint32_t)(x - ptr_x), (uint32_t)(y - ptr_y))) >> 24)
+    if (x >= ptr_x && y >= ptr_y &&
+        (p = pointer_pixel((uint32_t)(x - ptr_x) / ptr_scale, (uint32_t)(y - ptr_y) / ptr_scale)) >> 24)
         return p;
     for (unsigned i = 0; i < nshown; i++)
         if (from(order[i], x, y, &p))
@@ -786,6 +788,7 @@ static int64_t info(struct IntuiMsg *m)
     if ((e = ask(&in, m, INTUI_INFO)) == 0) {
         ptr_x = m->im_PointerX;
         ptr_y = m->im_PointerY;
+        ptr_scale = pointer_scale(m->im_Width, m->im_Height);
     }
     return e;
 }

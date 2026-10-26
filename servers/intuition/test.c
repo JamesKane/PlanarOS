@@ -311,11 +311,13 @@ static int run(const char *name, const struct GfxIFace *g)
                 }
             }
             if (ic_dirty(&s)) {
-                uint64_t was = s.painted;
+                uint64_t was = s.painted, pending = ic_pending(&s);
 
                 memset(writes, 0, sizeof writes);
                 target = &sb[back];
                 ic_compose(&s, target);
+                if (s.painted - was != pending)
+                    fault = "ic_pending wasn't what the frame painted";
                 painted += s.painted - was;
                 frames++;
                 back ^= 1;
@@ -496,6 +498,33 @@ static int events_test(void)
     return 0;
 }
 
+/* ic_start: a frame put off until just before the vblank, or not. */
+static int pace_test(void)
+{
+    constexpr uint64_t P = 16666667, LEAD = 4000000, V = 1000000000;
+    static const struct {
+        uint64_t now, cost;
+        bool waited;
+        uint64_t want;
+    } cases[] = {
+        { V + 1000000, 0, false, V + P - LEAD },            /* the pointer alone */
+        { V + 1000000, 100000, false, V + P - LEAD - 100000 },  /* a drag, the CIX's cost */
+        { V + 1000000, 2400000, false, V + P - LEAD - 2400000 },
+        { V + 1000000, 100000, true, 0 },                   /* a client waits */
+        { V + P - LEAD - 99999, 100000, false, 0 },         /* already late */
+        { V + P + 1000, 0, false, 0 },                      /* past the next vblank */
+        { V + 1000000, P / 2, false, 0 },                   /* too costly to put off */
+    };
+
+    for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++)
+        if (ic_start(cases[i].now, V, P, LEAD, cases[i].cost, cases[i].waited) != cases[i].want) {
+            printf("intuition-test: FAILED: pace: case %u\n", i);
+            return 1;
+        }
+    printf("intuition-test: ok: pace: a frame nobody waits for put off to its lead before the vblank\n");
+    return 0;
+}
+
 int main(void)
 {
     if (run("scalar", &scalar))
@@ -504,7 +533,7 @@ int main(void)
     if (run("NEON", &neon))
         return 1;
 #endif
-    if (chrome_test() || events_test())
+    if (chrome_test() || events_test() || pace_test())
         return 1;
     return 0;
 }

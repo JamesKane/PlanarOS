@@ -9,7 +9,10 @@
  * the last flip has latched, so one is composed a vblank at most. A
  * second task waits on the sync page's ds_Disp and signals the first,
  * whose sleep is on its ports. The pointer moving is a commit of plane 2
- * alone, at a vblank at most too, with no window composed.
+ * alone, at a vblank at most too, with no window composed. A frame no
+ * client waits for (the pointer, a drag, the chrome) is put off until
+ * just before the vblank, so a window's frame presented meanwhile goes
+ * with it (compose.h's ic_start).
  *
  * A window's buffers are its client's, shared with intuition read-only.
  * intuition describes each one itself (InitBitMap) from what OPEN said,
@@ -66,7 +69,10 @@ constexpr unsigned CONNS = 16;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t CALL_DEADLINE = 1000 * MS;   /* for display's and input's answers (V6 step 7) */
 constexpr uint64_t CLOSE_DEADLINE = 1000 * MS;  /* for CloseWindow, after the close gadget */
-constexpr uint64_t POINTER_LEAD = 4 * MS;       /* a pointer moved alone: committed this long before the vblank */
+constexpr uint64_t COMMIT_LEAD = 4 * MS;        /* a frame nobody waits for: committed this long before the vblank */
+constexpr uint64_t COMPOSE_FIXED = MS / 5;      /* a frame's cost beyond its pixels' */
+constexpr uint64_t RATE_PIXELS = 65536;         /* a frame this big or more says what a pixel costs */
+constexpr unsigned RATES = 8;
 
 /* A client's connection: its task, its page, and its events. */
 struct client {
@@ -120,7 +126,9 @@ static struct {
     bool flipping, pointer_moved;
     uint64_t flip_seq;
     uint64_t period;                /* the vblanks', from display's refresh */
-    uint64_t pointer_due;           /* a pointer moved alone, to be committed then; 0 none */
+    uint64_t frame_due;             /* a frame nobody waits for, to be started then; 0 none */
+    uint64_t rate[RATES];           /* the last big frames' picoseconds a pixel */
+    unsigned nrate;
     uint64_t close_next;            /* close_late's next deadline; 0 none */
 
     /* input, and what's done with it: ring nullptr while there's none. */
@@ -323,12 +331,14 @@ static int64_t screen_up(uint64_t deadline)
     for (unsigned b = 0; b < 2; b++)
         if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, 0, &it.buf[b], &it.sbm[b])) != 0)
             return e;
-    if ((e = alloc(POINTER_SIZE, POINTER_SIZE, DISPLAY_ARGB8888, 0, &it.pointer, &it.pbm)) != 0)
+    uint32_t ps = pointer_scale(it.width, it.height);
+
+    if ((e = alloc(POINTER_SIZE * ps, POINTER_SIZE * ps, DISPLAY_ARGB8888, 0, &it.pointer, &it.pbm)) != 0)
         return e;
-    for (uint32_t y = 0; y < POINTER_SIZE; y++)
-        for (uint32_t x = 0; x < POINTER_SIZE; x++)
+    for (uint32_t y = 0; y < POINTER_SIZE * ps; y++)
+        for (uint32_t x = 0; x < POINTER_SIZE * ps; x++)
             ((uint32_t *)((uint8_t *)it.pbm.bm_BaseAddr + y * it.pbm.bm_BytesPerRow))[x] =
-                pointer_pixel(x, y);
+                pointer_pixel(x / ps, y / ps);
     if (first) {
         it.px = (int32_t)it.width / 2;
         it.py = (int32_t)it.height / 2;
@@ -428,13 +438,27 @@ static void taken_away(void)
     }
 }
 
+/* What composing the next frame should take: its pixels at the worst
+ * rate of the last big frames. None yet (the first frame, the whole
+ * screen): a period, so it's composed at once. */
+static uint64_t compose_cost(void)
+{
+    uint64_t rate = 0;
+
+    if (!it.nrate)
+        return it.period;
+    for (unsigned i = 0; i < RATES; i++)
+        rate = it.rate[i] > rate ? it.rate[i] : rate;
+    return COMPOSE_FIXED + ic_pending(&it.screen) * rate / 1000;
+}
+
 /* intuition's one timer, at whichever is first. */
 static void rearm(void)
 {
     uint64_t t = it.close_next;
 
-    if (it.pointer_due && (!t || it.pointer_due < t))
-        t = it.pointer_due;
+    if (it.frame_due && (!t || it.frame_due < t))
+        t = it.frame_due;
     ArmTimer(t, SIG_TIMER);
 }
 
@@ -458,24 +482,26 @@ static void frame(void)
     }
     if (!compose && !it.pointer_moved)
         return;
-    /* A pointer moved alone waits until just before the vblank, so a
-     * window's frame presented meanwhile goes in the same commit: one
-     * committed first would hold it to the latch after. */
-    if (!compose) {
-        uint64_t due = it.ds->ds_Time + it.period - POINTER_LEAD;
-
-        if (CurrentTime() < due) {
-            it.pointer_due = due;
-            rearm();
-            return;
-        }
+    /* Not waited for: put off until just before the vblank (ic_start). */
+    t = ic_start(CurrentTime(), it.ds->ds_Time, it.period, COMMIT_LEAD, compose ? compose_cost() : 0,
+                 unsafe());
+    if (t) {
+        it.frame_due = t;
+        rearm();
+        return;
     }
-    it.pointer_due = 0;
+    it.frame_due = 0;
     memset(it.dm, 0, sizeof *it.dm);
     if (compose) {
+        uint64_t px = it.screen.painted;
+
         t = CurrentTime();
         ic_compose(&it.screen, &it.sbm[it.back]);
-        it.nanos += CurrentTime() - t;
+        t = CurrentTime() - t;
+        px = it.screen.painted - px;
+        if (px >= RATE_PIXELS)
+            it.rate[it.nrate++ % RATES] = t * 1000 / px;
+        it.nanos += t;
         it.frames++;
         taken();
         it.dm->dm_Set[n++] = (struct DisplayPlane){ 1, it.buf[it.back], 0, 0 };

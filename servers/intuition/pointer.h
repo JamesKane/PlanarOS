@@ -5,6 +5,11 @@
  * bottom from #E02828 to #A81818, in a white outline. Every pixel is
  * opaque or clear, so it lands on the screen as it is, whatever blends
  * it: conformance/window.c reads it back. Shared with window.c.
+ *
+ * On a screen of 1600 by 900 or more it's drawn twice the size, each
+ * pixel 2 by 2 (V7 step 6: 16 was small on 1920 by 1080). The hot spot
+ * still reaches the screen's last pixel, so at its right and bottom
+ * edges only the tip shows, as on other desktops.
  */
 #ifndef SERVERS_INTUITION_POINTER_H
 #define SERVERS_INTUITION_POINTER_H
@@ -12,6 +17,11 @@
 #include <stdint.h>
 
 constexpr uint32_t POINTER_SIZE = 16;
+
+static inline uint32_t pointer_scale(uint32_t width, uint32_t height)
+{
+    return width >= 1600 && height >= 900 ? 2 : 1;
+}
 
 static inline uint32_t pointer_pixel(uint32_t x, uint32_t y)
 {

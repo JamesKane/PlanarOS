@@ -184,6 +184,30 @@ static uint64_t pixels(struct GfxRect r)
     return (uint64_t)(r.MaxX - r.MinX + 1) * (uint64_t)(r.MaxY - r.MinY + 1);
 }
 
+/* What ic_compose paints: each pixel of 'all' once. */
+uint64_t ic_pending(const struct ic_screen *s)
+{
+    struct ic_damage all = s->last;
+    uint64_t n = 0;
+
+    for (unsigned i = 0; i < s->now.n; i++)
+        add(&all, s->now.r[i]);
+    for (unsigned i = 0; i < all.n; i++)
+        n += pixels(all.r[i]);
+    return n;
+}
+
+uint64_t ic_start(uint64_t now, uint64_t vblank, uint64_t period, uint64_t lead, uint64_t cost,
+                  bool waited)
+{
+    uint64_t due;
+
+    if (waited || cost >= period / 2 || lead >= period / 2)
+        return 0;
+    due = vblank + period - lead - cost;
+    return now < due ? due : 0;
+}
+
 /* 'r', from the windows at depth z and behind. */
 static void paint(struct ic_screen *s, struct RastPort *rp, struct GfxRect r, unsigned z)
 {

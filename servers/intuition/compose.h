@@ -83,6 +83,21 @@ void ic_move(struct ic_screen *s, struct ic_window *w, int32_t x, int32_t y);
 
 bool ic_dirty(const struct ic_screen *s);
 
+/* The pixels the next frame will paint. */
+uint64_t ic_pending(const struct ic_screen *s);
+
+/*
+ * When to start composing and committing a frame, 0 at once (V7 step
+ * 6). One a client waits for is at once. One nobody waits for (the
+ * pointer moved, a window dragged, chrome redrawn) is put off until
+ * 'lead' plus 'cost', what composing it should take, before the vblank
+ * after 'vblank': a window's frame presented meanwhile then goes in the
+ * same commit, where one committed first would hold it to the latch
+ * after. A cost of half a period or more is at once.
+ */
+uint64_t ic_start(uint64_t now, uint64_t vblank, uint64_t period, uint64_t lead, uint64_t cost,
+                  bool waited);
+
 /* The next frame into 'target', the screen's size: what changed for it
  * and for the last, repainted. */
 void ic_compose(struct ic_screen *s, struct BitMap *target);
