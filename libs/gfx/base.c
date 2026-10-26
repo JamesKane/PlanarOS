@@ -26,6 +26,10 @@ static const struct GfxIFace main_iface = {
     .BltBitMap = BltBitMap,
     .DrawBevel = DrawBevel,
     .Text = Text,
+
+    .PathBounds = PathBounds,
+    .PathMaskScratch = PathMaskScratch,
+    .PathMask = PathMask,
 };
 
 static struct Interface *const interfaces[] = { (struct Interface *)&main_iface, nullptr };
@@ -33,8 +37,8 @@ static struct Interface *const interfaces[] = { (struct Interface *)&main_iface,
 static const struct Library base = {
     .lib_Name = "gfx.library",
     .lib_Version = 7,
-    .lib_Revision = 2,
-    .lib_IdString = "gfx.library 7.2 (22.10.2026)",
+    .lib_Revision = 3,
+    .lib_IdString = "gfx.library 7.3 (26.10.2026)",
     .lib_Interfaces = interfaces,
 };
 

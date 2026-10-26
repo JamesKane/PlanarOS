@@ -107,7 +107,7 @@ For an English UTF-8 string, `IFont->ShapeRun` executes five deterministic, allo
 
 `IFont->RasterizeGlyph` converts a glyph's outlines into an 8-bit linear coverage bitmap (`A8`):
 
-1. **Curve flattening**: Decomposes quadratic (`glyf`) and cubic (`CFF `) Béziers into monotonic line segments using recursive midpoint subdivision with a flatness tolerance of `0.125 px` in device space.
+1. **Curve flattening**: Decomposes quadratic (`glyf`) and cubic (`CFF `) Béziers into monotonic line segments using recursive midpoint subdivision with a flatness tolerance of `0.125 px` in device space. *Built (V8 step 1):* evenly spaced points within `1/512 px`, the tolerance it took to be within 2/255 of the exact coverage; at `0.125 px` a pixel on a curve's edge was up to a tenth out. The rasteriser is gfx.library's `PathMask`, which font.library's outlines are drawn by ([v8-plan](v8-plan.md) decision 6).
 2. **Exact analytical area integration**: For each scanline $y$, accumulates signed trapezoidal pixel coverage and winding deltas across touched pixels (the same geometric integral used by FreeType's smooth rasteriser and `stb_truetype` v2), clamped by the non-zero winding rule (`CFF ` and standard OpenType) or even-odd rule when requested.
 3. **SIMD sweep**: The cumulative winding prefix-sum and `uint8_t` conversion across a scanline use RVV 1.0 on RISC-V and NEON on AArch64 ([§7.4](07-language-toolchain.md#74-simd-policy)), with a portable C23 scalar implementation verified alongside it.
 4. **Gamma-correct blending**: `gfx.library` blends the `A8` coverage mask in linear light (via a 256-entry sRGB-to-linear lookup table) so light text on dark slate (`pane.dark.bg`, `#36435A`) and dark text on brushed silver (`pane.light.bg`, `#D8DEE8`) maintain equal perceived stem weight.
@@ -179,6 +179,7 @@ FreeType (`libfreetype`) and HarfBuzz (`libharfbuzz`) are **test oracles only**:
    Renders all printable English glyphs at `12 px`, `13 px`, `16 px`, `24 px` and `48 px` using `IFont->RasterizeGlyph` and compares the resulting `A8` buffers against FreeType (`FT_LOAD_NO_HINTING | FT_LOAD_TARGET_NORMAL`, `FT_RENDER_MODE_NORMAL`):
    - Bounding box (`bitmap_left`, `bitmap_top`, `width`, `rows`) must match within $\le 1\text{ px}$.
    - Maximum per-pixel coverage difference across shared interior pixels must be $\le 2 / 255$ (fixed-point tie-breaking tolerance), with $\ge 99.8\%$ of pixels within $\le 1 / 255$.
+   - *Built (V8 step 1):* these numbers hold against the **exact** coverage, which the oracle computes itself, not against FreeType's. FreeType's unhinted renderer approximates curves more coarsely (up to 29/255 from the exact on a curve's edge), so it can't be matched to 2/255 without copying its flattening (§14.1). Against FreeType the oracle checks the boxes and guards set from measurement ([v8-plan](v8-plan.md) step 1).
 5. **Pass 5 — Adversarial Table Fuzzer (`tools/font-fuzz`)**:
    Mutates table offsets, `cmap` segment arrays, composite glyph component indices (including self-referential cycles `A → B → A`), `CFF ` subroutine calls and `GPOS` class matrices under AddressSanitizer and UndefinedBehaviorSanitizer. Every corrupted input must return `ERR_BADFONT` or `ERR_UNSUPPORTED` with zero out-of-bounds reads, zero leaks and bounded execution time.
 

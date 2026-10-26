@@ -1,6 +1,6 @@
 # gfx: bitmaps, rastports and drawing
 
-*Checked against V7 step 2.*
+*Checked against V7 step 2; the paths, V8 step 1.*
 
 gfx.library's functions, in alphabetical order. The header is `planar/gfx.h`. They're a shared library's, called through `IGfx` (`struct GfxIFace`, the "main" interface, version 1, of gfx.library 7). The same functions by the same names are in `lib/gfx` (`libgfx.a`), scalar, for a program that links them. None traps, except for the Area `AllocBitMap` makes and `FreeBitMap` frees. None keeps state, so any task can call any of them at any time. [Libraries ch. 12](../libraries/12-gfx.md) is the guide to them.
 
@@ -283,6 +283,97 @@ None known.
 
 **SEE ALSO**
 [RectFill](#gfxrectfill), [Text](#gfxtext).
+
+---
+
+## gfx/PathBounds
+
+**NAME**
+PathBounds -- the pixels a path's points touch
+
+**SYNOPSIS**
+```c
+#include <planar/gfx.h>
+bool PathBounds(const struct GfxPath *path, struct GfxRect *r);
+```
+
+**FUNCTION**
+Finds the box of every point in the path, curves' control points among them, and rounds it out to whole pixels: the smallest rectangle of pixels the path can cover. It's the box to give `PathMask`.
+
+**INPUTS**
+- `path` -- 26.6 fixed point, y down (`struct GfxPath`, below).
+- `r` -- where the box goes, inclusive, in pixels.
+
+**RESULT**
+True, with `*r` set. False, with `*r` untouched, if the path has no points, spans no area, starts with something other than `PATH_MOVE`, or its verbs and points don't agree.
+
+**EXAMPLE**
+```c
+struct GfxRect r;
+
+if (IGfx->PathBounds(&path, &r))
+    w = r.MaxX - r.MinX + 1, h = r.MaxY - r.MinY + 1;
+```
+
+**NOTES**
+- **Planar's own:** Exec had no paths.
+- A path's arrays are the caller's: `gp_Points` and `gp_Verbs`, `gp_MaxPoints` and `gp_MaxVerbs` their sizes, `gp_NumPoints` and `gp_NumVerbs` what's in them. Each verb takes its points from the next in `gp_Points`: `PATH_MOVE` and `PATH_LINE` one, `PATH_QUAD` two (the control, then the end), `PATH_CUBIC` three, `PATH_CLOSE` none.
+- The box is FreeType's for the same outline: its bitmap's left, top, width and rows (`tools/font-oracle`, pass 4).
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[PathMask](#gfxpathmask), [GlyphOutline](font.md#fontglyphoutline).
+
+---
+
+## gfx/PathMask
+
+**NAME**
+PathMask, PathMaskScratch -- a path's coverage of each pixel
+
+**SYNOPSIS**
+```c
+#include <planar/gfx.h>
+uint64_t PathMaskScratch(uint32_t width, uint32_t height);
+bool PathMask(const struct GfxPath *path, uint32_t flags, struct GfxMask *mask, void *scratch,
+              uint64_t scratchSize);
+```
+
+**FUNCTION**
+Fills `mask` with how much of each of its pixels the path covers, a byte a pixel: 0 none, 255 all. Curves are cut into lines within 1/512 px of them, and each line's area is added up exactly, so every pixel is within 2/255 of the true coverage. A subpath is closed by a line back to its start whether or not it ends in `PATH_CLOSE`. Integer arithmetic throughout: the same path gives the same bytes on every CPU.
+
+`PathMaskScratch` says how many bytes of scratch a mask of that size needs: `(width + 2) * height` 32-bit words.
+
+**INPUTS**
+- `path` -- 26.6 fixed point, y down.
+- `flags` -- `PATHF_EVENODD` for the even-odd rule; otherwise non-zero winding, as TrueType's outlines are.
+- `mask` -- `gm_Pixels`, `gm_Width` and `gm_Height` (each at most `GFX_MAX_SIZE`), `gm_BytesPerRow` (at least the width), and `gm_X`, `gm_Y`: which of the path's pixels the mask's top left is. `PathBounds` gives a box that holds it all.
+- `scratch`, `scratchSize` -- at least `PathMaskScratch(width, height)` bytes, 4-aligned. Overwritten.
+
+**RESULT**
+True. False, with nothing written, if the path is malformed (as [PathBounds](#gfxpathbounds) says), the mask's sizes are wrong, or the scratch is short.
+
+**EXAMPLE**
+```c
+struct GfxMask m = { pixels, w, h, w, r.MinX, r.MinY };
+
+IGfx->PathMask(&path, 0, &m, scratch, IGfx->PathMaskScratch(w, h));
+```
+
+**NOTES**
+- **Planar's own:** Exec had no paths.
+- Part of a path outside the mask counts as it would: an edge left of the mask still covers the pixels right of it. Nothing outside the mask is written.
+- Each glyph of `font.library` is drawn so (v8-plan decision 6): [GlyphOutline](font.md#fontglyphoutline), then this.
+- Held to 2/255 of the exact coverage over ten fonts' every glyph at five sizes by `tools/font-oracle`'s pass 4. FreeType's unhinted coverage differs from it by up to 29/255 on curves, where FreeType approximates them more coarsely.
+- Scalar on every CPU so far. Its row sweep goes to the vector unit in V8 step 3.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[PathBounds](#gfxpathbounds), [GlyphOutline](font.md#fontglyphoutline).
 
 ---
 

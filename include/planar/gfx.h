@@ -92,6 +92,45 @@ struct RastPort {
     const struct TextFont *rp_Font;     /* nullptr: the 8×8 font */
 };
 
+/*
+ * A path (V8 step 1): outlines of lines and Bézier curves, in 26.6 fixed
+ * point (1/64 px), y down. Its arrays are the caller's: gp_Max* their
+ * sizes, gp_Num* what's in them. Each verb takes its points from the
+ * next in gp_Points: MOVE and LINE one, QUAD two (the control, then the
+ * end), CUBIC three, CLOSE none. A subpath is closed by a line back to
+ * its MOVE whether or not it ends in CLOSE.
+ */
+enum : uint8_t {
+    PATH_MOVE = 0,
+    PATH_LINE = 1,
+    PATH_QUAD = 2,
+    PATH_CUBIC = 3,
+    PATH_CLOSE = 4,
+};
+
+struct GfxPoint {
+    int32_t x, y;
+};
+
+struct GfxPath {
+    struct GfxPoint *gp_Points;
+    uint8_t *gp_Verbs;
+    uint32_t gp_MaxPoints, gp_MaxVerbs;
+    uint32_t gp_NumPoints, gp_NumVerbs;
+};
+
+/* Coverage, a byte a pixel (A8): 0 none, 255 all. Pixel (0, 0) is the
+ * path's pixel (gm_X, gm_Y). */
+struct GfxMask {
+    uint8_t *gm_Pixels;
+    uint32_t gm_Width, gm_Height;
+    uint32_t gm_BytesPerRow;
+    int32_t gm_X, gm_Y;
+};
+
+/* PathMask's flags */
+constexpr uint32_t PATHF_EVENODD = 1u << 0;     /* even-odd; else non-zero winding */
+
 /* BltBitMap's blend */
 enum : uint32_t {
     BLEND_SRC = 0,              /* the source's pixels, as they are */
@@ -100,7 +139,8 @@ enum : uint32_t {
 
 /*
  * gfx.library's "main" interface, version 1 (V7 step 2): every call, in
- * this order, which is the ABI. A program opens it:
+ * this order, which is the ABI. Calls are added at its end, as V8's are
+ * (Data's size says how far a library's goes). A program opens it:
  *
  *     struct Library *lib = IExec->OpenLibrary("gfx.library", 7);
  *     struct GfxIFace *IGfx =
@@ -125,6 +165,12 @@ struct GfxIFace {
     void (*DrawBevel)(struct RastPort *rp, int32_t xMin, int32_t yMin, int32_t xMax, int32_t yMax,
                       uint32_t light, uint32_t dark);
     void (*Text)(struct RastPort *rp, int32_t x, int32_t y, const char *string, uint64_t count);
+
+    /* V8 step 1 */
+    bool (*PathBounds)(const struct GfxPath *path, struct GfxRect *r);
+    uint64_t (*PathMaskScratch)(uint32_t width, uint32_t height);
+    bool (*PathMask)(const struct GfxPath *path, uint32_t flags, struct GfxMask *mask, void *scratch,
+                     uint64_t scratchSize);
 };
 
 /* lib/gfx's own names, which the interface's scalar entries are. */
@@ -141,5 +187,16 @@ void BltBitMap(const struct BitMap *src, int32_t xSrc, int32_t ySrc, struct Rast
 void DrawBevel(struct RastPort *rp, int32_t xMin, int32_t yMin, int32_t xMax, int32_t yMax,
                uint32_t light, uint32_t dark);
 void Text(struct RastPort *rp, int32_t x, int32_t y, const char *string, uint64_t count);
+/* The pixels the path's points touch, curves' controls among them:
+ * false, and *r alone, if it has none or they span no area. */
+bool PathBounds(const struct GfxPath *path, struct GfxRect *r);
+/* Bytes of scratch PathMask needs for a mask of this size. */
+uint64_t PathMaskScratch(uint32_t width, uint32_t height);
+/* The path's coverage of each of the mask's pixels, within 2/255 of the
+ * exact (curves taken as lines 1/512 px from them): false if its verbs and
+ * points don't agree, or the scratch is short. Nothing outside the mask
+ * is touched; parts of the path outside it count as they would. */
+bool PathMask(const struct GfxPath *path, uint32_t flags, struct GfxMask *mask, void *scratch,
+              uint64_t scratchSize);
 
 #endif /* PLANAR_GFX_H */

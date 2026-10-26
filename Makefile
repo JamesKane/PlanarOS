@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V7.5 done
+EXPECT := V8.1 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -139,7 +139,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test font-oracle font-fuzz clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -197,6 +197,8 @@ test-all:
 	@$(MAKE) --no-print-directory dos-lib-test
 	@$(MAKE) --no-print-directory gfx-test
 	@$(MAKE) --no-print-directory intuition-test
+	@$(MAKE) --no-print-directory font-oracle
+	@$(MAKE) --no-print-directory font-fuzz
 
 # lib/rt/string.c's word loops, which the ISAs' own replace, on the host
 # with the sanitizers, renamed so as not to be the host's.
@@ -304,6 +306,44 @@ $(GFX_TEST): $(GFX_SRCS) $(GFX_NEON) lib/gfx/test.c lib/gfx/rows.h lib/gfx/font8
 
 gfx-test: $(GFX_TEST)
 	@$(GFX_TEST)
+
+# font.library (lib/font) and lib/gfx's rasteriser on the host with the
+# sanitizers, against the host's FreeType: docs §14.5's oracle, passes 1,
+# 3 and 4, over the corpus and the system fonts' subsets (v8-plan step 1).
+FONT_ORACLE := build/font/font-oracle
+FONT_SRCS := $(filter-out %/test.c,$(wildcard lib/font/*.c))
+FONT_FILES := $(wildcard lib/font/fonts/*.ttf)
+FONT_CORPUS := $(wildcard tools/font-oracle/corpus/*.ttf) $(FONT_FILES)
+FREETYPE_CFLAGS = $(shell pkg-config --cflags freetype2 | sed 's/-I/-isystem /g')
+FREETYPE_LIBS = $(shell pkg-config --libs freetype2)
+
+$(FONT_ORACLE): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/gfx/path.c lib/utility/span.c \
+		tools/font-oracle/oracle.c conformance/fontcheck.h include/planar/font.h include/planar/gfx.h \
+		include/planar/utility.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font -Iconformance) $(FREETYPE_CFLAGS) $(FONT_SRCS) lib/gfx/path.c \
+	  lib/utility/span.c tools/font-oracle/oracle.c $(FREETYPE_LIBS) -o $@
+
+font-oracle: $(FONT_ORACLE)
+	@$(FONT_ORACLE) $(FONT_CORPUS)
+
+# font.library fuzzed (§14.5's pass 5): libFuzzer from the seed fonts, a
+# fresh corpus each run so the run is the same one. FONT_FUZZ_RUNS for
+# a longer one (the exit's hour: -max_total_time=3600).
+FONT_FUZZ := build/font/font-fuzz
+FONT_FUZZ_RUNS ?= -runs=300000
+
+$(FONT_FUZZ): $(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/gfx/path.c lib/utility/span.c \
+		tools/font-fuzz/fuzz.c include/planar/font.h include/planar/gfx.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(subst -fsanitize=,-fsanitize=fuzzer$(comma),$(HWDB_CFLAGS:-Iservers/hwdb=-Ilib/font)) \
+	  $(FONT_SRCS) lib/gfx/path.c lib/utility/span.c tools/font-fuzz/fuzz.c -o $@
+
+font-fuzz: $(FONT_FUZZ)
+	@rm -rf $(FONT_FUZZ).corpus && mkdir -p $(FONT_FUZZ).corpus && cp tools/font-fuzz/seeds/*.ttf $(FONT_FUZZ).corpus/
+	@$(FONT_FUZZ) $(FONT_FUZZ_RUNS) -seed=1 -max_len=4096 -timeout=10 $(FONT_FUZZ).corpus \
+	  > $(FONT_FUZZ).log 2>&1 || { tail -40 $(FONT_FUZZ).log; exit 1; }
+	@echo "font-fuzz: ok: $$(tail -1 $(FONT_FUZZ).log)"
 
 # intuition's compositor (servers/intuition/compose.c) on the host with the
 # sanitizers, over made-up windows with and without chrome, against a

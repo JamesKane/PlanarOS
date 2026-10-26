@@ -1502,6 +1502,8 @@ void selftest_tasks(void *)
     kprintf("V7.3 done\n");
     kprintf("V7.4 done\n");
     kprintf("V7.5 done\n");
+    selftest_font();
+    kprintf("V8.1 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");
@@ -3140,6 +3142,25 @@ void selftest_gfx(void)
             "the reference draws them, every width to 130, clipped each way, %s; AllocBitMap's "
             "bitmap shared read-only\n",
             library_vector() ? "by the vector unit" : "scalar: no vector unit");
+}
+
+/*
+ * V8 step 1: font.library (conformance/fonttest.c): the system fonts
+ * opened through IFont, and a line of their glyphs drawn by IGfx's
+ * PathMask to the same bytes the host's oracle got (fontcheck.h), on
+ * either ISA.
+ */
+void selftest_font(void)
+{
+    static const char *const tests[] = { "fonttest" };
+
+    if (!user_images[0].name) {
+        kprintf("V8.1 font skipped: no user programs\n");
+        return;
+    }
+    run_each("V8.1 font", tests, 1);
+    kprintf("V8.1 font ok: System Sans and System Mono opened from font.library's constants, "
+            "their glyphs' outlines and coverage at 13 px as the host's oracle has them\n");
 }
 
 /*

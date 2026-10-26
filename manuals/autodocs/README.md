@@ -13,6 +13,7 @@
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 | [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing (`planar/gfx.h`, `lib/gfx`) |
 | [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events (`planar/intuition.h`, `lib/intuition`) |
+| [font.md](font.md) | font.library: TrueType fonts read in place, their metrics and glyphs' outlines (`planar/font.h`, `lib/font`) |
 
 ## All calls
 
@@ -83,17 +84,21 @@
 | FindTagItem | [utility](utility.md#utilityfindtagitem) | library |
 | FindTask | [exec](exec.md#execfindtask) | kernel |
 | FlushPort | [msg](msg.md#execflushport) | library |
+| FontInfo | [font](font.md#fontfontinfo) | library, through `IFont` |
+| FontName | [font](font.md#fontfontname) | library, through `IFont` |
 | FreeArea | [exec](exec.md#execfreearea) | kernel |
 | FreeBitMap | [gfx](gfx.md#gfxfreebitmap) | library, through `IGfx` |
 | FreePooled | [exec](exec.md#execfreepooled) | library |
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
 | FreeVec | [exec](exec.md#execfreevec) | library |
 | GetBitMapAttr | [gfx](gfx.md#gfxgetbitmapattr) | library, through `IGfx` |
+| GetGlyphMetrics | [font](font.md#fontgetglyphmetrics) | library, through `IFont` |
 | GetInterface | [exec](exec.md#execgetinterface) | library, through `IExec` |
 | GetIntuiEvent | [intuition](intuition.md#intuitiongetintuievent) | library, through `IIntuition` |
 | GetMsg | [msg](msg.md#execgetmsg) | library |
 | GetMsgSized | [msg](msg.md#execgetmsgsized) | library |
 | GetTagData | [utility](utility.md#utilitygettagdata) | library |
+| GlyphOutline | [font](font.md#fontglyphoutline) | library, through `IFont` |
 | GrantConsole | [lease](lease.md#leasegrantconsole) | kernel |
 | GrantFirmware | [lease](lease.md#leasegrantfirmware) | kernel |
 | GrantLease | [lease](lease.md#leasegrantlease) | kernel |
@@ -102,6 +107,7 @@
 | InitRastPort | [gfx](gfx.md#gfxinitrastport) | library, through `IGfx` |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
+| MapCodepoint | [font](font.md#fontmapcodepoint) | library, through `IFont` |
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
 | MapLease | [lease](lease.md#leasemaplease) | kernel |
 | NextTagItem | [utility](utility.md#utilitynexttagitem) | library |
@@ -109,10 +115,13 @@
 | OpenCon, WriteCon, PutStr, CloseCon | [dos](dos.md#dosopencon) | library |
 | OpenDos, OpenDosUntil, CloseDos | [dos](dos.md#dosopendos) | library |
 | OpenFile, CloseFile | [dos](dos.md#dosopenfile) | library |
+| OpenFont | [font](font.md#fontopenfont) | library, through `IFont` |
 | OpenIntuition | [intuition](intuition.md#intuitionopenintuition) | library, through `IIntuition` |
 | OpenLibrary | [exec](exec.md#execopenlibrary) | library, through `IExec` |
 | OpenPort | [exec](exec.md#execopenport) | kernel |
 | OpenWindowTagList, OpenWindowTags | [intuition](intuition.md#intuitionopenwindowtaglist) | library, through `IIntuition` |
+| PathBounds | [gfx](gfx.md#gfxpathbounds) | library, through `IGfx` |
+| PathMask, PathMaskScratch | [gfx](gfx.md#gfxpathmask) | library, through `IGfx` |
 | PortGone | [msg](msg.md#execportgone) | library |
 | PresentWindow | [intuition](intuition.md#intuitionpresentwindow) | library, through `IIntuition` |
 | Printf, VPrintf | [dos](dos.md#dosprintf) | library |
@@ -134,6 +143,7 @@
 | ReportUnresponsive | [msg](msg.md#execreportunresponsive) | library, in `libexec.a` |
 | RevokeLease | [lease](lease.md#leaserevokelease) | kernel |
 | RunCommand | [dos](dos.md#dosruncommand) | library |
+| ScaleUnits | [font](font.md#fontscaleunits) | library, through `IFont` |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | SetMem | [exec](exec.md#execsetmem) | library |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
@@ -153,6 +163,7 @@
 | StrSplit | [utility](utility.md#utilitystrsplit) | library |
 | StrToU64 | [utility](utility.md#utilitystrtou64) | library |
 | StrTrim | [utility](utility.md#utilitystrtrim) | library |
+| SystemFont | [font](font.md#fontsystemfont) | library, through `IFont` |
 | TagInArray | [utility](utility.md#utilitytaginarray) | library |
 | Text | [gfx](gfx.md#gfxtext) | library, through `IGfx` |
 | ToUpper, ToLower | [utility](utility.md#utilitytoupper) | library |
