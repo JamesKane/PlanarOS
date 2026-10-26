@@ -96,6 +96,28 @@ static void intuition_want(bool on)
         intuition_keep();
 }
 
+/* intuition's client on its connection 'conn' isn't answering, and the
+ * user said to close it (V8 step 4): hwdb holds the root, and the kernel
+ * holds it to intuition's own connections. */
+int64_t intuition_kill_client(uint64_t conn)
+{
+    int64_t e = ik.proc ? KillPeer(hwdb.root, ik.proc, (Handle)conn) : ERR_NOTFOUND;
+
+    say(e == 0 ? "hwdb: intuition's client wasn't answering, and was to be closed: ended it"
+               : "hwdb: intuition asked for a client to be ended, which couldn't be");
+    return e;
+}
+
+/* The system's desktop (V8 step 4, V7 decision 4's other half): intuition
+ * started once there's a screen, and kept, unless "nointuition". */
+void intuition_desktop(void)
+{
+    if (hwdb.test || !hwdb.desktop || ik.wanted || hwdb.stopping || !display_unit())
+        return;
+    say("hwdb: the desktop: intuition started, with the keyboard; the Shell on the serial line");
+    intuition_want(true);
+}
+
 /* --- The connection: test mode only. --- */
 
 static struct {
@@ -236,12 +258,21 @@ static void lines(void)
     say("V7.3 windows ok: a client's two windows composed on plane 1 from its own bitmaps, "
         "no copy over IPC, read back as drawn; refusals; frames paced by is_Safe");
     say("V7.3 windows ok: intuition killed, its screen buffers freed by display");
-    if (wt.input)
+    if (wt.input) {
         say("V7.4 input ok: focus by a click, keys at the active window alone, IDCMP events, "
-            "a drag, the depth and close gadgets; a stopped client's window dragged, raised "
-            "and taken off");
-    else
+            "a drag, the depth and close gadgets; a stopped client's window dragged and raised, "
+            "asked about after its close gadget, and ended by hwdb on Close");
+        say("V8.4 screen bar ok: the chrome and titles in System Sans, the bar in front of every "
+            "window with its titles and the clock (where there's an RTC), the mark's system menu and its About");
+        say("V8.4 menus ok: a strip's menu clicked open and chosen, one held by the right button "
+            "(a CHECKIT item checked), one by its key with GUI; IDCMP_MENUPICK each time");
+        say("V8.4 resize ok: a window resized by its corner, told by IDCMP_NEWSIZE, its old buffer "
+            "shown until new ones came and then let go of, held to its least size; EasyRequest "
+            "answered by a click");
+    } else {
         say("V7.4 input: not exercised: nobody moved the mouse, or intuition had no input");
+        say("V8.4 screen bar, menus and resize: not exercised: nobody moved the mouse");
+    }
     say("V7.5 supervision ok: kill-window: a killed client's two windows gone from the screen, its "
         "Areas unshared, intuition's handles and pages back where they were");
     say("V7.5 supervision ok: intuition killed under a client, restarted by hwdb, its buffers freed "
@@ -267,6 +298,7 @@ bool window_test(void)
             say("V7.3 windows: not exercised: no screen here");
             say("V7.4 input: not exercised: no screen here");
             say("V7.5 supervision: not exercised: no screen here");
+            say("V8.4 screen bar, menus and resize: not exercised: no screen here");
             return true;
         }
         /* display's own count first: what intuition takes must come back. */

@@ -4,7 +4,7 @@
 
 ## What it's for
 
-Keys and the mouse, from every keyboard and mouse there is, to one program: the Shell, or `intuition` while it runs (V7 step 4, [Libraries ch. 13](../libraries/13-intuition.md)). intuition starts only when it's wanted, so the console Shell keeps the keys otherwise (v7-plan decision 4). Whichever asks second goes without: intuition then runs with no pointer or keys, and says so. `input` (`servers/input`) is the class's server: one for the system, with no device of its own. The drivers that find keyboards and mice send it what they report, and it turns that into **events** on a ring the client reads with no message per event. USB's are the only ones so far: `xhci` (`drv/xhci`) drives the USB host controllers, walks their hubs, and reads every keyboard and mouse that speaks the HID boot protocol.
+Keys and the mouse, from every keyboard and mouse there is, to one program: `intuition` (V7 step 4, [Libraries ch. 13](../libraries/13-intuition.md)), which hwdb starts at boot once there's a screen (V8 step 4), or the Shell, which reads the keyboard when there's no desktop (`nointuition`, and the kill test outside its window test). Whichever asks second goes without: intuition then runs with no pointer or keys, and says so. `input` (`servers/input`) is the class's server: one for the system, with no device of its own. The drivers that find keyboards and mice send it what they report, and it turns that into **events** on a ring the client reads with no message per event. USB's are the only ones so far: `xhci` (`drv/xhci`) drives the USB host controllers, walks their hubs, and reads every keyboard and mouse that speaks the HID boot protocol.
 
 The serial console stays as it was ([chapter 3](03-console.md)): the Shell reads both.
 

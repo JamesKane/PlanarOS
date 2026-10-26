@@ -11,30 +11,55 @@
  * a frame's damage now and then past what it keeps. Through gfx.library's
  * table, wrapped to check that a frame writes no pixel twice and never
  * reads the screen; the scalar entries, and on an Arm host NEON's too.
- * Some windows have chrome.c's chrome around them, as parts of their own.
+ * Some windows have chrome.c's chrome around them, as parts of their own,
+ * in System Sans or the 8x8 font; some are resized, with a flat part
+ * past their buffer; a pinned window stays in front of them all.
  *
  * Then chrome.c alone: what's where on a window, and that drawing it
- * touches only its bitmaps. And events.c: a client reading slower than
- * intuition writes, at random, must get every key and button, in order,
- * and the last of each run of moves.
+ * touches only its bitmaps; bar.c's screen bar, menus and requesters
+ * likewise, each written to build/intuition/ as a picture to look at.
+ * And events.c: a client reading slower than intuition writes, at
+ * random, must get every key and button, in order, and the last of each
+ * run of moves. font.library is lib/font, linked in (gfx_host_ifont).
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <planar/font.h>
+
 #include "../../lib/gfx/rows.h"
+#include "bar.h"
 #include "chrome.h"
 #include "compose.h"
 #include "events.h"
 
-int64_t AllocArea(uint64_t, uint32_t, void **)
+extern const struct FontIFace *gfx_host_ifont;
+
+/* Areas: the host's memory, page aligned and zeroed (the fonts' caches). */
+static void *areas[16];
+
+int64_t AllocArea(uint64_t size, uint32_t, void **address)
 {
+    size = (size + 4095) & ~4095ull;
+    for (unsigned i = 0; i < sizeof areas / sizeof areas[0]; i++)
+        if (!areas[i]) {
+            if (!(areas[i] = aligned_alloc(4096, size)))
+                return ERR_NOMEM;
+            memset(areas[i], 0, size);
+            *address = areas[i];
+            return i + 1;
+        }
     return ERR_NOMEM;
 }
 
-int64_t FreeArea(Handle)
+int64_t FreeArea(Handle h)
 {
-    return ERR_BADHANDLE;
+    if (h < 1 || h > sizeof areas / sizeof areas[0] || !areas[h - 1])
+        return ERR_BADHANDLE;
+    free(areas[h - 1]);
+    areas[h - 1] = nullptr;
+    return 0;
 }
 
 int64_t QueryArea(const void *, struct AreaInfo *)
@@ -99,17 +124,23 @@ static void w_blt(const struct BitMap *src, int32_t sx, int32_t sy, struct RastP
     real->BltBitMap(src, sx, sy, dst, dx, dy, w, h, blend);
 }
 
-static const struct GfxIFace scalar = {
-    .InitBitMap = InitBitMap, .InitRastPort = InitRastPort, .RectFill = RectFill,
-    .BltBitMap = BltBitMap, .DrawBevel = DrawBevel, .Text = Text,
-};
+#define TABLE(fill, blt, text, path, mask, fpath, grad, run) { \
+    .AllocBitMap = AllocBitMap, .FreeBitMap = FreeBitMap, .InitBitMap = InitBitMap, \
+    .InitRastPort = InitRastPort, .RectFill = fill, .BltBitMap = blt, .DrawBevel = DrawBevel, \
+    .Text = text, .PathBounds = PathBounds, .PathMaskScratch = PathMaskScratch, .PathMask = path, \
+    .BltMask = mask, .FillPath = fpath, .FillGradient = grad, .PathRoundRect = PathRoundRect, \
+    .InitTmpRas = InitTmpRas, .OpenTextFont = OpenTextFont, .CloseTextFont = CloseTextFont, \
+    .SetFont = SetFont, .TextLength = TextLength, .TextRun = run }
+
+static const struct GfxIFace scalar =
+    TABLE(RectFill, BltBitMap, Text, PathMask, BltMask, FillPath, FillGradient, TextRun);
 
 #ifdef GFX_TEST_NEON
-static const struct GfxIFace neon = {
-    .InitBitMap = InitBitMap, .InitRastPort = InitRastPort, .RectFill = RectFillVector,
-    .BltBitMap = BltBitMapVector, .DrawBevel = DrawBevelVector, .Text = Text,
-};
+static const struct GfxIFace neon = TABLE(RectFillVector, BltBitMapVector, TextVector, PathMaskVector,
+                                          BltMaskVector, FillPathVector, FillGradientVector, TextRunVector);
 #endif
+
+static struct chrome_fonts fonts;       /* System Sans 13, regular and bold */
 
 static struct GfxIFace watched = { .InitBitMap = InitBitMap, .InitRastPort = InitRastPort,
                                    .RectFill = w_fill, .BltBitMap = w_blt };
@@ -117,7 +148,7 @@ static struct GfxIFace watched = { .InitBitMap = InitBitMap, .InitRastPort = Ini
 /* --- The windows, as a client keeps them. --- */
 
 struct win {
-    bool open;
+    bool open, pinned, grown;
     struct ic_window icw;
     struct chrome ch;
     int32_t ix, iy;
@@ -173,19 +204,50 @@ static void open_win(struct ic_screen *s, struct win *v)
         scribble(&v->bm[b], (struct GfxRect){ 0, 0, (int32_t)bw - 1, (int32_t)bh - 1 });
     }
     v->cur = 0;
+    v->grown = false;
     v->iw = w;
     v->ih = h;
     chrome_size(flags, w, h, &v->ch, &v->ix, &v->iy);
     v->ch.active = rnd(2);
     v->ch.title = "a window";
-    v->tpx = own(&v->top, v->ch.w, INTUI_TITLEBAR + INTUI_BORDER);
+    v->ch.fonts = rnd(4) ? &fonts : nullptr;
+    v->tpx = own(&v->top, v->ch.w, INTUI_TITLEBAR + chrome_bottom(flags));
     v->spx = own(&v->side, 2 * INTUI_BORDER, h);
     chrome_draw(real, &v->top, &v->side, &v->ch);
-    v->icw = (struct ic_window){ between(-60, W + 10), between(-50, H + 10), v->ch.w, v->ch.h, 1, { 0 } };
+    v->icw = (struct ic_window){ between(-60, W + 10), between(-50, H + 10), v->ch.w, v->ch.h, 1, { 0 }, 0 };
     v->icw.part[0] = (struct ic_part){ { v->ix, v->iy, v->ix + (int32_t)w - 1, v->iy + (int32_t)h - 1 },
-                                       &v->bm[0], 0, 0 };
+                                       &v->bm[0], 0, 0, 0 };
     chrome_parts(&v->ch, &v->top, &v->side, &v->icw);
-    v->open = ic_add(s, &v->icw);
+    v->pinned = v == &wins[0];          /* the first: always in front, as the screen bar is */
+    v->open = v->pinned ? ic_pin(s, &v->icw) : ic_add(s, &v->icw);
+}
+
+/* Made bigger, as a resize leaves a window until its client gives new
+ * buffers: the buffer shown where it reaches, a flat part past it. */
+static void grow(struct ic_screen *s, struct win *v)
+{
+    uint32_t dw = rnd(20), dh = rnd(20), bw = v->bm[v->cur].bm_Width, bh = v->bm[v->cur].bm_Height;
+    int32_t x1, y1, sw, sh;
+    unsigned n;
+
+    if (!(v->ch.flags & WFLG_BORDERLESS) || v->pinned)
+        return;                         /* only bare ones: the chrome's bitmaps are their size */
+    v->grown = true;
+    v->iw += dw;
+    v->ih += dh;
+    v->ch.w += dw;
+    v->ch.h += dh;
+    ic_resize(s, &v->icw, v->ch.w, v->ch.h);
+    sw = (int32_t)(bw < v->iw ? bw : v->iw);
+    sh = (int32_t)(bh < v->ih ? bh : v->ih);
+    x1 = (int32_t)v->iw - 1, y1 = (int32_t)v->ih - 1;
+    v->icw.part[0].r = (struct GfxRect){ 0, 0, sw - 1, sh - 1 };
+    n = 1;
+    if (sw <= x1)
+        v->icw.part[n++] = (struct ic_part){ { sw, 0, x1, y1 }, nullptr, 0, 0, 0xff102030 };
+    if (sh <= y1)
+        v->icw.part[n++] = (struct ic_part){ { 0, sh, sw - 1, y1 }, nullptr, 0, 0, 0xff302010 };
+    v->icw.nparts = n;
 }
 
 static void close_win(struct ic_screen *s, struct win *v)
@@ -205,7 +267,7 @@ static void present(struct ic_screen *s, struct win *v)
     unsigned n = rnd(8) == 0 ? IC_DAMAGE + 4 : 1 + rnd(3);
     struct BitMap *b;
 
-    if (rnd(2)) {
+    if (rnd(2) && !v->grown) {         /* a grown window keeps its buffer */
         unsigned other = v->cur ^ 1;
 
         for (uint32_t y = 0; y < v->ih; y++)
@@ -216,6 +278,9 @@ static void present(struct ic_screen *s, struct win *v)
     v->icw.part[0].bm = b;
     for (unsigned i = 0; i < n; i++) {
         struct GfxRect r = some_of(v);
+
+        if (r.MaxX >= (int32_t)b->bm_Width || r.MaxY >= (int32_t)b->bm_Height)
+            continue;                   /* past its buffer, grown */
 
         if (n > IC_DAMAGE)              /* specks, mostly apart: more than a frame keeps */
             r.MaxX = r.MinX, r.MaxY = r.MinY;
@@ -250,7 +315,8 @@ static uint32_t naive(const struct ic_screen *s, int32_t x, int32_t y)
                 const struct ic_part *p = &w->part[k];
 
                 if (wx >= p->r.MinX && wx <= p->r.MaxX && wy >= p->r.MinY && wy <= p->r.MaxY)
-                    return *at((struct BitMap *)p->bm, p->sx + wx - p->r.MinX, p->sy + wy - p->r.MinY);
+                    return p->bm ? *at((struct BitMap *)p->bm, p->sx + wx - p->r.MinX, p->sy + wy - p->r.MinY)
+                                 : p->colour;
             }
             return POISON ^ 1;          /* a hole in the parts: can't match */
         }
@@ -298,6 +364,14 @@ static int run(const char *name, const struct GfxIFace *g)
                         ic_raise(&s, &v->icw);
                     else
                         ic_lower(&s, &v->icw);
+                    if (s.z[0] != &wins[0].icw && wins[0].open)
+                        fault = "a window raised past a pinned one";
+                    break;
+                case 5:
+                    if (rnd(4) == 0)
+                        grow(&s, v);
+                    else
+                        present(&s, v);
                     break;
                 case 6:
                     refocus(&s, v);
@@ -362,6 +436,7 @@ static int chrome_test(void)
     int32_t ix, iy;
 
     real = &scalar;
+    c.fonts = &fonts;
     chrome_size(WFLG_CLOSEGADGET | WFLG_DEPTHGADGET | WFLG_DRAGBAR, 200, 120, &c, &ix, &iy);
     if (c.w != 208 || c.h != 150 || ix != 4 || iy != 26) {
         printf("intuition-test: FAILED: a window of 200x120 is %ux%u, its inside at (%d, %d)\n", c.w,
@@ -382,6 +457,13 @@ static int chrome_test(void)
     c.flags = WFLG_DEPTHGADGET;                     /* no close gadget: depth's in its slot */
     if (chrome_hit(&c, 203, 3) != CH_DEPTH || chrome_hit(&c, 179, 10) != CH_TITLE) {
         printf("intuition-test: FAILED: the depth gadget isn't rightmost without the close one\n");
+        return 1;
+    }
+    chrome_size(WFLG_SIZEGADGET | WFLG_CLOSEGADGET, 200, 120, &c, &ix, &iy);
+    if (c.h != 120 + INTUI_TITLEBAR + INTUI_SIZEBORDER || chrome_hit(&c, 200, 155) != CH_SIZE ||
+        chrome_hit(&c, 100, 155) != CH_FRAME || chrome_hit(&c, 203, 145) != CH_INSIDE ||
+        chrome_hit(&c, 190, 155) != CH_FRAME) {
+        printf("intuition-test: FAILED: the size gadget isn't in the bottom right corner\n");
         return 1;
     }
 
@@ -419,6 +501,251 @@ static int chrome_test(void)
     free(tp);
     free(sp);
     printf("intuition-test: ok: the chrome: what's where, and drawn in its bitmaps alone\n");
+    return 0;
+}
+
+/* --- bar.c: the screen bar, a menu and a requester. --- */
+
+/* A bitmap w by h with a row and a column to spare, poisoned. */
+static uint32_t *poisoned(struct BitMap *bm, uint32_t w, uint32_t h)
+{
+    uint32_t *px = malloc((uint64_t)(w + 1) * (h + 1) * 4);
+
+    for (uint64_t i = 0; i < (uint64_t)(w + 1) * (h + 1); i++)
+        px[i] = POISON;
+    InitBitMap(bm, px, w, h, (w + 1) * 4, PIXFMT_XRGB8888);
+    return px;
+}
+
+/* Every pixel of it drawn, and none past it. */
+static bool drawn(const uint32_t *px, uint32_t w, uint32_t h, const char *what)
+{
+    for (uint32_t y = 0; y <= h; y++)
+        for (uint32_t x = 0; x <= w; x++)
+            if ((px[y * (w + 1) + x] == POISON) != (x == w || y == h)) {
+                printf("intuition-test: FAILED: %s at (%u, %u) %s\n", what, x, y,
+                       x == w || y == h ? "drawn past its edge" : "not drawn");
+                return false;
+            }
+    return true;
+}
+
+/* A picture to look at: build/intuition/<name>.ppm. */
+static void picture(const char *name, const struct BitMap *bm)
+{
+    char path[128];
+    FILE *f;
+
+    snprintf(path, sizeof path, "build/intuition/%s.ppm", name);
+    if (!(f = fopen(path, "wb")))
+        return;
+    fprintf(f, "P6\n%u %u\n255\n", bm->bm_Width, bm->bm_Height);
+    for (uint32_t y = 0; y < bm->bm_Height; y++)
+        for (uint32_t x = 0; x < bm->bm_Width; x++) {
+            uint32_t p = *at((struct BitMap *)bm, (int32_t)x, (int32_t)y);
+            uint8_t rgb[3] = { (uint8_t)(p >> 16), (uint8_t)(p >> 8), (uint8_t)p };
+
+            fwrite(rgb, 1, 3, f);
+        }
+    fclose(f);
+}
+
+static struct IntuiMenuStrip strip;
+
+static void strip_init(void)
+{
+    static const struct { uint8_t menu; const char *label; char key; uint16_t flags; } items[] = {
+        { 0, "Open\xe2\x80\xa6", 'O', 0 }, { 0, "Save", 'S', 0 }, { 0, nullptr, 0, ITEMBAR },
+        { 0, "Quit", 'Q', 0 }, { 1, "Snap to grid", 0, CHECKIT | CHECKED }, { 1, "Wrap lines", 0, CHECKIT },
+        { 1, "Print", 'P', NM_ITEMDISABLED }, { 2, "Help", 0, 0 },
+    };
+
+    memset(&strip, 0, sizeof strip);
+    strcpy(strip.ms_Title[0], "Project");
+    strcpy(strip.ms_Title[1], "Options");
+    strcpy(strip.ms_Title[2], "Help");
+    strip.ms_Menus = 3;
+    strip.ms_Disabled = 1u << 2;
+    for (unsigned i = 0; i < sizeof items / sizeof items[0]; i++) {
+        struct IntuiMenuItem *mi = &strip.ms_Item[strip.ms_Items++];
+
+        mi->mi_Menu = items[i].menu;
+        mi->mi_Key = items[i].key;
+        mi->mi_Flags = items[i].flags;
+        if (items[i].label)
+            strcpy(mi->mi_Label, items[i].label);
+    }
+}
+
+static int bar_test(void)
+{
+    static const struct { uint64_t s; const char *want; } times[] = {
+        { 0, "12:00 AM" }, { 59, "12:00 AM" }, { 13 * 3600 + 5 * 60, "1:05 PM" }, { 23 * 3600 + 59 * 60 + 59, "11:59 PM" },
+        { 12 * 3600, "12:00 PM" }, { 1761480000, "12:00 PM" }, { 10 * 3600 + 38 * 60, "10:38 AM" },
+    };
+    struct bar b = { .width = 640, .fonts = &fonts, .strip = &strip, .open = -1 };
+    struct menu m = { .strip = &strip, .menu = 0, .hot = -1 };
+    struct request q = { 0 };
+    struct BitMap bm;
+    uint32_t *px;
+    char clock[12];
+
+    real = &scalar;
+    strip_init();
+    for (unsigned i = 0; i < sizeof times / sizeof times[0]; i++) {
+        bar_clock(clock, times[i].s);
+        if (strcmp(clock, times[i].want)) {
+            printf("intuition-test: FAILED: %llu s into a day is \"%s\", not \"%s\"\n",
+                   (unsigned long long)times[i].s, clock, times[i].want);
+            return 1;
+        }
+    }
+
+    /* The bar: the system menu's title, then the strip's, apart, left to right. */
+    strcpy(b.clock, "12:38 PM");
+    bar_layout(&scalar, &b);
+    if (b.n != 4 || b.x0[0] != 4 || bar_hit(&b, 10, 10) != 0 || bar_hit(&b, 10, 28) != -1 ||
+        bar_hit(&b, 639, 10) != -1) {
+        printf("intuition-test: FAILED: the bar's titles: %u, the first from %d\n", b.n, b.x0[0]);
+        return 1;
+    }
+    for (unsigned i = 1; i < b.n; i++)
+        if (b.x0[i] <= b.x1[i - 1] || b.x1[i] <= b.x0[i] || bar_hit(&b, (b.x0[i] + b.x1[i]) / 2, 14) != (int)i) {
+            printf("intuition-test: FAILED: the bar's title %u at %d to %d\n", i, b.x0[i], b.x1[i]);
+            return 1;
+        }
+    px = poisoned(&bm, 640, INTUI_SCREENBAR);
+    b.open = 1;
+    bar_draw(&scalar, &bm, &b);
+    if (!drawn(px, 640, INTUI_SCREENBAR, "the screen bar"))
+        return 1;
+    picture("bar", &bm);
+    free(px);
+
+    /* A menu: its items one under another, a separator and a disabled
+     * one not to be chosen. */
+    menu_layout(&scalar, &fonts, &m);
+    if (m.count != 4 || m.first != 0 || m.w < 120 || menu_hit(&m, 10, m.y[1] + 2) != 1 ||
+        menu_hit(&m, (int32_t)m.w, m.y[1] + 2) != -1 || menu_hit(&m, 10, 0) != -1 ||
+        !menu_choosable(&m, 1) || menu_choosable(&m, 2) || m.y[3] - m.y[2] >= m.y[2] - m.y[1]) {
+        printf("intuition-test: FAILED: a menu's items: %u, %ux%u\n", m.count, m.w, m.h);
+        return 1;
+    }
+    m.hot = 1;
+    px = poisoned(&bm, m.w, m.h);
+    menu_draw(&scalar, &fonts, &bm, &m);
+    if (!drawn(px, m.w, m.h, "a menu"))
+        return 1;
+    picture("menu", &bm);
+    free(px);
+    m = (struct menu){ .strip = &strip, .menu = 1, .hot = 0 };
+    menu_layout(&scalar, &fonts, &m);
+    if (m.count != 3 || m.first != 4 || menu_choosable(&m, 2)) {
+        printf("intuition-test: FAILED: the second menu's items\n");
+        return 1;
+    }
+    m = (struct menu){ .strip = &strip, .menu = 2, .hot = -1 };
+    menu_layout(&scalar, &fonts, &m);
+    if (m.count != 1 || menu_choosable(&m, 0)) {
+        printf("intuition-test: FAILED: a disabled menu's item can be chosen\n");
+        return 1;
+    }
+
+    /* A requester: two lines, two buttons, the first at the left. */
+    strcpy(q.r.ir_Title, "Program not answering");
+    strcpy(q.r.ir_Body, "The program isn't answering.\nClose it?");
+    strcpy(q.r.ir_Gadgets, "Close|Wait");
+    if (!request_layout(&scalar, &fonts, &q, 600) || q.nlines != 2 || q.nbuttons != 2 ||
+        q.button[0].MaxX >= q.button[1].MinX || q.button[0].MinX != 16 ||
+        q.button[1].MaxX != (int32_t)q.w - 17 ||
+        request_hit(&q, (q.button[0].MinX + q.button[0].MaxX) / 2, q.button[0].MinY + 3) != 0 ||
+        request_hit(&q, (q.button[1].MinX + q.button[1].MaxX) / 2, q.button[1].MaxY) != 1 ||
+        request_hit(&q, 2, 2) != -1 || request_answer(&q, 0) != 1 || request_answer(&q, 1) != 0) {
+        printf("intuition-test: FAILED: a requester: %u lines, %u buttons, %ux%u\n", q.nlines, q.nbuttons, q.w, q.h);
+        return 1;
+    }
+    q.pressed = 0;
+    px = poisoned(&bm, q.w, q.h);
+    request_draw(&scalar, &fonts, &bm, &q);
+    if (!drawn(px, q.w, q.h, "a requester"))
+        return 1;
+    picture("request", &bm);
+    free(px);
+    strcpy(q.r.ir_Gadgets, "");
+    if (request_layout(&scalar, &fonts, &q, 600)) {
+        printf("intuition-test: FAILED: a requester with no buttons\n");
+        return 1;
+    }
+    printf("intuition-test: ok: the screen bar, a menu and a requester: where things are, and drawn "
+           "in their bitmaps alone (build/intuition/*.ppm)\n");
+    return 0;
+}
+
+/* The desktop composed, to look at: the bar, a window with a menu open
+ * over it, and a requester (build/intuition/desktop.ppm). */
+static int desktop(void)
+{
+    constexpr uint32_t SW = 640, SH = 400;
+    static uint32_t screen[SH][SW];
+    struct BitMap sb, top, side, inside, barbm, menubm, rtop, rside, rbody;
+    struct ic_window bw, ww, mw, rw;
+    struct ic_screen s;
+    struct chrome c = { .title = "Workbench", .active = true, .fonts = &fonts }, rc = { 0 };
+    struct bar b = { .width = SW, .fonts = &fonts, .strip = &strip, .open = 1 };
+    struct menu m = { .strip = &strip, .menu = 0, .hot = 1 };
+    struct request q = { 0 };
+    struct RastPort rp;
+    void *mem[9];
+    int32_t ix, iy, rix, riy;
+    unsigned n = 0;
+
+    real = &scalar;
+    InitBitMap(&sb, screen, SW, SH, SW * 4, PIXFMT_XRGB8888);
+    ic_init(&s, &scalar, SW, SH);
+    strcpy(b.clock, "12:38 PM");
+    bar_layout(&scalar, &b);
+    mem[n++] = own(&barbm, SW, INTUI_SCREENBAR);
+    bar_draw(&scalar, &barbm, &b);
+    bw = (struct ic_window){ 0, 0, SW, INTUI_SCREENBAR, 1, { { { 0, 0, SW - 1, INTUI_SCREENBAR - 1 }, &barbm, 0, 0, 0 } }, 0 };
+    ic_pin(&s, &bw);
+
+    chrome_size(WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET | WFLG_SIZEGADGET, 360, 200, &c, &ix, &iy);
+    mem[n++] = own(&top, c.w, INTUI_TITLEBAR + INTUI_SIZEBORDER);
+    mem[n++] = own(&side, 2 * INTUI_BORDER, 200);
+    mem[n++] = own(&inside, 360, 200);
+    chrome_draw(&scalar, &top, &side, &c);
+    InitRastPort(&rp, &inside);
+    FillGradient(&rp, &(struct GfxGradient){ { 0, 0, 359, 199 }, 0xff36435a, 0xff46556e, 0 }, nullptr, 0);
+    ww = (struct ic_window){ 20, 60, c.w, c.h, 1, { { { ix, iy, ix + 359, iy + 199 }, &inside, 0, 0, 0 } }, 0 };
+    chrome_parts(&c, &top, &side, &ww);
+    ic_add(&s, &ww);
+
+    menu_layout(&scalar, &fonts, &m);
+    mem[n++] = own(&menubm, m.w, m.h);
+    menu_draw(&scalar, &fonts, &menubm, &m);
+    mw = (struct ic_window){ b.x0[1], INTUI_SCREENBAR, m.w, m.h, 1, { { { 0, 0, (int32_t)m.w - 1, (int32_t)m.h - 1 }, &menubm, 0, 0, 0 } }, 0 };
+    ic_pin(&s, &mw);
+
+    strcpy(q.r.ir_Title, "Program not answering");
+    strcpy(q.r.ir_Body, "The program isn't answering.\nClose it?");
+    strcpy(q.r.ir_Gadgets, "Close|Wait");
+    request_layout(&scalar, &fonts, &q, SW - 40);
+    rc.title = q.r.ir_Title;
+    rc.active = true;
+    rc.fonts = &fonts;
+    chrome_size(0, q.w, q.h, &rc, &rix, &riy);
+    mem[n++] = own(&rtop, rc.w, INTUI_TITLEBAR + INTUI_BORDER);
+    mem[n++] = own(&rside, 2 * INTUI_BORDER, q.h);
+    mem[n++] = own(&rbody, q.w, q.h);
+    chrome_draw(&scalar, &rtop, &rside, &rc);
+    request_draw(&scalar, &fonts, &rbody, &q);
+    rw = (struct ic_window){ 390, 230, rc.w, rc.h, 1, { { { rix, riy, rix + (int32_t)q.w - 1, riy + (int32_t)q.h - 1 }, &rbody, 0, 0, 0 } }, 0 };
+    chrome_parts(&rc, &rtop, &rside, &rw);
+    ic_add(&s, &rw);
+    ic_compose(&s, &sb);
+    picture("desktop", &sb);
+    for (unsigned i = 0; i < n; i++)
+        free(mem[i]);
     return 0;
 }
 
@@ -527,13 +854,28 @@ static int pace_test(void)
 
 int main(void)
 {
+    static const struct FontIFace font = {
+        .SystemFont = SystemFont, .OpenFont = OpenFont, .FontInfo = FontInfo, .FontName = FontName,
+        .MapCodepoint = MapCodepoint, .GetGlyphMetrics = GetGlyphMetrics, .GlyphOutline = GlyphOutline,
+        .ScaleUnits = ScaleUnits, .ShapeRun = ShapeRun, .FitLine = FitLine, .LineSpacing = LineSpacing,
+    };
+
+    gfx_host_ifont = &font;
+    fonts.sans = OpenTextFont(&(struct TextAttr){ "System Sans", 13, 0, 0 });
+    fonts.bold = OpenTextFont(&(struct TextAttr){ "System Sans", 13, FSF_BOLD, 0 });
+    if (!fonts.sans || !fonts.bold) {
+        printf("intuition-test: FAILED: System Sans wouldn't open\n");
+        return 1;
+    }
     if (run("scalar", &scalar))
         return 1;
 #ifdef GFX_TEST_NEON
     if (run("NEON", &neon))
         return 1;
 #endif
-    if (chrome_test() || events_test() || pace_test())
+    if (chrome_test() || bar_test() || desktop() || events_test() || pace_test())
         return 1;
+    CloseTextFont((struct TextFont *)fonts.sans);
+    CloseTextFont((struct TextFont *)fonts.bold);
     return 0;
 }

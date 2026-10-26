@@ -351,6 +351,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_cold_reboot_call((uint32_t)a[0]);
     case SYS_READ_LOG:
         return lease_read_log_call((uint32_t)a[0], a[1], (uint32_t)a[2]);
+    case SYS_KILL_PEER:
+        return lease_kill_peer_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2]);
     default:
         return ERR_NOSYS;
     }

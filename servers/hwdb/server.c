@@ -964,6 +964,8 @@ static void serve(unsigned c)
             m->hm_Msg.mn_Error = (int32_t)ERR_BADARG;
         } else if (op == HWDB_UNRESPONSIVE) {
             unresponsive(m);
+        } else if (op == HWDB_KILL_CLIENT) {
+            m->hm_Msg.mn_Error = (int32_t)intuition_kill_client(m->hm_Conn);
         } else if (u && op == HWDB_BIND && conn_unit[c] == UINT32_MAX) {
             conn_unit[c] = idx;
             bind_reply(u, m);
@@ -1176,6 +1178,7 @@ static void system_step(void)
     }
     if (hwdb.test || hwdb_busy() || hwdb.now < sys_due)
         return;
+    intuition_desktop();
     if (sys_dos && QueryProcess(sys_dos, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
         say("hwdb: dos ended: restarting it");
         CloseHandle(sys_dos);
@@ -1209,7 +1212,8 @@ static void system_step(void)
         sys_due = hwdb.now + 50 * MS;
         return;
     }
-    p = RunCommand(&d, "C:shell", "", SIG_DEAD, PROCF_HELD);
+    /* With the desktop, intuition has the keyboard: the Shell the serial line. */
+    p = RunCommand(&d, "C:shell", hwdb.desktop ? "SERIAL" : "", SIG_DEAD, PROCF_HELD);
     CloseDos(&d);
     if (p < 0) {
         say("hwdb: no C:shell to start");
@@ -1280,6 +1284,7 @@ int main(uint64_t arg, uint64_t root)
     hwdb.end = arg & HWDB_END;
     hwdb.look = arg & HWDB_LOOK;
     hwdb.drag = arg & HWDB_DRAG;
+    hwdb.desktop = !(arg & HWDB_NOINTUITION);
     hwdb.now = CurrentTime();
     if (!build()) {
         say("hwdb: the firmware's description is unusable");

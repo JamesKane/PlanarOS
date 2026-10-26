@@ -76,6 +76,7 @@ int64_t lease_firmware_grant_call(uint32_t root, uint32_t process);
 int64_t lease_root_grant_call(uint32_t root, uint32_t process);
 int64_t lease_cold_reboot_call(uint32_t root);
 int64_t lease_read_log_call(uint32_t root, uint64_t buf, uint32_t len);
+int64_t lease_kill_peer_call(uint32_t root, uint32_t process, uint32_t conn);
 int64_t lease_console_grant_call(uint32_t root, uint32_t process);
 int64_t lease_console_read_call(uint64_t buf, uint32_t len);
 int64_t lease_share_call(uint32_t lease, uint64_t addr, uint64_t size, uint32_t task);

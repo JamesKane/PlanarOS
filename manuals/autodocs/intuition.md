@@ -1,8 +1,90 @@
 # intuition: windows on the screen
 
-*Checked against V7 step 4.*
+*Checked against V8 step 4.*
 
-intuition.library's functions, in alphabetical order. The header is `planar/intuition.h`. They're a shared library's, called through `IIntuition` (`struct IntuitionIFace`, the "main" interface, version 1, of intuition.library 7). Each works on the caller's own `Intuition`, the connection to the intuition server, or a `Window` on it. They keep no state of their own but a page per connection, the caller's, which says how far it has read its events. One task at a time may use an `Intuition` and its windows. [Libraries ch. 13](../libraries/13-intuition.md) is the guide to them.
+intuition.library's functions, in alphabetical order. The header is `planar/intuition.h`. They're a shared library's, called through `IIntuition` (`struct IntuitionIFace`, the "main" interface, version 1, of intuition.library 8; a program opening version 7 gets the same table, V8 step 4's four calls at its end). Each works on the caller's own `Intuition`, the connection to the intuition server, or a `Window` on it. They keep no state of their own but a page per connection, the caller's, which says how far it has read its events. One task at a time may use an `Intuition` and its windows. [Libraries ch. 13](../libraries/13-intuition.md) is the guide to them.
+
+---
+
+## intuition/ChangeWindowBuffers
+
+**NAME**
+ChangeWindowBuffers -- give a resized window buffers of its new size
+
+**SYNOPSIS**
+```c
+#include <planar/intuition.h>
+int64_t ChangeWindowBuffers(struct Window *w, struct BitMap *bm, struct BitMap *back);
+```
+
+**FUNCTION**
+After `IDCMP_NEWSIZE`, gives the window new buffers, at least the size its sync words say (`is_Width` by `is_Height`). Shares them with intuition, read-only, and waits a second at most for its answer. Then `w_Width` and `w_Height` are the new size, `w_BitMap` the new buffers, `w_Back` the first, and `w_RPort` on it: draw the next frame there, and present it. intuition takes the new buffers at that frame, showing the old one until then, and lets go of its mappings of the old ones as it does.
+
+**INPUTS**
+- `w` -- an open window.
+- `bm` -- the first new buffer, `AllocBitMap`'s.
+- `back` -- a second, or `nullptr` for one.
+
+**RESULT**
+0, or:
+- `ERR_BADARG` -- the window isn't open, a bitmap isn't `AllocBitMap`'s or is smaller than the size, or intuition says the size isn't the window's (it was resized again meanwhile: wait for that `IDCMP_NEWSIZE`).
+- `ERR_RIGHTS` -- a bitmap's memory isn't shared with intuition.
+- `ERR_NOTFOUND` -- intuition took the window off the screen.
+- `ERR_TIMEOUT`, `ERR_PORT_DIED` -- intuition didn't answer in time, or has gone.
+
+**EXAMPLE**
+From `conformance/window.c`:
+```c
+struct BitMap *fbm = IGfx->AllocBitMap(240, 150, PIXFMT_XRGB8888, 0, nullptr);
+
+if (IIntuition->ChangeWindowBuffers(&we, fbm, nullptr) == 0) {
+    picture(&we.w_RPort, 240, 150, 0x3a6298, "resized");
+    IIntuition->PresentWindow(&we, nullptr, 0);
+}
+```
+
+**NOTES**
+- The old buffers may be freed once this returns: intuition's mapping keeps their memory until it lets go of them.
+- A buffer bigger than the window is shown as far as the window goes, so a program may keep one big buffer through many resizes, and call this only to grow it.
+- Two calls before a frame: the second's buffers are the ones taken.
+- **Differs from the RKM:** the RKM's window was resized in place, its layer's bitmap grown by the system. Planar's buffers are the program's.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[OpenWindowTagList](#intuitionopenwindowtaglist), [PresentWindow](#intuitionpresentwindow), [GetIntuiEvent](#intuitiongetintuievent).
+
+---
+
+## intuition/ClearMenuStrip
+
+**NAME**
+ClearMenuStrip -- take a window's menus away
+
+**SYNOPSIS**
+```c
+#include <planar/intuition.h>
+int64_t ClearMenuStrip(struct Window *w);
+```
+
+**FUNCTION**
+`SetMenuStrip(w, nullptr)`: the window has no menus, and the screen bar shows none when it's active. A menu of it open is closed.
+
+**INPUTS**
+- `w` -- an open window.
+
+**RESULT**
+As `SetMenuStrip`.
+
+**NOTES**
+- **Differs from the RKM:** not needed before changing a strip, as intuition keeps a copy, and `SetMenuStrip` replaces it whole.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[SetMenuStrip](#intuitionsetmenustrip).
 
 ---
 
@@ -52,7 +134,7 @@ int64_t CloseWindow(struct Window *w);
 **FUNCTION**
 Asks intuition to close the window, and waits a second at most for the answer. What the window covered is the backdrop, or the windows behind it, from the next frame. intuition lets go of its mappings of the window's bitmaps, unless another window of the caller's uses them.
 
-A window whose close gadget was clicked must be closed within a second of its `IDCMP_CLOSEWINDOW`. If it isn't, intuition takes it off the screen and lets go of its bitmaps, and says so in the log (v7-plan decision 6). Its `is_Safe` goes to its highest, so `WaitSafe` returns, and its next `PresentWindow` is refused with `ERR_NOTFOUND`. `CloseWindow` on it still returns 0.
+A window whose close gadget was clicked must be closed within a second of its `IDCMP_CLOSEWINDOW`. If it isn't, intuition asks the user whether to close it (V8 step 4), and on *Close* asks hwdb to end the program, which takes its windows with it. If it can't ask, or hwdb won't, it takes the window off the screen and lets go of its bitmaps, and says so in the log (v7-plan decision 6). Its `is_Safe` goes to its highest, so `WaitSafe` returns, and its next `PresentWindow` is refused with `ERR_NOTFOUND`. `CloseWindow` on it still returns 0.
 
 **INPUTS**
 - `w` -- a window `OpenWindowTagList` opened.
@@ -73,6 +155,54 @@ None known.
 
 **SEE ALSO**
 [OpenWindowTagList](#intuitionopenwindowtaglist), [CloseIntuition](#intuitioncloseintuition).
+
+---
+
+## intuition/EasyRequest
+
+**NAME**
+EasyRequest -- ask the user, and wait for the answer
+
+**SYNOPSIS**
+```c
+#include <planar/intuition.h>
+int64_t EasyRequest(struct Intuition *in, struct Window *w, const struct EasyStruct *es);
+```
+
+**FUNCTION**
+Shows a requester, a small window intuition draws and owns: `es_Title` in its title bar, `es_TextFormat`'s lines (split at `'\n'`), and a button for each of `es_GadgetFormat`'s labels (split at `'|'`), along the bottom. It's centred over `w`, or the screen. Waits for the user to click a button, however long that takes, then the requester goes.
+
+**INPUTS**
+- `in` -- an open `Intuition`, used by nothing else until this returns.
+- `w` -- the window it's about, of the same connection, or `nullptr`.
+- `es` -- `es_Title` (31 bytes at most), `es_TextFormat` (479, 12 lines), `es_GadgetFormat` (95, 6 buttons, at least one). `es_StructSize` and `es_Flags` aren't read.
+
+**RESULT**
+The button clicked: 1 for the leftmost, 2 for the next and so on, and 0 for the rightmost (the RKM's numbering, where the rightmost is "Cancel"). Or:
+- `ERR_BADARG` -- no buttons, text too long, or `w` not open on `in`.
+- `ERR_FULL` -- 4 requesters are up already.
+- `ERR_NOMEM` -- intuition had no memory for it.
+- `ERR_PORT_DIED` -- intuition went.
+
+**EXAMPLE**
+From `conformance/window.c`, on a task and connection of its own:
+```c
+const struct EasyStruct es = { sizeof es, 0, "A question", "Which one?\nThe middle, please.",
+                               "Left|Middle|Right" };
+
+answer = IIntuition->EasyRequest(&easy.in, nullptr, &es);      /* 2: Middle */
+```
+
+**NOTES**
+- **Differs from the RKM:** `EasyRequestArgs` took `printf` arguments and an IDCMP pointer that could end it; this takes the text as it is, and only a button ends it. Its window's input isn't blocked: other windows, and the one it's about, go on.
+- The answer comes on the connection, so nothing else may call through `in` meanwhile, from any task: a program that goes on drawing opens a second `Intuition` to ask on.
+- The requester takes no keys. It can be raised and lowered as any window, and isn't dragged.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[SetMenuStrip](#intuitionsetmenustrip), [OpenIntuition](#intuitionopenintuition).
 
 ---
 
@@ -97,8 +227,10 @@ An event is one of the IDCMP classes its window asked for with `WA_IDCMP`:
 - `IDCMP_VANILLAKEY` -- a key at the active window that types a character, going down: `iev_Code` the character. With both asked for, such a key comes as `IDCMP_VANILLAKEY`, and its going up as `IDCMP_RAWKEY`.
 - `IDCMP_ACTIVEWINDOW`, `IDCMP_INACTIVEWINDOW` -- the window became the active one, or stopped being.
 - `IDCMP_CLOSEWINDOW` -- its close gadget was clicked. Close the window with `CloseWindow`, within a second.
+- `IDCMP_MENUPICK` -- an item of its menu strip was chosen ([SetMenuStrip](#intuitionsetmenustrip)): `iev_Code` the RKM's packed number (`MENUNUM`, `ITEMNUM`; `SUBNUM` is `NOSUB`), and `iev_Char` 1 if a `CHECKIT` item is checked now, 0 if not.
+- `IDCMP_NEWSIZE` -- the window was resized by its size gadget: `iev_MouseX` and `iev_MouseY` are its inside's new width and height, as its sync words' `is_Width` and `is_Height` are. Give it buffers of that size with [ChangeWindowBuffers](#intuitionchangewindowbuffers).
 
-`iev_MouseX` and `iev_MouseY` are where the pointer was, in the window's inside's coordinates: (0, 0) is the top left pixel of its buffers. `iev_Qualifier` is input's `IEQ_*` (the modifier keys), with `IEQ_LEFTBUTTON`, `IEQ_RBUTTON` and `IEQ_MIDBUTTON` for the buttons held and `IEQ_REPEAT` for a key's repeat. `iev_Time` is when input had it, `CurrentTime()`'s.
+Otherwise `iev_MouseX` and `iev_MouseY` are where the pointer was, in the window's inside's coordinates: (0, 0) is the top left pixel of its buffers. `iev_Qualifier` is input's `IEQ_*` (the modifier keys), with `IEQ_LEFTBUTTON`, `IEQ_RBUTTON` and `IEQ_MIDBUTTON` for the buttons held and `IEQ_REPEAT` for a key's repeat. `iev_Time` is when input had it, `CurrentTime()`'s.
 
 **INPUTS**
 - `in` -- an open `Intuition`.
@@ -197,7 +329,7 @@ int64_t OpenWindowTags(iface, in, w, { tag, data }, ...);     /* a macro */
 **FUNCTION**
 Shares the window's bitmaps with intuition, read-only, and asks it to open the window. The window isn't on the screen until its first `PresentWindow`. Then it comes to the front.
 
-The window's inside is the top left `WA_Width` by `WA_Height` of the bitmap presented. Draw a frame through `w->w_RPort`, which is on `w->w_BitMap[w->w_Back]`. Around the inside intuition draws the window's chrome (§13.3), unless it's `WFLG_BORDERLESS`: a title bar of `INTUI_TITLEBAR` (26) pixels above, with the title and the gadgets asked for, and a frame of `INTUI_BORDER` (4) on the other sides. `w->w_BorderLeft` and `w->w_BorderTop` say where the inside is in the window, from the chrome's top left.
+The window's inside is the top left `WA_Width` by `WA_Height` of the bitmap presented. Draw a frame through `w->w_RPort`, which is on `w->w_BitMap[w->w_Back]`. Around the inside intuition draws the window's chrome (§13.3), unless it's `WFLG_BORDERLESS`: a title bar of `INTUI_TITLEBAR` (26) pixels above, with the title in System Sans and the gadgets asked for, and a frame of `INTUI_BORDER` (4) on the other sides, or `INTUI_SIZEBORDER` (16) at the bottom with a size gadget. `w->w_BorderLeft`, `w_BorderTop`, `w_BorderRight` and `w_BorderBottom` say where the inside is in the window, from the chrome's top left.
 
 **INPUTS**
 - `in` -- an open `Intuition`.
@@ -208,7 +340,8 @@ The window's inside is the top left `WA_Width` by `WA_Height` of the bitmap pres
   - `WA_Left`, `WA_Top` -- where the window's top left goes on the screen, its chrome's. 0 by default. Either may be negative, or past the screen's edge, by up to 16384.
   - `WA_Width`, `WA_Height` -- the inside's size, no larger than either bitmap's. The first bitmap's by default.
   - `WA_Title` -- `const char *`: the title bar's, 31 bytes at most, cut short where the gadgets begin. "" by default.
-  - `WA_Flags` -- `WFLG_*`, the RKM's: `WFLG_DRAGBAR` (dragged by its title bar), `WFLG_DEPTHGADGET`, `WFLG_CLOSEGADGET`, `WFLG_BORDERLESS` (no chrome: the inside alone, as in V7 step 3), `WFLG_ACTIVATE` (the active window at its first frame). None by default: a title bar and a frame, with no gadgets, that can't be dragged.
+  - `WA_Flags` -- `WFLG_*`, the RKM's: `WFLG_DRAGBAR` (dragged by its title bar), `WFLG_DEPTHGADGET`, `WFLG_CLOSEGADGET`, `WFLG_SIZEGADGET` (resized by its bottom right corner: `IDCMP_NEWSIZE`), `WFLG_BORDERLESS` (no chrome: the inside alone, as in V7 step 3), `WFLG_ACTIVATE` (the active window at its first frame). None by default: a title bar and a frame, with no gadgets, that can't be dragged.
+  - `WA_MinWidth`, `WA_MinHeight`, `WA_MaxWidth`, `WA_MaxHeight` -- the inside's size a resize is held to. 1, 1, and the screen's by default (0 is the screen's).
   - `WA_IDCMP` -- the IDCMP classes the window's events are wanted for ([GetIntuiEvent](#intuitiongetintuievent)). None by default.
 
 **RESULT**
@@ -232,7 +365,8 @@ if (OpenWindowTags(IIntuition, &in, &w, { WA_Left, 64 }, { WA_Top, 48 },
 ```
 
 **NOTES**
-- **Differs from the RKM:** the caller provides the `Window` and the bitmaps, and the result is an error, not a `Window *`. There's no `NewWindow`. Of `WA_Flags`, only the five above; iconify, zoom, the border scrollers and the size gadget are V8's, with `ui.library`. The window's size is its inside's, not its outside's.
+- **Differs from the RKM:** the caller provides the `Window` and the bitmaps, and the result is an error, not a `Window *`. There's no `NewWindow`. Of `WA_Flags`, only the six above; iconify, zoom and the border scrollers aren't built (v8-plan decision 9). The window's size is its inside's, not its outside's, and so are its limits.
+- A window's top left may be under the screen bar, which is shown over it; a drag keeps its title bar below the bar.
 - The window is opaque in V7: an ARGB bitmap's alpha is ignored.
 - intuition describes each buffer itself, from what this sends: the address, the row stride, the width and the height, checked against the Area holding them. The `BitMap` in the Area isn't read.
 - A bitmap shared before keeps its mapping (`ERR_EXISTS` from `ShareArea` is taken as done). One that intuition refuses is let go again, unless another window uses it.
@@ -264,7 +398,7 @@ It doesn't wait for intuition: the message goes, and its answer is taken later. 
 
 **INPUTS**
 - `w` -- an open window.
-- `damage` -- rectangles in the window's inside's coordinates, inclusive, each inside it. Not read if `count` is 0.
+- `damage` -- rectangles in the window's inside's coordinates, inclusive, each inside the window (the library's check) and its buffer (intuition's: after a resize a window and its buffer may differ). Not read if `count` is 0.
 - `count` -- 0 to `INTUI_RECTS` (16). 0 is the whole window.
 
 **RESULT**
@@ -293,6 +427,64 @@ None known.
 
 **SEE ALSO**
 [WaitSafe](#intuitionwaitsafe), [OpenWindowTagList](#intuitionopenwindowtaglist), [PutMsg](msg.md#execputmsg).
+
+---
+
+## intuition/SetMenuStrip
+
+**NAME**
+SetMenuStrip -- give a window its menus
+
+**SYNOPSIS**
+```c
+#include <planar/intuition.h>
+int64_t SetMenuStrip(struct Window *w, const struct NewMenu *menus);
+```
+
+**FUNCTION**
+Gives the window a menu strip, made from `menus`, an array of GadTools' `NewMenu`s ended by `NM_END`: each `NM_TITLE` a menu, and the `NM_ITEM`s after it its items. intuition keeps a copy, and while the window is active the screen bar shows its titles. intuition opens, draws and tracks the menus itself, and a choice comes as `IDCMP_MENUPICK` (Libraries ch. 13, *Menus*). Replaces any strip the window had; `nullptr` or an empty array takes it away.
+
+**INPUTS**
+- `w` -- an open window.
+- `menus` -- the strip:
+  - `nm_Type` -- `NM_TITLE`, `NM_ITEM`, or `NM_END`.
+  - `nm_Label` -- the label, 23 bytes at most; for an item, `NM_BARLABEL` is a separator, which can't be chosen but is counted in `ITEMNUM`.
+  - `nm_CommKey` -- an item's key, chosen with the GUI key held: its first character, letters as capitals. `nullptr` for none.
+  - `nm_Flags` -- a title's `NM_MENUDISABLED`; an item's `NM_ITEMDISABLED`, `CHECKIT` (checked and unchecked by choosing it) and `CHECKED` (checked to begin with).
+
+**RESULT**
+0, or:
+- `ERR_BADARG` -- the window isn't open; more than 8 menus, 64 items in all, or 63 in a menu; a label too long; an item before any title.
+- `ERR_NOTFOUND` -- intuition took the window off the screen.
+- `ERR_TIMEOUT`, `ERR_PORT_DIED` -- intuition didn't answer in time, or has gone.
+
+**EXAMPLE**
+From `conformance/window.c`:
+```c
+static const struct NewMenu strip[] = {
+    { NM_TITLE, "Project", nullptr, 0 },
+    { NM_ITEM, "Open", nullptr, 0 },
+    { NM_ITEM, "Save", "s", 0 },
+    { NM_ITEM, NM_BARLABEL, nullptr, 0 },
+    { NM_ITEM, "Quit", "Q", 0 },
+    { NM_TITLE, "Options", nullptr, 0 },
+    { NM_ITEM, "Snap to grid", nullptr, CHECKIT },
+    { NM_END, nullptr, nullptr, 0 },
+};
+
+IIntuition->SetMenuStrip(&we, strip);
+```
+
+**NOTES**
+- **Differs from the RKM:** it takes GadTools' `NewMenu` array, not a linked `Menu` strip from `CreateMenus` and `LayoutMenus`; intuition lays it out. There are no sub-items, no `MutualExclude`, no images, and no `NextSelect`: one `IDCMP_MENUPICK` an item.
+- The strip travels in the page the connection's `IntuiAck` is on, which intuition copies during the call.
+- A `CHECKIT` item's state is intuition's after this: it toggles it at each choice, and says which it is in `iev_Char`. `SetMenuStrip` again sets it afresh.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[ClearMenuStrip](#intuitionclearmenustrip), [GetIntuiEvent](#intuitiongetintuievent), [EasyRequest](#intuitioneasyrequest).
 
 ---
 

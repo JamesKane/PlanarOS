@@ -1,6 +1,6 @@
 /*
  * servers/intuition/main.c -- intuition: windows composed on the screen
- * (v7-plan steps 3 to 5)
+ * (v7-plan steps 3 to 5; V8 step 4)
  *
  * planar/intuition.h has the protocol. intuition is display's client:
  * two full-screen XRGB buffers of display's, shown on plane 1 in turn
@@ -32,6 +32,19 @@
  * gadget gets no CloseWindow within a second is taken off the screen
  * (decision 6).
  *
+ * V8 step 4: the screen bar (bar.c), pinned in front of every window,
+ * with the clock from the RTC's driver, read once an hour and kept by
+ * CurrentTime between. Menus: the active window's strip, kept here,
+ * drawn and tracked here, so a hung client's still open; the right
+ * button held, or a title clicked. A window resized by its size gadget
+ * drags an outline, and at the release is resized at once, its old
+ * buffer shown clipped (or the backdrop beyond it) until the client
+ * gives buffers of the new size, taken at its next present. Requesters
+ * are windows of intuition's own: a client's EasyRequest, answered when
+ * chosen; the system menu's About; and a window whose close gadget gets
+ * no CloseWindow within the deadline, which asks whether to close it,
+ * and on Close asks hwdb to end its client (HWDB_KILL_CLIENT).
+ *
  * When a client goes, closed or dead, its windows go and intuition lets
  * go of their buffers' Areas. hwdb starts intuition when it's wanted
  * (decision 4): its test now, and in V8 the Workbench; then it keeps it,
@@ -49,9 +62,11 @@
 
 #include <planar/devices/display.h>
 #include <planar/devices/input.h>
+#include <planar/drv.h>
 #include <planar/intuition.h>
 #include <planar/syscalls.h>
 
+#include "bar.h"
 #include "chrome.h"
 #include "compose.h"
 #include "events.h"
@@ -60,10 +75,11 @@
 
 void *memset(void *dst, int c, size_t n);
 void *memcpy(void *restrict dst, const void *restrict src, size_t n);
+int memcmp(const void *a, const void *b, size_t n);
 
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_LATCH = 18, SIG_DISPLAY = 19;
 constexpr int64_t SIG_INPUT = 20, SIG_INPUT_PORT = 21, SIG_TIMER = 22;
-constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24;
+constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24, SIG_CALL = 25;
 constexpr int64_t SIG_AWAIT = 16;               /* an awaiting task's own, for its connection */
 constexpr unsigned CONNS = 16;
 constexpr uint64_t MS = 1000000;
@@ -73,6 +89,17 @@ constexpr uint64_t COMMIT_LEAD = 4 * MS;        /* a frame nobody waits for: com
 constexpr uint64_t COMPOSE_FIXED = MS / 5;      /* a frame's cost beyond its pixels' */
 constexpr uint64_t RATE_PIXELS = 65536;         /* a frame this big or more says what a pixel costs */
 constexpr unsigned RATES = 8;
+constexpr uint64_t SECOND = 1000 * MS;
+constexpr uint64_t RTC_AGAIN = 3600 * SECOND;   /* the RTC read again after this */
+constexpr unsigned REQS = 4;                    /* requesters on the screen, at most */
+constexpr uint32_t OUTLINE = PEN_TEXT_LIGHT;    /* a resize's outline */
+constexpr uint32_t BEYOND = IC_BACKDROP;        /* a resized window's inside past its buffer */
+
+/* What an ic_window on the screen is (its kind). */
+enum : uint32_t { K_WINDOW, K_BAR, K_MENU, K_OUTLINE, K_REQUEST };
+
+/* Why a requester is up. */
+enum : uint8_t { R_CLIENT, R_HUNG, R_ABOUT };
 
 /* A client's connection: its task, its page, and its events. */
 struct client {
@@ -103,6 +130,25 @@ struct window {
     uint64_t latching;              /* in the flip waiting to latch */
     uint64_t close_by;              /* its close gadget clicked: CloseWindow by then */
     char title[INTUI_TITLE];
+    uint32_t min_w, min_h, max_w, max_h;    /* a resize's limits, the inside's */
+    struct BitMap next[INTUI_BUFFERS];      /* ChangeWindowBuffers', taken at its next present */
+    uint64_t next_area[INTUI_BUFFERS];
+    uint32_t next_buffers;                  /* 0: none waiting */
+    bool has_strip;
+    struct IntuiMenuStrip strip;
+};
+
+/* A requester: a window of intuition's own. */
+struct req {
+    bool used;
+    uint8_t why;                    /* R_* */
+    uint8_t conn;                   /* R_CLIENT's connection */
+    struct IntuiMsg *m;             /* R_CLIENT's call, answered when chosen */
+    struct window *of;              /* R_HUNG's window */
+    struct ic_window icw;
+    struct chrome ch;
+    struct BitMap *top, *side, *body;
+    struct request q;
 };
 
 static struct {
@@ -144,6 +190,30 @@ static struct {
     struct window *press;           /* a gadget of it held down, ch.pressed's kind */
     unsigned pressing;
     struct window *button_to[3];    /* each button's press went to its inside */
+
+    /* V8 step 4: the type, the screen bar, menus, resizing and requesters. */
+    struct TextFont *sans, *bold;
+    struct chrome_fonts fonts;
+    struct ic_window bar_w;
+    struct BitMap *bar_bm;
+    struct bar bar;
+    struct IntuiMenuStrip sys;      /* the system menu */
+    int menu_title;                 /* the title open: the bar's numbering; -1 none */
+    bool menu_held;                 /* by the right button: chosen at its release */
+    struct ic_window menu_w;
+    struct BitMap *menu_bm;
+    struct menu menu;
+    struct window *sizing;          /* by its size gadget: to size_w by size_h, its inside */
+    int32_t size_dx, size_dy;       /* the pointer from its bottom right corner */
+    uint32_t size_w, size_h;
+    struct ic_window outline[4];
+    bool outlined;
+    struct req req[REQS];
+    struct req *req_press;          /* a requester's button held down */
+    int req_button;
+    uint64_t rtc_secs, rtc_at;      /* the RTC's seconds, read at CurrentTime's rtc_at; 0 none */
+    uint64_t clock_next;            /* the clock drawn again then */
+    uint64_t clock_secs;            /* the minute it shows, for INFO */
 
     uint64_t frames, nanos;
     uint64_t move_at, flip_move_at;     /* the oldest move not yet committed, and in the flip */
@@ -480,6 +550,8 @@ static void rearm(void)
 
     if (it.frame_due && (!t || it.frame_due < t))
         t = it.frame_due;
+    if (it.clock_next && (!t || it.clock_next < t))
+        t = it.clock_next;
     ArmTimer(t, SIG_TIMER);
 }
 
@@ -569,7 +641,13 @@ static void latch(void)
 
 static struct window *of(struct ic_window *icw)
 {
-    return icw ? (struct window *)((char *)icw - offsetof(struct window, icw)) : nullptr;
+    return icw && icw->kind == K_WINDOW ? (struct window *)((char *)icw - offsetof(struct window, icw))
+                                        : nullptr;
+}
+
+static struct req *req_of(struct ic_window *icw)
+{
+    return icw && icw->kind == K_REQUEST ? (struct req *)((char *)icw - offsetof(struct req, icw)) : nullptr;
 }
 
 static uint32_t id_of(const struct window *w)
@@ -587,8 +665,8 @@ static struct window *find(unsigned c, uint32_t id)
     return w->used && w->conn == c ? w : nullptr;
 }
 
-/* Let go of the Area at 'area' unless a window's buffer or a client's
- * IntuiAck lies in it. */
+/* Let go of the Area at 'area' unless a window's buffer (or one it's to
+ * take) or a client's IntuiAck lies in it. */
 static void release(uint64_t area, const struct window *except)
 {
     if (!area)
@@ -597,8 +675,8 @@ static void release(uint64_t area, const struct window *except)
         const struct window *w = &it.win[i];
 
         if (w != except && w->used)
-            for (unsigned b = 0; b < w->buffers; b++)
-                if (w->area[b] == area)
+            for (unsigned b = 0; b < INTUI_BUFFERS; b++)
+                if ((b < w->buffers && w->area[b] == area) || (b < w->next_buffers && w->next_area[b] == area))
                     return;
     }
     for (unsigned c = 0; c < it.nconns; c++)
@@ -658,18 +736,24 @@ static int64_t page_up(unsigned c, Handle task)
 
 /* --- What a window's client hears. --- */
 
-static void post(struct window *w, uint32_t cls, uint16_t code, uint16_t qual, uint32_t ch,
-                 uint64_t time)
+static void post_at(struct window *w, uint32_t cls, uint16_t code, uint16_t qual, uint32_t ch,
+                    uint64_t time, int32_t x, int32_t y)
 {
     struct client *cl = &it.cl[w->conn];
     struct IntuiEvent e = {
         .iev_Time = time, .iev_Class = cls, .iev_Window = id_of(w), .iev_Code = code,
-        .iev_Qualifier = (uint16_t)(qual | it.buttons), .iev_Char = ch,
-        .iev_MouseX = it.px - (w->icw.x + w->ix), .iev_MouseY = it.py - (w->icw.y + w->iy),
+        .iev_Qualifier = (uint16_t)(qual | it.buttons), .iev_Char = ch, .iev_MouseX = x, .iev_MouseY = y,
     };
 
     if (w->idcmp & cls && !w->removed && cl->page)
         ie_push(&cl->q, &e, &cl->page->ip_Lost);
+}
+
+/* An event at the pointer, in the window's inside's coordinates. */
+static void post(struct window *w, uint32_t cls, uint16_t code, uint16_t qual, uint32_t ch,
+                 uint64_t time)
+{
+    post_at(w, cls, code, qual, ch, time, it.px - (w->icw.x + w->ix), it.py - (w->icw.y + w->iy));
 }
 
 static void flush_events(void)
@@ -694,6 +778,30 @@ static void redraw(struct window *w)
             ic_damage_window(&it.screen, &w->icw, w->icw.part[k].r);
 }
 
+/* Its parts: the inside from its buffer, as much of it as the buffer
+ * holds and BEYOND past that; then the chrome's. */
+static void layout(struct window *w)
+{
+    const struct BitMap *bm = &w->bm[w->cur];
+    int32_t bw = (int32_t)(bm->bm_Width < w->iw ? bm->bm_Width : w->iw);
+    int32_t bh = (int32_t)(bm->bm_Height < w->ih ? bm->bm_Height : w->ih);
+    int32_t x1 = w->ix + (int32_t)w->iw - 1, y1 = w->iy + (int32_t)w->ih - 1;
+    unsigned n;
+
+    w->icw.part[0] = (struct ic_part){ { w->ix, w->iy, w->ix + bw - 1, w->iy + bh - 1 }, bm, 0, 0, 0 };
+    chrome_parts(&w->ch, w->top, w->side, &w->icw);
+    n = w->icw.nparts;
+    if (bw < (int32_t)w->iw)
+        w->icw.part[n++] = (struct ic_part){ { w->ix + bw, w->iy, x1, y1 }, nullptr, 0, 0, BEYOND };
+    if (bh < (int32_t)w->ih)
+        w->icw.part[n++] = (struct ic_part){ { w->ix, w->iy + bh, w->ix + bw - 1, y1 }, nullptr, 0, 0, BEYOND };
+    w->icw.nparts = n;
+}
+
+static void menu_close(void);
+static void bar_redraw(void);
+static void req_free(struct req *r);
+
 static void activate(struct window *w, uint64_t time)
 {
     struct window *was = it.active;
@@ -701,6 +809,8 @@ static void activate(struct window *w, uint64_t time)
     if (was == w)
         return;
     it.active = w;
+    if (it.menu_title > 0)              /* a menu of the strip that was */
+        menu_close();
     if (was) {
         was->ch.active = false;
         redraw(was);
@@ -711,6 +821,7 @@ static void activate(struct window *w, uint64_t time)
         redraw(w);
         post(w, IDCMP_ACTIVEWINDOW, 0, 0, 0, time);
     }
+    bar_redraw();
 }
 
 static void move_to(struct window *w, int32_t x, int32_t y)
@@ -722,36 +833,57 @@ static void move_to(struct window *w, int32_t x, int32_t y)
     line_of(w)->is_TopEdge = y;
 }
 
+static void outline_off(void)
+{
+    if (it.outlined)
+        for (unsigned k = 0; k < 4; k++)
+            ic_remove(&it.screen, &it.outline[k]);
+    it.outlined = false;
+}
+
 /* Nothing of intuition's points at 'w' any more. */
 static void forget(struct window *w)
 {
-    if (it.active == w)
+    if (it.active == w) {
+        if (it.menu_title > 0)
+            menu_close();
         it.active = nullptr;
+        bar_redraw();
+    }
     if (it.drag == w)
         it.drag = nullptr;
     if (it.press == w)
         it.press = nullptr;
+    if (it.sizing == w) {
+        outline_off();
+        it.sizing = nullptr;
+    }
     for (unsigned b = 0; b < 3; b++)
         if (it.button_to[b] == w)
             it.button_to[b] = nullptr;
+    for (unsigned r = 0; r < REQS; r++)
+        if (it.req[r].used && it.req[r].of == w)
+            req_free(&it.req[r]);
 }
 
 /* Off the screen, its buffers and its chrome let go. */
 static void take_off(struct window *w)
 {
-    uint64_t area[INTUI_BUFFERS];
+    uint64_t area[2 * INTUI_BUFFERS];
+    unsigned n = 0;
 
     forget(w);
     if (w->shown)
         ic_remove(&it.screen, &w->icw);
     w->shown = false;
     for (unsigned b = 0; b < INTUI_BUFFERS; b++) {
-        area[b] = w->area[b];
-        w->area[b] = 0;
+        area[n++] = w->area[b];
+        area[n++] = w->next_area[b];
+        w->area[b] = w->next_area[b] = 0;
     }
-    for (unsigned b = 0; b < w->buffers; b++)
-        release(area[b], w);
-    w->buffers = 0;
+    w->buffers = w->next_buffers = 0;
+    for (unsigned i = 0; i < n; i++)
+        release(area[i], w);
     w->icw.nparts = 0;
     if (w->top)
         it.gfx->FreeBitMap(w->top);
@@ -773,6 +905,8 @@ static void remove_late(struct window *w)
     set_word(&line_of(w)->is_Safe, UINT64_MAX);
 }
 
+static bool ask_hung(struct window *w);
+
 static void close_late(void)
 {
     uint64_t now = CurrentTime(), next = 0;
@@ -782,10 +916,13 @@ static void close_late(void)
 
         if (!w->used || !w->close_by)
             continue;
-        if (w->close_by <= now)
-            remove_late(w);
-        else if (!next || w->close_by < next)
+        if (w->close_by <= now) {
+            w->close_by = 0;
+            if (!ask_hung(w))
+                remove_late(w);
+        } else if (!next || w->close_by < next) {
             next = w->close_by;
+        }
     }
     it.close_next = next;
     rearm();
@@ -816,8 +953,8 @@ static int64_t open_window(unsigned c, const struct IntuiMsg *q, struct IntuiMsg
         e = page_up(c, q->im_Task);
     chrome_size(q->im_Flags, q->im_Width, q->im_Height, &n.ch, &n.ix, &n.iy);
     if (!e && !(q->im_Flags & WFLG_BORDERLESS) &&
-        (!(n.top = it.gfx->AllocBitMap(n.ch.w, INTUI_TITLEBAR + INTUI_BORDER, PIXFMT_XRGB8888, 0,
-                                       nullptr)) ||
+        (!(n.top = it.gfx->AllocBitMap(n.ch.w, INTUI_TITLEBAR + chrome_bottom(q->im_Flags),
+                                       PIXFMT_XRGB8888, 0, nullptr)) ||
          !(n.side = it.gfx->AllocBitMap(2 * INTUI_BORDER, q->im_Height, PIXFMT_XRGB8888, 0,
                                         nullptr))))
         e = ERR_NOMEM;
@@ -834,17 +971,23 @@ static int64_t open_window(unsigned c, const struct IntuiMsg *q, struct IntuiMsg
     n.idcmp = q->im_IDCMP;
     n.iw = q->im_Width;
     n.ih = q->im_Height;
-    n.icw = (struct ic_window){ q->im_Left, q->im_Top, n.ch.w, n.ch.h, 0, { 0 } };
+    n.min_w = q->im_MinWidth ? q->im_MinWidth : 1;
+    n.min_h = q->im_MinHeight ? q->im_MinHeight : 1;
+    n.max_w = q->im_MaxWidth ? q->im_MaxWidth : GFX_MAX_SIZE;
+    n.max_h = q->im_MaxHeight ? q->im_MaxHeight : GFX_MAX_SIZE;
+    n.icw = (struct ic_window){ q->im_Left, q->im_Top, n.ch.w, n.ch.h, 0, { 0 }, K_WINDOW };
     memcpy(n.title, q->im_Title, INTUI_TITLE);
     n.title[INTUI_TITLE - 1] = 0;
     *w = n;
     w->ch.title = w->title;
-    w->icw.part[0] = (struct ic_part){ { w->ix, w->iy, w->ix + (int32_t)w->iw - 1,
-                                         w->iy + (int32_t)w->ih - 1 }, &w->bm[0], 0, 0 };
+    w->ch.fonts = &it.fonts;
+    layout(w);
+    w->icw.nparts = 0;                  /* nothing shown until its first frame */
     if (w->top)
         chrome_draw(it.gfx, w->top, w->side, &w->ch);
     cl->lines |= 1u << line;
-    *line_of(w) = (struct IntuiSync){ .is_LeftEdge = q->im_Left, .is_TopEdge = q->im_Top };
+    *line_of(w) = (struct IntuiSync){ .is_LeftEdge = q->im_Left, .is_TopEdge = q->im_Top,
+                                      .is_Width = n.iw, .is_Height = n.ih };
     m->im_Window = id_of(w);
     m->im_Sync = (uint64_t)line_of(w);
     return 0;
@@ -857,26 +1000,50 @@ static void close_window(struct window *w)
     *w = (struct window){ 0 };
 }
 
+/* The buffers ChangeWindowBuffers gave, taken: the old ones let go of
+ * unless they're among the new. */
+static void rebuffered(struct window *w)
+{
+    uint64_t old[INTUI_BUFFERS];
+    unsigned had = w->buffers;
+
+    for (unsigned b = 0; b < INTUI_BUFFERS; b++) {
+        old[b] = w->area[b];
+        w->bm[b] = w->next[b];
+        w->area[b] = w->next_area[b];
+        w->next_area[b] = 0;
+    }
+    w->buffers = w->next_buffers;
+    w->next_buffers = 0;
+    for (unsigned b = 0; b < had; b++)
+        release(old[b], nullptr);
+}
+
 static int64_t present(unsigned c, const struct IntuiMsg *q)
 {
     struct window *w = find(c, q->im_Window);
+    const struct BitMap *bm;
+    bool whole;
 
     if (!w || w->removed)
         return ERR_NOTFOUND;
-    if (q->im_Index >= w->buffers || q->im_Count > INTUI_RECTS || q->im_Frame <= w->frame)
+    if (q->im_Index >= (w->next_buffers ? w->next_buffers : w->buffers) || q->im_Count > INTUI_RECTS ||
+        q->im_Frame <= w->frame)
         return ERR_BADARG;
+    bm = w->next_buffers ? &w->next[q->im_Index] : &w->bm[q->im_Index];
     for (unsigned i = 0; i < q->im_Count; i++) {
         const struct GfxRect *r = &q->im_Rect[i];
 
         if (r->MinX < 0 || r->MinY < 0 || r->MinX > r->MaxX || r->MinY > r->MaxY ||
-            r->MaxX >= (int64_t)w->iw || r->MaxY >= (int64_t)w->ih)
+            r->MaxX >= (int64_t)bm->bm_Width || r->MaxY >= (int64_t)bm->bm_Height)
             return ERR_BADARG;
     }
+    if ((whole = w->next_buffers))
+        rebuffered(w);
     w->cur = q->im_Index;
     w->frame = q->im_Frame;
-    w->icw.part[0].bm = &w->bm[w->cur];
+    layout(w);
     if (!w->shown) {
-        chrome_parts(&w->ch, w->top, w->side, &w->icw);
         if (!(w->shown = ic_add(&it.screen, &w->icw))) {
             w->icw.nparts = 0;
             return ERR_FULL;
@@ -885,13 +1052,617 @@ static int64_t present(unsigned c, const struct IntuiMsg *q)
             activate(w, CurrentTime());
         return 0;
     }
-    if (!q->im_Count)
-        ic_damage_window(&it.screen, &w->icw, w->icw.part[0].r);
+    if (!q->im_Count || whole)
+        ic_damage_window(&it.screen, &w->icw,
+                         (struct GfxRect){ w->ix, w->iy, w->ix + (int32_t)w->iw - 1, w->iy + (int32_t)w->ih - 1 });
     for (unsigned i = 0; i < q->im_Count; i++)
         ic_damage_window(&it.screen, &w->icw,
                          (struct GfxRect){ w->ix + q->im_Rect[i].MinX, w->iy + q->im_Rect[i].MinY,
                                            w->ix + q->im_Rect[i].MaxX, w->iy + q->im_Rect[i].MaxY });
     return 0;
+}
+
+/* --- Resizing (V8 step 4). --- */
+
+/* 'w' made iw by ih inside, at once: its chrome drawn again at the new
+ * size, its buffer shown as far as it goes, and the client told. */
+static bool resize(struct window *w, uint32_t iw, uint32_t ih)
+{
+    struct chrome ch = w->ch;
+    struct BitMap *top = nullptr, *side = nullptr;
+    int32_t ix, iy;
+
+    if (iw == w->iw && ih == w->ih)
+        return true;
+    chrome_size(w->ch.flags, iw, ih, &ch, &ix, &iy);
+    if (!(w->ch.flags & WFLG_BORDERLESS) &&
+        (!(top = it.gfx->AllocBitMap(ch.w, INTUI_TITLEBAR + chrome_bottom(ch.flags), PIXFMT_XRGB8888, 0,
+                                     nullptr)) ||
+         !(side = it.gfx->AllocBitMap(2 * INTUI_BORDER, ih, PIXFMT_XRGB8888, 0, nullptr)))) {
+        it.gfx->FreeBitMap(top);
+        return false;
+    }
+    if (w->top) {
+        it.gfx->FreeBitMap(w->top);
+        it.gfx->FreeBitMap(w->side);
+    }
+    w->top = top;
+    w->side = side;
+    w->ch = ch;
+    w->iw = iw;
+    w->ih = ih;
+    if (w->top)
+        chrome_draw(it.gfx, w->top, w->side, &w->ch);
+    ic_resize(&it.screen, &w->icw, ch.w, ch.h);
+    layout(w);
+    line_of(w)->is_Width = iw;
+    line_of(w)->is_Height = ih;
+    post_at(w, IDCMP_NEWSIZE, 0, 0, 0, CurrentTime(), (int32_t)iw, (int32_t)ih);
+    return true;
+}
+
+/* The outline of 'it.sizing' at size_w by size_h: four thin windows of
+ * a flat colour, pinned. */
+static void outline_set(void)
+{
+    const struct window *w = it.sizing;
+    int32_t ow = (int32_t)(it.size_w + w->ch.w - w->iw), oh = (int32_t)(it.size_h + w->ch.h - w->ih);
+    const struct GfxRect e[4] = { { 0, 0, ow - 1, 1 }, { 0, oh - 2, ow - 1, oh - 1 }, { 0, 2, 1, oh - 3 },
+                                  { ow - 2, 2, ow - 1, oh - 3 } };
+
+    outline_off();
+    for (unsigned k = 0; k < 4; k++) {
+        struct ic_window *o = &it.outline[k];
+        uint32_t ew = (uint32_t)(e[k].MaxX - e[k].MinX + 1), eh = (uint32_t)(e[k].MaxY - e[k].MinY + 1);
+
+        *o = (struct ic_window){ w->icw.x + e[k].MinX, w->icw.y + e[k].MinY, ew, eh, 1, { 0 }, K_OUTLINE };
+        o->part[0] = (struct ic_part){ { 0, 0, (int32_t)ew - 1, (int32_t)eh - 1 }, nullptr, 0, 0, OUTLINE };
+        ic_pin(&it.screen, o);
+    }
+    it.outlined = true;
+}
+
+static uint32_t limit(int64_t v, uint32_t lo, uint32_t hi)
+{
+    return v < (int64_t)lo ? lo : v > (int64_t)hi ? hi : (uint32_t)v;
+}
+
+/* The inside's size with the size gadget at the pointer, within the
+ * window's limits and the screen. */
+static void size_track(void)
+{
+    const struct window *w = it.sizing;
+    int64_t cw = (int64_t)w->ch.w - w->iw, chh = (int64_t)w->ch.h - w->ih;
+    uint32_t mw = (uint32_t)((int64_t)it.width - w->icw.x - cw), mh = (uint32_t)((int64_t)it.height - w->icw.y - chh);
+
+    mw = mw > w->max_w ? w->max_w : mw;
+    mh = mh > w->max_h ? w->max_h : mh;
+    it.size_w = limit((int64_t)it.px + it.size_dx - w->icw.x - cw, w->min_w, mw > w->min_w ? mw : w->min_w);
+    it.size_h = limit((int64_t)it.py + it.size_dy - w->icw.y - chh, w->min_h, mh > w->min_h ? mh : w->min_h);
+    outline_set();
+}
+
+static void size_start(struct window *w)
+{
+    it.sizing = w;
+    it.size_dx = w->icw.x + (int32_t)w->ch.w - it.px;
+    it.size_dy = w->icw.y + (int32_t)w->ch.h - it.py;
+    size_track();
+}
+
+static void size_end(void)
+{
+    struct window *w = it.sizing;
+
+    outline_off();
+    it.sizing = nullptr;
+    if (!resize(w, it.size_w, it.size_h))
+        say("intuition: no memory for a resized window's chrome: left as it was");
+}
+
+/* --- The screen bar and its clock (V8 step 4). --- */
+
+static void copy(char *to, const char *from, unsigned n)
+{
+    unsigned i = 0;
+
+    for (; from[i] && i < n - 1; i++)
+        to[i] = from[i];
+    to[i] = 0;
+}
+
+static void bar_redraw(void)
+{
+    if (!it.bar_bm)
+        return;
+    it.bar.strip = it.active && it.active->has_strip ? &it.active->strip : nullptr;
+    it.bar.open = it.menu_title;
+    bar_layout(it.gfx, &it.bar);
+    bar_draw(it.gfx, it.bar_bm, &it.bar);
+    ic_damage_window(&it.screen, &it.bar_w, it.bar_w.part[0].r);
+}
+
+/* The RTC's seconds, from its driver if it's there: connected to, read
+ * and let go, so intuition holds nothing of it between. */
+static bool rtc_read(uint64_t *secs)
+{
+    struct MsgPort mp;
+    struct DrvRequest *r;
+    bool ok = false;
+
+    if (ConnectPort(&mp, "rtc.0", SIG_CALL, 2, 2 * sizeof *r) != 0)
+        return false;
+    if ((r = AllocMsg(&mp, sizeof *r))) {
+        memset(r, 0, sizeof *r);
+        r->dr_Msg.mn_Length = sizeof *r;
+        r->dr_Op = DRV_READ;
+        r->dr_Len = 8;
+        if (DoMsgUntil(&mp, &r->dr_Msg, CurrentTime() + 100 * MS) == 0 && r->dr_Msg.mn_Error == 0 &&
+            r->dr_Len == 8) {
+            *secs = 0;
+            for (unsigned i = 0; i < 8; i++)
+                *secs |= (uint64_t)r->dr_Data[i] << (8 * i);
+            ok = *secs != 0;
+        }
+    }
+    ClosePort(&mp);
+    return ok;
+}
+
+/* The time of day drawn, and again at the next minute; with no RTC yet,
+ * nothing, and it's looked for again in 5 s. */
+static void clock_tick(void)
+{
+    uint64_t now = CurrentTime(), s;
+    char was[sizeof it.bar.clock];
+
+    if ((!it.rtc_at || now - it.rtc_at > RTC_AGAIN) && rtc_read(&s)) {
+        it.rtc_secs = s;
+        it.rtc_at = now;
+    }
+    memcpy(was, it.bar.clock, sizeof was);
+    if (!it.rtc_at) {
+        it.bar.clock[0] = 0;
+        it.clock_next = now + 5 * SECOND;
+    } else {
+        s = it.rtc_secs + (now - it.rtc_at) / SECOND;
+        bar_clock(it.bar.clock, s);
+        it.clock_secs = s - s % 60;
+        it.clock_next = now + (60 - s % 60) * SECOND;
+    }
+    if (memcmp(was, it.bar.clock, sizeof was) != 0)
+        bar_redraw();
+    rearm();
+}
+
+/* The system menu: About; the rest wait for what does them (the Shell
+ * in a window, step 5; Reboot and Shutdown, power). */
+static void system_menu(void)
+{
+    static const char *const items[] = { "About Planar", nullptr, "Shell", nullptr, "Reboot", "Shutdown" };
+    struct IntuiMenuStrip *s = &it.sys;
+
+    copy(s->ms_Title[0], "PlanarOS", INTUI_LABEL);
+    s->ms_Menus = 1;
+    for (unsigned i = 0; i < sizeof items / sizeof items[0]; i++) {
+        struct IntuiMenuItem *mi = &s->ms_Item[s->ms_Items++];
+
+        if (!items[i]) {
+            mi->mi_Flags = ITEMBAR;
+            continue;
+        }
+        copy(mi->mi_Label, items[i], INTUI_LABEL);
+        mi->mi_Flags = i ? NM_ITEMDISABLED : 0;
+    }
+}
+
+/* System Sans, the bar pinned at the top, and the clock. Without the
+ * fonts, the 8x8; without the bar's bitmap, no bar. */
+static void bar_up(void)
+{
+    struct TextAttr sans = { "System Sans", 13, 0, 0 }, bold = { "System Sans", 13, FSF_BOLD, 0 };
+
+    it.sans = it.gfx->OpenTextFont(&sans);
+    it.bold = it.gfx->OpenTextFont(&bold);
+    if (!it.sans || !it.bold)
+        say("intuition: System Sans wouldn't open: the chrome in the 8x8 font");
+    it.fonts = (struct chrome_fonts){ it.sans, it.bold };
+    it.menu_title = -1;
+    system_menu();
+    if (!(it.bar_bm = it.gfx->AllocBitMap(it.width, INTUI_SCREENBAR, PIXFMT_XRGB8888, 0, nullptr))) {
+        say("intuition: no memory for the screen bar");
+        return;
+    }
+    it.bar = (struct bar){ .width = it.width, .fonts = &it.fonts, .open = -1 };
+    it.bar_w = (struct ic_window){ 0, 0, it.width, INTUI_SCREENBAR, 1, { 0 }, K_BAR };
+    it.bar_w.part[0] = (struct ic_part){ { 0, 0, (int32_t)it.width - 1, (int32_t)INTUI_SCREENBAR - 1 },
+                                         it.bar_bm, 0, 0, 0 };
+    ic_pin(&it.screen, &it.bar_w);
+    clock_tick();
+    bar_redraw();
+}
+
+/* --- Menus (V8 step 4). --- */
+
+/* The strip title 'title' of the bar opens: the system's, or the
+ * active window's. */
+static const struct IntuiMenuStrip *strip_of(int title)
+{
+    if (title == 0)
+        return &it.sys;
+    return it.active && it.active->has_strip && title - 1 < (int)it.active->strip.ms_Menus ? &it.active->strip
+                                                                                         : nullptr;
+}
+
+static void menu_close(void)
+{
+    if (it.menu_bm) {
+        ic_remove(&it.screen, &it.menu_w);
+        it.gfx->FreeBitMap(it.menu_bm);
+        it.menu_bm = nullptr;
+    }
+    if (it.menu_title >= 0) {
+        it.menu_title = -1;
+        bar_redraw();
+    }
+}
+
+/* Title 'title' open, its menu under it unless it's disabled. */
+static void menu_open(int title)
+{
+    const struct IntuiMenuStrip *s = strip_of(title);
+    int32_t x;
+
+    if (title == it.menu_title)
+        return;
+    menu_close();
+    if (!s)
+        return;
+    it.menu_title = title;
+    bar_redraw();
+    if (title > 0 && s->ms_Disabled & 1u << (title - 1))
+        return;
+    it.menu = (struct menu){ .strip = s, .menu = title ? (unsigned)title - 1 : 0, .hot = -1 };
+    menu_layout(it.gfx, &it.fonts, &it.menu);
+    if (!it.menu.count ||
+        !(it.menu_bm = it.gfx->AllocBitMap(it.menu.w, it.menu.h, PIXFMT_XRGB8888, 0, nullptr)))
+        return;
+    menu_draw(it.gfx, &it.fonts, it.menu_bm, &it.menu);
+    x = it.bar.x0[title];
+    if (x + (int32_t)it.menu.w > (int32_t)it.width)
+        x = (int32_t)it.width - (int32_t)it.menu.w;
+    it.menu_w = (struct ic_window){ x < 0 ? 0 : x, (int32_t)INTUI_SCREENBAR, it.menu.w, it.menu.h, 1, { 0 }, K_MENU };
+    it.menu_w.part[0] = (struct ic_part){ { 0, 0, (int32_t)it.menu.w - 1, (int32_t)it.menu.h - 1 }, it.menu_bm, 0, 0, 0 };
+    ic_pin(&it.screen, &it.menu_w);
+}
+
+/* The pointer at (x, y) with the menus up: a title it's on opens, an
+ * item it's on is highlighted. */
+static void menu_track(int32_t x, int32_t y)
+{
+    int title = bar_hit(&it.bar, x, y), hot = -1;
+
+    if (title >= 0)
+        menu_open(title);
+    if (!it.menu_bm)
+        return;
+    hot = menu_hit(&it.menu, x - it.menu_w.x, y - it.menu_w.y);
+    if (hot != it.menu.hot) {
+        it.menu.hot = hot;
+        menu_draw(it.gfx, &it.fonts, it.menu_bm, &it.menu);
+        ic_damage_window(&it.screen, &it.menu_w, it.menu_w.part[0].r);
+    }
+}
+
+/* Item 'index' of w's strip (its 'item' of menu 'menu') chosen: a
+ * CHECKIT item checked or not, and the client told. */
+static void pick(struct window *w, unsigned index, unsigned menu, unsigned item, uint64_t time)
+{
+    struct IntuiMenuItem *mi = &w->strip.ms_Item[index];
+
+    if (mi->mi_Flags & CHECKIT)
+        mi->mi_Flags ^= CHECKED;
+    post(w, IDCMP_MENUPICK, FULLMENUNUM(menu, item, NOSUB), 0,
+         mi->mi_Flags & CHECKIT && mi->mi_Flags & CHECKED ? 1 : 0, time);
+}
+
+static void about(void);
+
+/* The menus closed, and the highlighted item chosen if it can be. */
+static void menu_choose(uint64_t time)
+{
+    struct menu m = it.menu;
+    bool open = it.menu_bm, system = m.strip == &it.sys;
+    struct window *w = it.active;
+
+    menu_close();
+    if (!open || !menu_choosable(&m, m.hot))
+        return;
+    if (system) {
+        if (m.hot == 0)
+            about();
+        return;
+    }
+    if (w && m.strip == &w->strip)
+        pick(w, m.first + (unsigned)m.hot, m.menu, (unsigned)m.hot, time);
+}
+
+/* A key with the GUI key held: an item of the active window's strip it
+ * chooses, if any. True if it was such a key, chosen or not. */
+static bool menu_key(const struct InputEvent *ev)
+{
+    struct window *w = it.active;
+    uint32_t c = ev->ie_Char;
+    unsigned item = 0;
+
+    if (!w || !w->has_strip || ev->ie_Flags & IEF_UP || !(ev->ie_Qualifier & (IEQ_LGUI | IEQ_RGUI)) || !c ||
+        c > 0x7e)
+        return false;
+    c = c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c;
+    for (unsigned i = 0; i < w->strip.ms_Items; i++) {
+        const struct IntuiMenuItem *mi = &w->strip.ms_Item[i];
+
+        item = i && mi->mi_Menu == w->strip.ms_Item[i - 1].mi_Menu ? item + 1 : 0;
+        if ((uint32_t)(uint8_t)mi->mi_Key != c)
+            continue;
+        if (!(w->strip.ms_Disabled & 1u << mi->mi_Menu) && !(mi->mi_Flags & (ITEMBAR | NM_ITEMDISABLED)))
+            pick(w, i, mi->mi_Menu, item, ev->ie_Time);
+        return true;
+    }
+    return false;
+}
+
+/* SetMenuStrip's strip, copied from the client's page once and checked
+ * there: labels ended, items in their menus' order. */
+static int64_t menus(unsigned c, const struct IntuiMsg *q)
+{
+    struct window *w = find(c, q->im_Window);
+    struct IntuiMenuStrip *s;
+    unsigned in_menu = 0;
+
+    if (!w || w->removed)
+        return ERR_NOTFOUND;
+    if (!it.cl[c].ack)
+        return ERR_BADARG;
+    if (it.menu_title > 0 && w == it.active)
+        menu_close();
+    s = &w->strip;
+    memcpy(s, &it.cl[c].ack->ia_Strip, sizeof *s);
+    w->has_strip = false;
+    if (s->ms_Menus > INTUI_MENU_TITLES || s->ms_Items > INTUI_MENU_ITEMS)
+        return ERR_BADARG;
+    for (unsigned i = 0; i < INTUI_MENU_TITLES; i++)
+        s->ms_Title[i][INTUI_LABEL - 1] = 0;
+    for (unsigned i = 0; i < s->ms_Items; i++) {
+        struct IntuiMenuItem *mi = &s->ms_Item[i];
+
+        mi->mi_Label[INTUI_LABEL - 1] = 0;
+        in_menu = i && mi->mi_Menu == s->ms_Item[i - 1].mi_Menu ? in_menu + 1 : 0;
+        if (mi->mi_Menu >= s->ms_Menus || (i && mi->mi_Menu < s->ms_Item[i - 1].mi_Menu) || in_menu > 62)
+            return ERR_BADARG;
+    }
+    w->has_strip = s->ms_Menus > 0;
+    if (w == it.active)
+        bar_redraw();
+    return 0;
+}
+
+/* ChangeWindowBuffers': checked now, taken at the window's next present. */
+static int64_t rebuffer(unsigned c, const struct IntuiMsg *q)
+{
+    struct window *w = find(c, q->im_Window);
+    struct BitMap bm[INTUI_BUFFERS] = { 0 };
+    uint64_t area[INTUI_BUFFERS] = { 0 }, old[INTUI_BUFFERS];
+    unsigned had;
+    int64_t e = 0;
+
+    if (!w || w->removed)
+        return ERR_NOTFOUND;
+    if (q->im_Buffers < 1 || q->im_Buffers > INTUI_BUFFERS || q->im_Width != w->iw || q->im_Height != w->ih)
+        return ERR_BADARG;
+    for (unsigned b = 0; b < q->im_Buffers && !e; b++)
+        e = buffer(&q->im_Buffer[b], w->iw, w->ih, &bm[b], &area[b]);
+    if (e) {
+        for (unsigned b = 0; b < INTUI_BUFFERS; b++)
+            release(area[b], nullptr);
+        return e;
+    }
+    had = w->next_buffers;              /* a change not yet taken: dropped */
+    for (unsigned b = 0; b < INTUI_BUFFERS; b++) {
+        old[b] = w->next_area[b];
+        w->next[b] = bm[b];
+        w->next_area[b] = area[b];
+    }
+    w->next_buffers = q->im_Buffers;
+    for (unsigned b = 0; b < had; b++)
+        release(old[b], nullptr);
+    return 0;
+}
+
+/* --- Requesters (V8 step 4). --- */
+
+static struct req *req_new(void)
+{
+    for (unsigned i = 0; i < REQS; i++)
+        if (!it.req[i].used) {
+            it.req[i] = (struct req){ 0 };
+            return &it.req[i];
+        }
+    return nullptr;
+}
+
+static void req_free(struct req *r)
+{
+    if (!r->used)
+        return;
+    ic_remove(&it.screen, &r->icw);
+    it.gfx->FreeBitMap(r->top);
+    it.gfx->FreeBitMap(r->side);
+    it.gfx->FreeBitMap(r->body);
+    if (it.req_press == r)
+        it.req_press = nullptr;
+    *r = (struct req){ 0 };
+}
+
+/* r's text laid out and drawn in a window of intuition's, at the front,
+ * centred over 'over' or the screen, below the bar. */
+static bool req_show(struct req *r, const struct window *over)
+{
+    int32_t ix, iy, x, y, cx, cy;
+
+    if (!request_layout(it.gfx, &it.fonts, &r->q, it.width > 64 ? it.width - 40 : it.width))
+        return false;
+    chrome_size(0, r->q.w, r->q.h, &r->ch, &ix, &iy);
+    r->ch.title = r->q.r.ir_Title;
+    r->ch.active = true;
+    r->ch.fonts = &it.fonts;
+    if (!(r->top = it.gfx->AllocBitMap(r->ch.w, INTUI_TITLEBAR + INTUI_BORDER, PIXFMT_XRGB8888, 0, nullptr)) ||
+        !(r->side = it.gfx->AllocBitMap(2 * INTUI_BORDER, r->q.h, PIXFMT_XRGB8888, 0, nullptr)) ||
+        !(r->body = it.gfx->AllocBitMap(r->q.w, r->q.h, PIXFMT_XRGB8888, 0, nullptr))) {
+        it.gfx->FreeBitMap(r->top);
+        it.gfx->FreeBitMap(r->side);
+        return false;
+    }
+    chrome_draw(it.gfx, r->top, r->side, &r->ch);
+    request_draw(it.gfx, &it.fonts, r->body, &r->q);
+    cx = over && over->shown ? over->icw.x + (int32_t)over->icw.w / 2 : (int32_t)it.width / 2;
+    cy = over && over->shown ? over->icw.y + (int32_t)over->icw.h / 2 : (int32_t)it.height / 2;
+    x = cx - (int32_t)r->ch.w / 2;
+    y = cy - (int32_t)r->ch.h / 2;
+    x = x + (int32_t)r->ch.w > (int32_t)it.width ? (int32_t)it.width - (int32_t)r->ch.w : x;
+    y = y + (int32_t)r->ch.h > (int32_t)it.height ? (int32_t)it.height - (int32_t)r->ch.h : y;
+    r->icw = (struct ic_window){ x < 0 ? 0 : x, y < (int32_t)INTUI_SCREENBAR ? (int32_t)INTUI_SCREENBAR : y,
+                                 r->ch.w, r->ch.h, 0, { 0 }, K_REQUEST };
+    r->icw.part[0] = (struct ic_part){ { ix, iy, ix + (int32_t)r->q.w - 1, iy + (int32_t)r->q.h - 1 }, r->body, 0, 0, 0 };
+    chrome_parts(&r->ch, r->top, r->side, &r->icw);
+    if (!ic_add(&it.screen, &r->icw)) {
+        r->used = true;
+        req_free(r);
+        return false;
+    }
+    r->used = true;
+    return true;
+}
+
+static bool kill_client(unsigned c);
+
+/* r answered: its caller told, or what intuition asked done. */
+static void req_answer(struct req *r, int answer)
+{
+    struct window *w = r->of;
+    struct IntuiMsg *m = r->m;
+    uint8_t why = r->why, conn = r->conn;
+
+    req_free(r);
+    if (why == R_CLIENT) {
+        m->im_Index = (uint32_t)answer;
+        m->im_Msg.mn_Error = 0;
+        ReplyMsgLater(&it.mp[conn], &m->im_Msg);
+    } else if (why == R_HUNG && w && w->used) {
+        if (answer == 0) {              /* Wait: asked again after another deadline */
+            w->close_by = CurrentTime() + CLOSE_DEADLINE;
+            close_late();
+        } else if (!kill_client(w->conn)) {
+            remove_late(w);
+        }
+    }
+}
+
+/* The front requester's inside button at the pointer, or -1. */
+static int req_button_at(const struct req *r)
+{
+    return request_hit(&r->q, it.px - r->icw.x - r->icw.part[0].r.MinX, it.py - r->icw.y - r->icw.part[0].r.MinY);
+}
+
+static void req_pressed(struct req *r, int button)
+{
+    if (r->q.pressed == button)
+        return;
+    r->q.pressed = button;
+    request_draw(it.gfx, &it.fonts, r->body, &r->q);
+    ic_damage_window(&it.screen, &r->icw, r->icw.part[0].r);
+}
+
+static void about(void)
+{
+    struct req *r = req_new();
+
+    if (!r)
+        return;
+    r->why = R_ABOUT;
+    copy(r->q.r.ir_Title, "About Planar", INTUI_TITLE);
+    copy(r->q.r.ir_Body, "Planar OS, version 8\nThe desktop: intuition 8.4, its type in System Sans\n"
+                         "Windows composed on the CPU, the pointer on a plane of its own", INTUI_REQ_BODY);
+    copy(r->q.r.ir_Gadgets, "OK", INTUI_REQ_GADGETS);
+    req_show(r, nullptr);
+}
+
+/* w's close gadget went unanswered (decision 6, V8 step 4): asked
+ * whether to close it. False if no requester could be shown. */
+static bool ask_hung(struct window *w)
+{
+    struct req *r = req_new();
+
+    if (!r)
+        return false;
+    r->why = R_HUNG;
+    r->of = w;
+    copy(r->q.r.ir_Title, "Program not answering", INTUI_TITLE);
+    copy(r->q.r.ir_Body, "The program isn't answering.\nClose it?", INTUI_REQ_BODY);
+    copy(r->q.r.ir_Gadgets, "Close|Wait", INTUI_REQ_GADGETS);
+    if (!req_show(r, w))
+        return false;
+    KPrintF("intuition: window %lu wasn't closed within %lu ms of its close gadget: asked whether to "
+            "close it", (uint64_t)id_of(w), CLOSE_DEADLINE / MS);
+    return true;
+}
+
+/* EasyRequest's: copied from the client's page once; answered when chosen. */
+static int64_t requested(unsigned c, struct IntuiMsg *m, const struct IntuiMsg *q, bool *held)
+{
+    struct window *w = q->im_Window ? find(c, q->im_Window) : nullptr;
+    struct req *r;
+
+    if (q->im_Window && (!w || w->removed))
+        return ERR_NOTFOUND;
+    if (!it.cl[c].ack)
+        return ERR_BADARG;
+    if (!(r = req_new()))
+        return ERR_FULL;
+    memcpy(&r->q.r, &it.cl[c].ack->ia_Request, sizeof r->q.r);
+    r->why = R_CLIENT;
+    r->conn = (uint8_t)c;
+    r->m = m;
+    if (!req_show(r, w))
+        return ERR_NOMEM;
+    *held = true;
+    return 0;
+}
+
+/* hwdb asked to end client c, which isn't answering (V8 step 4): true
+ * if it did. */
+static bool kill_client(unsigned c)
+{
+    struct MsgPort mp;
+    struct HwdbMsg *m;
+    int64_t e = ERR_NOMEM;
+
+    if (ConnectPort(&mp, "hwdb", SIG_CALL, 2, 2 * sizeof *m) != 0)
+        return false;
+    if ((m = AllocMsg(&mp, sizeof *m))) {
+        memset(m, 0, sizeof *m);
+        m->hm_Msg.mn_Length = sizeof *m;
+        m->hm_Op = HWDB_KILL_CLIENT;
+        m->hm_Conn = (uint64_t)it.mp[c].mp_Conn;
+        if ((e = DoMsgUntil(&mp, &m->hm_Msg, CurrentTime() + CALL_DEADLINE)) == 0)
+            e = m->hm_Msg.mn_Error;
+    }
+    ClosePort(&mp);
+    if (e == 0)
+        say("intuition: a client not answering, ended by hwdb as asked");
+    else
+        KPrintF("intuition: hwdb wouldn't end a client not answering (%ld)", e);
+    return e == 0;
 }
 
 /* The client's IntuiAck, and its page with the ring. */
@@ -915,11 +1686,38 @@ static int64_t events(unsigned c, const struct IntuiMsg *q, struct IntuiMsg *m)
     return 0;
 }
 
+/* INFO's places on the screen, for tests that click them. */
+static void places(struct IntuiMsg *m)
+{
+    for (unsigned i = 0; i < it.bar.n && i < 1 + INTUI_MENU_TITLES; i++)
+        m->im_TitleX[i] = (it.bar.x0[i] + it.bar.x1[i]) / 2;
+    if (it.menu_bm) {
+        m->im_MenuRect = (struct GfxRect){ it.menu_w.x, it.menu_w.y, it.menu_w.x + (int32_t)it.menu_w.w - 1,
+                                           it.menu_w.y + (int32_t)it.menu_w.h - 1 };
+        for (unsigned i = 0; i < it.menu.count && i < 16; i++)
+            m->im_ItemY[i] = it.menu_w.y + (it.menu.y[i] + it.menu.y[i + 1]) / 2;
+    }
+    for (unsigned z = 0; z < it.screen.nz; z++) {
+        struct req *r = req_of(it.screen.z[z]);
+
+        if (!r)
+            continue;
+        for (unsigned i = 0; i < r->q.nbuttons && i < 4; i++) {
+            struct GfxRect b = r->q.button[i];
+            int32_t dx = r->icw.x + r->icw.part[0].r.MinX, dy = r->icw.y + r->icw.part[0].r.MinY;
+
+            m->im_ReqButton[i] = (struct GfxRect){ b.MinX + dx, b.MinY + dy, b.MaxX + dx, b.MaxY + dy };
+        }
+        break;
+    }
+}
+
 static void message(unsigned c, struct IntuiMsg *m)
 {
     static struct IntuiMsg q;
     struct window *w;
     int64_t e = 0;
+    bool held = false;
 
     memcpy(&q, m, sizeof q);
     switch (q.im_Op) {
@@ -933,7 +1731,9 @@ static void message(unsigned c, struct IntuiMsg *m)
         m->im_PointerX = it.px;
         m->im_PointerY = it.py;
         m->im_Active = it.active ? id_of(it.active) : 0;
-        m->im_Windows = it.screen.nz;
+        m->im_Windows = 0;              /* clients': not the bar, a menu or a requester */
+        for (unsigned z = 0; z < it.screen.nz; z++)
+            m->im_Windows += it.screen.z[z]->kind == K_WINDOW;
         m->im_Input = it.ring != nullptr;
         m->im_InputOpens = it.input_opens;
         m->im_Moves = it.moves;
@@ -941,6 +1741,16 @@ static void message(unsigned c, struct IntuiMsg *m)
         m->im_MoveMax = it.move_max;
         m->im_ReadMax = it.read_max;
         memcpy(m->im_MoveGaps, it.gaps, sizeof it.gaps);
+        m->im_Menu = (uint32_t)(it.menu_title + 1);
+        m->im_Requests = 0;
+        for (unsigned r = 0; r < REQS; r++)
+            m->im_Requests += it.req[r].used;
+        m->im_Clock = it.clock_secs;
+        memset(m->im_TitleX, 0, sizeof m->im_TitleX);
+        memset(&m->im_MenuRect, 0, sizeof m->im_MenuRect);
+        memset(m->im_ItemY, 0, sizeof m->im_ItemY);
+        memset(m->im_ReqButton, 0, sizeof m->im_ReqButton);
+        places(m);
         break;
     case INTUI_OPEN:
         e = open_window(c, &q, m);
@@ -957,9 +1767,20 @@ static void message(unsigned c, struct IntuiMsg *m)
     case INTUI_EVENTS:
         e = events(c, &q, m);
         break;
+    case INTUI_MENUS:
+        e = menus(c, &q);
+        break;
+    case INTUI_REBUFFER:
+        e = rebuffer(c, &q);
+        break;
+    case INTUI_REQUEST:
+        e = requested(c, m, &q, &held);
+        break;
     default:
         e = ERR_BADARG;
     }
+    if (held)                           /* answered when chosen */
+        return;
     m->im_Msg.mn_Error = (int32_t)e;
     ReplyMsgLater(&it.mp[c], &m->im_Msg);
 }
@@ -971,6 +1792,9 @@ static void gone(unsigned c)
     unsigned last = it.nconns - 1;
     uint64_t ack = it.cl[c].ack_area;
 
+    for (unsigned r = 0; r < REQS; r++)
+        if (it.req[r].used && it.req[r].why == R_CLIENT && it.req[r].conn == c)
+            req_free(&it.req[r]);       /* its caller's gone: nobody to answer */
     for (unsigned i = 0; i < IC_WINDOWS; i++)
         if (it.win[i].used && it.win[i].conn == c)
             close_window(&it.win[i]);
@@ -988,6 +1812,9 @@ static void gone(unsigned c)
         for (unsigned i = 0; i < IC_WINDOWS; i++)
             if (it.win[i].used && it.win[i].conn == last)
                 it.win[i].conn = (uint8_t)c;
+        for (unsigned r = 0; r < REQS; r++)
+            if (it.req[r].used && it.req[r].why == R_CLIENT && it.req[r].conn == last)
+                it.req[r].conn = (uint8_t)c;
     }
     it.cl[last] = (struct client){ 0 };
     it.nconns--;
@@ -1061,6 +1888,16 @@ static void input_lost(void)
     it.drag = nullptr;
     for (unsigned b = 0; b < 3; b++)
         it.button_to[b] = nullptr;
+    it.menu_held = false;
+    menu_close();
+    if (it.sizing) {
+        outline_off();
+        it.sizing = nullptr;
+    }
+    if (it.req_press) {
+        req_pressed(it.req_press, -1);
+        it.req_press = nullptr;
+    }
     if (it.press) {
         it.press->ch.pressed = CH_NONE;
         redraw(it.press);
@@ -1086,8 +1923,17 @@ static void pointer(const struct InputEvent *ev)
     it.pointer_moved = true;
     if (!it.move_at)
         it.move_at = ev->ie_Time;
-    if (it.drag) {
-        move_to(it.drag, x - it.drag_dx, y - it.drag_dy);
+    if (it.menu_title >= 0 || it.menu_held) {
+        menu_track(x, y);
+    } else if (it.sizing) {
+        size_track();
+    } else if (it.req_press) {
+        req_pressed(it.req_press, req_button_at(it.req_press) == it.req_button ? it.req_button : -1);
+    } else if (it.drag) {
+        /* Not under the screen bar: its title bar stays below it. */
+        int32_t top = y - it.drag_dy;
+
+        move_to(it.drag, x - it.drag_dx, top < (int32_t)INTUI_SCREENBAR ? (int32_t)INTUI_SCREENBAR : top);
     } else if (it.press) {              /* the gadget drawn pressed while the pointer's on it */
         struct window *w = it.press;
         unsigned on = chrome_hit(&w->ch, x - w->icw.x, y - w->icw.y) == it.pressing ? it.pressing
@@ -1105,7 +1951,7 @@ static void pointer(const struct InputEvent *ev)
 /* The depth gadget: to the back, or to the front from the back. */
 static void depth(struct window *w)
 {
-    if (it.screen.z[it.screen.nz - 1] == &w->icw)
+    if (ic_back(&it.screen) == &w->icw)
         ic_raise(&it.screen, &w->icw);
     else
         ic_lower(&it.screen, &w->icw);
@@ -1129,11 +1975,89 @@ static void gadget_up(struct window *w)
     }
 }
 
+/* A button let go over the menus, the size gadget or a requester's
+ * button: true if one of those had it. */
+static bool button_up_ours(unsigned b, uint64_t time)
+{
+    struct req *r = it.req_press;
+
+    if (b == 1 && it.menu_held) {
+        it.menu_held = false;
+        menu_choose(time);
+        return true;
+    }
+    if (b == 0 && it.menu_bm && it.menu.hot >= 0) {
+        menu_choose(time);
+        return true;
+    }
+    if (b == 0 && it.sizing) {
+        size_end();
+        return true;
+    }
+    if (b == 0 && r) {
+        bool on = req_button_at(r) == it.req_button;
+
+        it.req_press = nullptr;
+        req_pressed(r, -1);
+        if (on)
+            req_answer(r, request_answer(&r->q, it.req_button));
+        return true;
+    }
+    return false;
+}
+
+/* A button pressed over the bar, a menu or a requester, or with the
+ * menus up: true if it was theirs. The right button over the bar, or
+ * over anything while the active window has a strip, holds the menus. */
+static bool button_down_ours(unsigned b, struct ic_window *at)
+{
+    struct req *r = req_of(at);
+    int title;
+
+    if (at && at->kind == K_BAR) {
+        title = bar_hit(&it.bar, it.px, it.py);
+        if (b == 1) {
+            it.menu_held = true;
+            if (title >= 0)
+                menu_open(title);
+        } else if (b == 0) {
+            if (title >= 0 && title != it.menu_title)
+                menu_open(title);
+            else
+                menu_close();
+        }
+        return true;
+    }
+    if (it.menu_title >= 0 || it.menu_held) {
+        if (at && at->kind == K_MENU) {
+            it.menu_held |= b == 1;
+            return true;
+        }
+        if (!it.menu_held)
+            menu_close();
+        return true;
+    }
+    if (b == 1 && it.active && it.active->has_strip && !(r)) {
+        it.menu_held = true;
+        return true;
+    }
+    if (r) {
+        ic_raise(&it.screen, &r->icw);
+        if (b == 0 && (it.req_button = req_button_at(r)) >= 0) {
+            it.req_press = r;
+            req_pressed(r, it.req_button);
+        }
+        return true;
+    }
+    return at && at->kind == K_OUTLINE;
+}
+
 static void button(const struct InputEvent *ev)
 {
     static const uint16_t down[3] = { SELECTDOWN, MENUDOWN, MIDDLEDOWN };
     static const uint16_t held[3] = { IEQ_LEFTBUTTON, IEQ_RBUTTON, IEQ_MIDBUTTON };
     unsigned b = ev->ie_Code;
+    struct ic_window *at;
     struct window *w;
     unsigned part;
 
@@ -1141,6 +2065,8 @@ static void button(const struct InputEvent *ev)
         return;
     if (ev->ie_Flags & IEF_UP) {
         it.buttons &= (uint16_t)~held[b];
+        if (button_up_ours(b, ev->ie_Time))
+            return;
         if (b == 0 && it.drag)
             it.drag = nullptr;
         if (b == 0 && it.press)
@@ -1152,12 +2078,15 @@ static void button(const struct InputEvent *ev)
         return;
     }
     it.buttons |= held[b];
-    w = of(ic_at(&it.screen, it.px, it.py));
+    at = ic_at(&it.screen, it.px, it.py);
+    if (button_down_ours(b, at))
+        return;
+    w = of(at);
     activate(w, ev->ie_Time);
     if (!w)
         return;
     part = chrome_hit(&w->ch, it.px - w->icw.x, it.py - w->icw.y);
-    if (part != CH_DEPTH && it.screen.z[0] != &w->icw)
+    if (part != CH_DEPTH && ic_front(&it.screen) != &w->icw)
         ic_raise(&it.screen, &w->icw);
     if (part == CH_INSIDE) {
         it.button_to[b] = w;
@@ -1166,6 +2095,8 @@ static void button(const struct InputEvent *ev)
         it.drag = w;
         it.drag_dx = it.px - w->icw.x;
         it.drag_dy = it.py - w->icw.y;
+    } else if (b == 0 && part == CH_SIZE) {
+        size_start(w);
     } else if (b == 0 && (part == CH_DEPTH || part == CH_CLOSE)) {
         it.press = w;
         it.pressing = part;
@@ -1180,7 +2111,7 @@ static void key(const struct InputEvent *ev)
     uint16_t qual = ev->ie_Qualifier | (ev->ie_Flags & IEF_REPEAT ? IEQ_REPEAT : 0);
     bool up = ev->ie_Flags & IEF_UP;
 
-    if (!w)
+    if (!w || menu_key(ev))
         return;
     if (!up && ev->ie_Char && w->idcmp & IDCMP_VANILLAKEY)
         post(w, IDCMP_VANILLAKEY, (uint16_t)ev->ie_Char, qual, ev->ie_Char, ev->ie_Time);
@@ -1298,8 +2229,8 @@ static void costs(void)
         ok &= alloc(it.width, it.height, DISPLAY_XRGB8888, it.cached ? 0 : DISPLAYA_CACHED, &id[b],
                     &other[b]) == 0;
     full = (struct ic_window){ .x = 0, .y = 0, .w = it.width, .h = it.height, .nparts = 1,
-                               .part[0] = { { 0, 0, (int32_t)it.width - 1, (int32_t)it.height - 1 }, src, 0, 0 } };
-    small = (struct ic_window){ .w = 640, .h = 480, .nparts = 1, .part[0] = { { 0, 0, 639, 479 }, src, 0, 0 } };
+                               .part[0] = { { 0, 0, (int32_t)it.width - 1, (int32_t)it.height - 1 }, src, 0, 0, 0 } };
+    small = (struct ic_window){ .w = 640, .h = 480, .nparts = 1, .part[0] = { { 0, 0, 639, 479 }, src, 0, 0, 0 } };
     for (unsigned k = 0; ok && k < 4; k++) {
         struct ic_window *w = k & 2 ? &small : &full;
 
@@ -1362,6 +2293,7 @@ int main(uint64_t arg)
                            : "intuition: no screen from display");
         return 2;
     }
+    bar_up();
     input_up(CurrentTime() + 1000 * MS);
     if (arg & INTUITION_COSTS)
         costs();
@@ -1410,8 +2342,11 @@ int main(uint64_t arg)
             c++;
         }
         input_events();
-        if (sigs & 1ULL << SIG_TIMER)
+        if (sigs & 1ULL << SIG_TIMER) {
             close_late();
+            if (it.clock_next && CurrentTime() >= it.clock_next)
+                clock_tick();
+        }
         flush_events();
         latch();
     }

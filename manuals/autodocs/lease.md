@@ -1,6 +1,6 @@
 # lease: device leases
 
-*Checked against V5; `GrantRoot` and `ColdReboot`, V6.*
+*Checked against V5; `GrantRoot` and `ColdReboot`, V6; `KillPeer`, V8 step 4.*
 
 The calls a driver and its supervisor use, in alphabetical order, with the serial console's input and MSIs, which the device root also governs. The header is `planar/lease.h`. Every one is a kernel call: one stub in `arch/<isa>/user/syscalls.S`, trapping on every call. The code is `kernel/lease.c`, and the design is in [docs §11.4](../../docs/11-driver-model.md) and [V4 step 1](../../docs/v4-plan.md).
 
@@ -517,6 +517,48 @@ None known.
 
 **SEE ALSO**
 [ColdReboot](#leasecoldreboot), [CreateProcess](exec.md#execcreateprocess)
+
+---
+
+## lease/KillPeer
+
+**NAME**
+KillPeer -- end the program at the other end of a server's connection
+
+**SYNOPSIS**
+```c
+#include <planar/lease.h>
+int64_t KillPeer(Handle root, Handle process, Handle conn);
+```
+
+**FUNCTION**
+Ends the process at the other end of the connection that `process`, one the caller made, holds as `conn`, as `KillProcess` would. hwdb's, for intuition (V8 step 4): a window's program that doesn't close it after its close gadget, which the user said to close. intuition sends hwdb its own handle for the connection (`HWDB_KILL_CLIENT`), and hwdb calls this with intuition's process handle, so the kernel holds the request to intuition's own clients.
+
+A kernel call. It needs the device root, since the process ended isn't the caller's.
+
+**INPUTS**
+- `root` -- the device root handle, owned by the calling process.
+- `process` -- a process the caller created: the server whose connection it is.
+- `conn` -- the server's handle for its end of the connection.
+
+**RESULT**
+0, or:
+- `ERR_BADHANDLE` -- `root` isn't a device root the caller owns, or `process` isn't a process it made.
+- `ERR_NOTFOUND` -- `process` holds no such connection, or its other end has closed.
+- `ERR_RIGHTS` -- the other end is the caller, or `process` itself.
+
+**NOTES**
+- It returns at once: the process dies as `KillProcess`'s do, and its parent hears it as a death.
+- From `servers/hwdb/intuition.c`:
+```c
+int64_t e = ik.proc ? KillPeer(hwdb.root, ik.proc, (Handle)conn) : ERR_NOTFOUND;
+```
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[KillProcess](exec.md#execkillprocess), [GrantRoot](#leasegrantroot)
 
 ---
 

@@ -28,7 +28,9 @@ types those keys (QEMU's qcodes, a "shift-" prefix held over the key),
 "inputtest: send mouse 10 -5 left" moves the mouse and clicks a button
 (conformance/inputtest.c), "... send move 10 -5" only moves it, and
 "... send drag 10 -5 left" moves it with the button held. The window
-test asks as "window: send ..." (conformance/window.c).
+test asks as "window: send ..." (conformance/window.c), and "window:
+send screendump menus" saves the screen as build/screens/menus.ppm
+(QMP's screendump), to be looked at.
 """
 
 import argparse
@@ -41,7 +43,7 @@ import subprocess
 import sys
 import time
 
-SEND = re.compile(rb"(?:inputtest|window): send (keys|mouse|move|drag) ([^\r\n]*)")
+SEND = re.compile(rb"(?:inputtest|window): send (keys|mouse|move|drag|screendump) ([^\r\n]*)")
 
 
 class Qmp:
@@ -107,6 +109,11 @@ class Qmp:
         if verb == "keys":
             return self.keys(words)
         self._connect()
+        if verb == "screendump":
+            name = re.sub(r"[^a-z0-9-]", "", words.strip()) or "screen"
+            os.makedirs("build/screens", exist_ok=True)
+            self._call("screendump", {"filename": os.path.abspath(f"build/screens/{name}.ppm")})
+            return
         w = words.split()
         if verb == "move":
             self._move(w[0], w[1])

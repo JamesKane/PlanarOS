@@ -39,6 +39,7 @@ enum : uint32_t {
     HWDB_PCI_FUNCTION = 4,  /* pci's: hm_Function in, a function it found */
     HWDB_UNRESPONSIVE = 5,  /* anyone's: hm_PortName's server missed a deadline */
     HWDB_STOP = 6,          /* a started driver's: answered when it's to stop, by hm_Deadline */
+    HWDB_KILL_CLIENT = 7,   /* intuition's: its client on hm_Conn isn't answering; end it (V8 step 4) */
 };
 
 constexpr uint64_t DRV_STOP_MS = 1000;      /* a driver's time to stop, once asked */
@@ -133,6 +134,7 @@ struct HwdbMsg {
         struct PciFunction hm_Function;
         uint64_t hm_Deadline;       /* HWDB_STOP's answer: CurrentTime's clock */
         char hm_PortName[32];       /* HWDB_UNRESPONSIVE */
+        uint64_t hm_Conn;           /* HWDB_KILL_CLIENT: intuition's handle for the connection */
     };
 };
 

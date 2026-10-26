@@ -4,8 +4,10 @@
  *
  *   Shell              read lines from the serial console (decision 1)
  *   Shell FROM FILE    run FILE's lines, then end: 0 if all succeeded
+ *   Shell SERIAL       the serial console's lines alone: intuition has
+ *                      the keyboard (hwdb's, with the desktop: V8 step 4)
  *
- * Its template is "FROM" (ReadArgs). Started from a Shell, it begins in
+ * Its template is "FROM,SERIAL/S" (ReadArgs). Started from a Shell, it begins in
  * that one's current directory. A line's first word is a built-in (CD,
  * Help, EndShell) or a command, found in C: unless it names its volume
  * or directory; the rest of the line is its arguments, and it's given
@@ -13,7 +15,7 @@
  * and says how it ended if not well.
  * Input is the console's (GrantConsole, by hwdb) and a USB keyboard's,
  * from input's ring (planar/devices/input.h), which the Shell takes when
- * input is there and again after it restarts. Both are polled every
+ * input is there and again after it restarts, unless SERIAL. Both are polled every
  * 10 ms, echoed, with backspace.
  */
 #include <stddef.h>
@@ -37,6 +39,7 @@ constexpr unsigned LINE = 200;
 static struct Con con;
 static struct Dos dos;
 static char cwd[DOS_PATH] = "SYS:";
+static bool serial_only;                /* SERIAL: no keyboard of input's */
 static unsigned number = 1;             /* the Amiga's CLI number, for the prompt */
 
 static void say(const char *s)
@@ -234,7 +237,8 @@ static int interactive(void)
     unsigned n = 0;
 
     say("Planar Shell. Type Help for help.\n");
-    keys_take();
+    if (!serial_only)
+        keys_take();
     prompt();
     for (;;) {
         char got[64];
@@ -244,7 +248,7 @@ static int interactive(void)
             say("Shell: the console isn't mine\n");
             return 1;
         }
-        if (r == 0)
+        if (r == 0 && !serial_only)
             r = keys_read(got, sizeof got);
         if (r == 0) {
             nap(10);
@@ -312,7 +316,7 @@ static int script(const char *file)
 int main(uint64_t arg)
 {
     struct RDArgs ra = { 0 };
-    int64_t a[1] = { 0 };
+    int64_t a[2] = { 0 };
     char from[DOS_PATH];
     int64_t e;
 
@@ -320,8 +324,8 @@ int main(uint64_t arg)
     SplitArgs(arg, from, sizeof from, &ra.rda_Source);
     SNPrintf(cwd, sizeof cwd, "%s", from);
     OpenCon(&con, SIG_CON);
-    if (ReadArgs("FROM", a, &ra) != 0) {
-        Printf(&con, "Shell: %s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: FROM" : "FROM");
+    if (ReadArgs("FROM,SERIAL/S", a, &ra) != 0) {
+        Printf(&con, "Shell: %s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: FROM,SERIAL/S" : "FROM,SERIAL/S");
         CloseCon(&con);
         return 1;
     }
@@ -331,6 +335,7 @@ int main(uint64_t arg)
         CloseCon(&con);
         return 1;
     }
+    serial_only = a[1] != 0;
     e = a[0] ? script((const char *)a[0]) : interactive();
     FreeArgs(&ra);
     CloseCon(&con);

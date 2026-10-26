@@ -12,7 +12,7 @@
 | [dos.md](dos.md) | dos.library: files, the loader, `ReadArgs` and paths, the console and `Printf` (`planar/dos.h`, `lib/dos`) |
 | [utility.md](utility.md) | utility.library: tag lists, hooks, strings, `Span` and `Str` (`planar/utility.h`, `lib/utility`) |
 | [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing; paths, gradients and type (`planar/gfx.h`, `lib/gfx`) |
-| [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events (`planar/intuition.h`, `lib/intuition`) |
+| [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events; menus, resizing and requesters (`planar/intuition.h`, `lib/intuition`) |
 | [font.md](font.md) | font.library: TrueType fonts read in place, their metrics, glyphs' outlines, shaping and lines (`planar/font.h`, `lib/font`) |
 
 ## All calls
@@ -46,6 +46,8 @@
 | blk_release | [blk](blk.md#blkblk_release) | library |
 | blk_submit | [blk](blk.md#blkblk_submit) | library |
 | CallHookPkt | [utility](utility.md#utilitycallhookpkt) | library |
+| ChangeWindowBuffers | [intuition](intuition.md#intuitionchangewindowbuffers) | library, through `IIntuition` |
+| ClearMenuStrip | [intuition](intuition.md#intuitionclearmenustrip) | library, through `IIntuition` |
 | CloseConn | [exec](exec.md#execcloseconn) | kernel |
 | CloseHandle | [exec](exec.md#execclosehandle) | kernel |
 | CloseIntuition | [intuition](intuition.md#intuitioncloseintuition) | library, through `IIntuition` |
@@ -78,6 +80,7 @@
 | drv_main | [drv](drv.md#drvdrv_main) | library |
 | drv_publish | [drv](drv.md#drvdrv_publish) | library |
 | drv_reply | [drv](drv.md#drvdrv_reply) | library |
+| EasyRequest | [intuition](intuition.md#intuitioneasyrequest) | library, through `IIntuition` |
 | ExamineNext | [dos](dos.md#dosexaminenext) | library |
 | ExaminePath | [dos](dos.md#dosexaminepath) | library |
 | ExitProcess | [exec](exec.md#execexitprocess) | kernel |
@@ -110,6 +113,7 @@
 | InitBitMap | [gfx](gfx.md#gfxinitbitmap) | library, through `IGfx` |
 | InitRastPort | [gfx](gfx.md#gfxinitrastport) | library, through `IGfx` |
 | InitTmpRas | [gfx](gfx.md#gfxinittmpras) | library, through `IGfx` |
+| KillPeer | [lease](lease.md#leasekillpeer) | kernel |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
 | LineSpacing | [font](font.md#fontlinespacing) | library, through `IFont` |
@@ -155,6 +159,7 @@
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | SetFont | [gfx](gfx.md#gfxsetfont) | library, through `IGfx` |
 | SetMem | [exec](exec.md#execsetmem) | library |
+| SetMenuStrip | [intuition](intuition.md#intuitionsetmenustrip) | library, through `IIntuition` |
 | ShapeRun | [font](font.md#fontshaperun) | library, through `IFont` |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
 | Signal | [exec](exec.md#execsignal) | kernel |

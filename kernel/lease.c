@@ -1066,6 +1066,26 @@ int64_t lease_read_log_call(uint32_t root_h, uint64_t buf, uint32_t len)
     return ok ? (int64_t)n : ERR_BADADDR;
 }
 
+/* V8 step 4: a client of 'process' (intuition) ended, at its asking. */
+int64_t lease_kill_peer_call(uint32_t root_h, uint32_t process, uint32_t conn)
+{
+    struct process *self = task_self()->process, *holder, *peer;
+
+    if (!handle_get(root_h, HANDLE_DEVROOT, self) || !(holder = process_child(process)))
+        return ERR_BADHANDLE;
+    peer = conn_peer(holder, conn);
+    process_put(holder);
+    if (!peer)
+        return ERR_NOTFOUND;
+    if (peer == self || peer == holder) {
+        process_put(peer);
+        return ERR_RIGHTS;
+    }
+    process_kill(peer);
+    process_put(peer);
+    return 0;
+}
+
 /* The same, into a process the root's holder made: acpid (step 4). */
 int64_t lease_firmware_grant_call(uint32_t root_h, uint32_t process)
 {

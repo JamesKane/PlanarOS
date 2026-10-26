@@ -538,6 +538,19 @@ uint64_t conn_signal_wait_call(uint32_t h, uint64_t mask, uint64_t deadline)
     return task_wait_until(mask, deadline, c);
 }
 
+struct process *conn_peer(const struct process *holder, uint32_t h)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    struct end *e = handle_get(h, HANDLE_CONN, holder);
+    struct end *peer = e ? &e->conn->end[e == &e->conn->end[0]] : nullptr;
+    struct process *p = peer && peer->open ? peer->proc : nullptr;
+
+    if (p)
+        process_get(p);
+    spin_unlock_irqrestore(&lock, was);
+    return p;
+}
+
 int64_t conn_close_call(uint32_t h)
 {
     uint64_t kicks = 0;

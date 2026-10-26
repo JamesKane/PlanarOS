@@ -30,6 +30,10 @@ int64_t conn_close_call(uint32_t conn);
 /* 't' is leaving its process: close its ports and connection ends. */
 void ipc_task_gone(struct task *t);
 
+/* The process at the other end of the connection 'holder' holds as 'h',
+ * with a reference (process_put); nullptr if there's none, or it's gone. */
+struct process *conn_peer(const struct process *holder, uint32_t h);
+
 /* Is there an open connection between 'a' and 'b' (either way)? */
 bool ipc_connected(const struct process *a, const struct process *b);
 

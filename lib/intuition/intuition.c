@@ -1,6 +1,6 @@
 /*
  * lib/intuition/intuition.c -- intuition.library: the client's side
- * (v7-plan steps 3 to 5)
+ * (v7-plan steps 3 to 5, V8 step 4)
  *
  * Over the messages of planar/intuition.h, on a connection the caller's
  * Intuition holds. OPEN, CLOSE, INFO and EVENTS wait for their answers, a second
@@ -9,6 +9,10 @@
  * again. A present intuition refused is said by the next PresentWindow
  * or WaitSafe. PresentWindow checks what intuition would refuse first,
  * so a refusal there is a client's bug or a window intuition closed.
+ *
+ * SetMenuStrip and EasyRequest write what they carry into the IntuiAck's
+ * page, which intuition reads during the call (one at a time, on
+ * in_Call). EasyRequest waits for the user, for as long as it takes.
  *
  * WaitSafe makes no kernel call when the back buffer is free already,
  * nor GetIntuiEvent, unless it reads the ring down from full or from
@@ -39,15 +43,20 @@ static void clear(void *p, uint64_t n)
         *b++ = 0;
 }
 
-static int64_t call(struct Intuition *in, uint32_t op)
+static int64_t call_until(struct Intuition *in, uint32_t op, uint64_t deadline)
 {
     int64_t e;
 
     in->in_Call->im_Msg.mn_Length = sizeof *in->in_Call;
     in->in_Call->im_Op = op;
     in->in_Call->im_Task = FindTask(nullptr);
-    e = DoMsgUntil(&in->in_Port, &in->in_Call->im_Msg, CurrentTime() + CALL_DEADLINE);
+    e = DoMsgUntil(&in->in_Port, &in->in_Call->im_Msg, deadline);
     return e ? e : in->in_Call->im_Msg.mn_Error;
+}
+
+static int64_t call(struct Intuition *in, uint32_t op)
+{
+    return call_until(in, op, CurrentTime() + CALL_DEADLINE);
 }
 
 /* The page saying how far the caller has read, shared with intuition,
@@ -151,6 +160,10 @@ int64_t OpenWindowTagList(struct Intuition *in, struct Window *w, const struct T
     m->im_Height = (uint32_t)GetTagData(WA_Height, bm->bm_Height, tags);
     m->im_Flags = (uint32_t)GetTagData(WA_Flags, 0, tags);
     m->im_IDCMP = (uint32_t)GetTagData(WA_IDCMP, 0, tags);
+    m->im_MinWidth = (uint32_t)GetTagData(WA_MinWidth, 1, tags);
+    m->im_MinHeight = (uint32_t)GetTagData(WA_MinHeight, 1, tags);
+    m->im_MaxWidth = (uint32_t)GetTagData(WA_MaxWidth, 0, tags);
+    m->im_MaxHeight = (uint32_t)GetTagData(WA_MaxHeight, 0, tags);
     m->im_Buffers = back ? 2 : 1;
     describe(&m->im_Buffer[0], bm);
     if (back)
@@ -164,13 +177,18 @@ int64_t OpenWindowTagList(struct Intuition *in, struct Window *w, const struct T
     }
     if ((e = call(in, INTUI_OPEN)) != 0)
         return e;
+    bool bare = m->im_Flags & WFLG_BORDERLESS;
+
     *w = (struct Window){
         .w_Intuition = in, .w_Id = m->im_Window, .w_Buffers = m->im_Buffers,
         .w_LeftEdge = m->im_Left, .w_TopEdge = m->im_Top, .w_Width = m->im_Width,
         .w_Height = m->im_Height, .w_BitMap = { bm, back }, .w_Flags = m->im_Flags,
         .w_Sync = (const struct IntuiSync *)m->im_Sync,
-        .w_BorderLeft = m->im_Flags & WFLG_BORDERLESS ? 0 : (int32_t)INTUI_BORDER,
-        .w_BorderTop = m->im_Flags & WFLG_BORDERLESS ? 0 : (int32_t)INTUI_TITLEBAR,
+        .w_BorderLeft = bare ? 0 : (int32_t)INTUI_BORDER,
+        .w_BorderTop = bare ? 0 : (int32_t)INTUI_TITLEBAR,
+        .w_BorderRight = bare ? 0 : (int32_t)INTUI_BORDER,
+        .w_BorderBottom = bare ? 0 : m->im_Flags & WFLG_SIZEGADGET ? (int32_t)INTUI_SIZEBORDER
+                                                                   : (int32_t)INTUI_BORDER,
     };
     rastport(w);
     return 0;
@@ -325,4 +343,126 @@ int64_t WaitIntuiEvent(struct Intuition *in, uint64_t deadline)
             return ERR_TIMEOUT;
     }
     return 0;
+}
+
+/* --- V8 step 4: menus, resizing and requesters. --- */
+
+/* 'from' into 'to', at most n - 1 bytes and its end; false if cut. */
+static bool copy_label(char *to, const char *from, unsigned n)
+{
+    unsigned i = 0;
+
+    for (; from && from[i] && i < n - 1; i++)
+        to[i] = from[i];
+    to[i] = 0;
+    return !from || !from[i];
+}
+
+int64_t SetMenuStrip(struct Window *w, const struct NewMenu *menus)
+{
+    struct Intuition *in = w->w_Intuition;
+    struct IntuiMenuStrip *ms;
+    uint32_t item = 0;
+
+    if (!live(w))
+        return ERR_BADARG;
+    ms = &in->in_Ack->ia_Strip;
+    clear(ms, sizeof *ms);
+    for (const struct NewMenu *nm = menus; nm && nm->nm_Type != NM_END; nm++) {
+        if (nm->nm_Type == NM_TITLE) {
+            if (ms->ms_Menus == INTUI_MENU_TITLES ||
+                !copy_label(ms->ms_Title[ms->ms_Menus], nm->nm_Label, INTUI_LABEL))
+                return ERR_BADARG;
+            if (nm->nm_Flags & NM_MENUDISABLED)
+                ms->ms_Disabled |= 1u << ms->ms_Menus;
+            ms->ms_Menus++;
+            item = 0;
+            continue;
+        }
+        if (nm->nm_Type != NM_ITEM || !ms->ms_Menus || ms->ms_Items == INTUI_MENU_ITEMS || item == 63)
+            return ERR_BADARG;
+        struct IntuiMenuItem *mi = &ms->ms_Item[ms->ms_Items++];
+
+        mi->mi_Menu = (uint8_t)(ms->ms_Menus - 1);
+        mi->mi_Flags = nm->nm_Flags & (CHECKIT | CHECKED | NM_ITEMDISABLED);
+        if (nm->nm_Label == NM_BARLABEL)
+            mi->mi_Flags = ITEMBAR;
+        else if (!copy_label(mi->mi_Label, nm->nm_Label, INTUI_LABEL))
+            return ERR_BADARG;
+        if (nm->nm_Label != NM_BARLABEL && nm->nm_CommKey && nm->nm_CommKey[0])
+            mi->mi_Key = nm->nm_CommKey[0] >= 'a' && nm->nm_CommKey[0] <= 'z'
+                             ? (char)(nm->nm_CommKey[0] - 'a' + 'A') : nm->nm_CommKey[0];
+        item++;
+    }
+    clear(in->in_Call, sizeof *in->in_Call);
+    in->in_Call->im_Window = w->w_Id;
+    return call(in, INTUI_MENUS);
+}
+
+int64_t ClearMenuStrip(struct Window *w)
+{
+    return SetMenuStrip(w, nullptr);
+}
+
+/* After IDCMP_NEWSIZE: buffers of the size the sync words say, shared,
+ * and the next frame drawn in the first. */
+int64_t ChangeWindowBuffers(struct Window *w, struct BitMap *bm, struct BitMap *back)
+{
+    struct Intuition *in = w->w_Intuition;
+    struct IntuiMsg *m = in->in_Call;
+    uint32_t width, height;
+    int64_t e;
+
+    if (!live(w) || !bm || !bm->bm_Area || (back && !back->bm_Area))
+        return ERR_BADARG;
+    width = w->w_Sync->is_Width;
+    height = w->w_Sync->is_Height;
+    if (bm->bm_Width < width || bm->bm_Height < height ||
+        (back && (back->bm_Width < width || back->bm_Height < height)))
+        return ERR_BADARG;
+    for (unsigned b = 0; b < (back ? 2u : 1u); b++) {
+        e = ShareArea((b ? back : bm)->bm_Area, in->in_Server, AREAR_READ);
+        if (e != 0 && e != ERR_EXISTS)
+            return e;
+    }
+    clear(m, sizeof *m);
+    m->im_Window = w->w_Id;
+    m->im_Width = width;
+    m->im_Height = height;
+    m->im_Buffers = back ? 2 : 1;
+    describe(&m->im_Buffer[0], bm);
+    if (back)
+        describe(&m->im_Buffer[1], back);
+    if ((e = call(in, INTUI_REBUFFER)) != 0)
+        return e;
+    w->w_Width = width;
+    w->w_Height = height;
+    w->w_BitMap[0] = bm;
+    w->w_BitMap[1] = back;
+    w->w_Buffers = back ? 2 : 1;
+    w->w_Back = 0;
+    rastport(w);
+    return 0;
+}
+
+/* Until the user chooses: 1 to n - 1 for the buttons from the left, 0
+ * for the rightmost; or an error. */
+int64_t EasyRequest(struct Intuition *in, struct Window *w, const struct EasyStruct *es)
+{
+    struct IntuiRequest *r;
+    int64_t e;
+
+    if (!in->in_Page || !es || (w && !live(w)) || !es->es_GadgetFormat || !es->es_GadgetFormat[0])
+        return ERR_BADARG;
+    r = &in->in_Ack->ia_Request;
+    clear(r, sizeof *r);
+    if (!copy_label(r->ir_Title, es->es_Title, INTUI_TITLE) ||
+        !copy_label(r->ir_Body, es->es_TextFormat, INTUI_REQ_BODY) ||
+        !copy_label(r->ir_Gadgets, es->es_GadgetFormat, INTUI_REQ_GADGETS))
+        return ERR_BADARG;
+    clear(in->in_Call, sizeof *in->in_Call);
+    in->in_Call->im_Window = w ? w->w_Id : 0;
+    if ((e = call_until(in, INTUI_REQUEST, DEADLINE_NONE)) != 0)
+        return e;
+    return in->in_Call->im_Index;
 }

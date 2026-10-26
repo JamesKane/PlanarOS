@@ -1,16 +1,20 @@
 /*
- * servers/intuition/chrome.c -- a window's chrome (v7-plan step 4)
+ * servers/intuition/chrome.c -- a window's chrome (v7-plan step 4, V8
+ * step 4)
  *
  * Drawn as the window's coordinates have it, each rectangle cut into
  * the pieces of it that 'top' and 'side' hold. §13.2's colours: the
  * title bar's win.frame gradient, the frame's lower stop, win.bevel's
  * light along the top and left and dark around the outside, and the
- * inside sunk into it. The title is in the 8x8 font.
+ * inside sunk into it. The title is in System Sans, light on the bar
+ * with a dark shadow a pixel below (§13.2's label treatment), bold when
+ * the window is active.
  */
 #include "chrome.h"
 
 constexpr uint32_t TB = INTUI_TITLEBAR, BD = INTUI_BORDER;
 constexpr int32_t GADGET_W = 22, GADGET_H = 20, GADGET_Y = 3;
+constexpr int32_t SIZE_W = 16;          /* the size gadget, the bottom border's height */
 
 struct pens {
     uint32_t top, bottom;               /* win.frame's gradient */
@@ -18,12 +22,13 @@ struct pens {
     uint32_t text;
 };
 
-static const struct pens active = { 0xff5b88c2, 0xff3a6298, 0xff8bb4e8, 0xff162030, 0xfff0f4fa };
-static const struct pens inactive = { 0xff4a5668, 0xff333c4b, 0xff6a788e, 0xff162030, 0xff7e8ca3 };
+static const struct pens active = { 0xff5b88c2, 0xff3a6298, 0xff8bb4e8, PEN_BEVEL_DARK, PEN_TEXT_LIGHT };
+static const struct pens inactive = { 0xff4a5668, 0xff333c4b, 0xff6a788e, PEN_BEVEL_DARK, PEN_TEXT_MUTED };
 
 struct canvas {
     const struct GfxIFace *g;
     const struct chrome *c;
+    int32_t bb;                         /* the bottom border's height */
     struct RastPort top, side;
 };
 
@@ -35,6 +40,11 @@ static int32_t min32(int32_t a, int32_t b)
 static int32_t max32(int32_t a, int32_t b)
 {
     return a > b ? a : b;
+}
+
+uint32_t chrome_bottom(uint32_t flags)
+{
+    return flags & WFLG_SIZEGADGET ? INTUI_SIZEBORDER : INTUI_BORDER;
 }
 
 /* (x0, y0) to (x1, y1) of the window, within [rx0, rx1] by [ry0, ry1],
@@ -54,9 +64,9 @@ static void fill(struct canvas *k, uint32_t pen, int32_t x0, int32_t y0, int32_t
 
     k->top.rp_FgPen = k->side.rp_FgPen = pen;
     piece(k, &k->top, x0, y0, x1, y1, 0, 0, w - 1, (int32_t)TB - 1, 0, 0);
-    piece(k, &k->top, x0, y0, x1, y1, 0, h - (int32_t)BD, w - 1, h - 1, 0, (int32_t)TB);
-    piece(k, &k->side, x0, y0, x1, y1, 0, (int32_t)TB, (int32_t)BD - 1, h - (int32_t)BD - 1, 0, 0);
-    piece(k, &k->side, x0, y0, x1, y1, w - (int32_t)BD, (int32_t)TB, w - 1, h - (int32_t)BD - 1,
+    piece(k, &k->top, x0, y0, x1, y1, 0, h - k->bb, w - 1, h - 1, 0, (int32_t)TB);
+    piece(k, &k->side, x0, y0, x1, y1, 0, (int32_t)TB, (int32_t)BD - 1, h - k->bb - 1, 0, 0);
+    piece(k, &k->side, x0, y0, x1, y1, w - (int32_t)BD, (int32_t)TB, w - 1, h - k->bb - 1,
           (int32_t)BD, 0);
 }
 
@@ -70,17 +80,25 @@ static void bevel(struct canvas *k, int32_t x0, int32_t y0, int32_t x1, int32_t 
     fill(k, dark, x1, y0 + 1, x1, y1);
 }
 
-/* The gadget slots from the right: the close gadget's, then the depth one's. */
+/* The gadget slots from the right: the close gadget's, then the depth
+ * one's; and the size gadget at the bottom right. */
 static bool gadget(const struct chrome *c, unsigned which, struct GfxRect *r)
 {
-    int32_t slot = 0, x1;
+    int32_t slot = 0, x1, w = (int32_t)c->w, h = (int32_t)c->h;
 
-    if (c->flags & WFLG_BORDERLESS || !(c->flags & (which == CH_CLOSE ? WFLG_CLOSEGADGET
-                                                                       : WFLG_DEPTHGADGET)))
+    if (c->flags & WFLG_BORDERLESS)
+        return false;
+    if (which == CH_SIZE) {
+        if (!(c->flags & WFLG_SIZEGADGET))
+            return false;
+        *r = (struct GfxRect){ w - 1 - SIZE_W, h - SIZE_W, w - 2, h - 2 };
+        return r->MinX > (int32_t)BD;
+    }
+    if (!(c->flags & (which == CH_CLOSE ? WFLG_CLOSEGADGET : WFLG_DEPTHGADGET)))
         return false;
     if (which == CH_DEPTH && c->flags & WFLG_CLOSEGADGET)
         slot = 1;
-    x1 = (int32_t)c->w - (int32_t)BD - 1 - slot * (GADGET_W + 2);
+    x1 = w - (int32_t)BD - 1 - slot * (GADGET_W + 2);
     *r = (struct GfxRect){ x1 - GADGET_W + 1, GADGET_Y, x1, GADGET_Y + GADGET_H - 1 };
     return r->MinX > (int32_t)BD;
 }
@@ -102,11 +120,14 @@ static void draw_gadget(struct canvas *k, const struct pens *p, unsigned which)
             fill(k, p->text, cx + i, cy + i, cx + i + 1, cy + i);
             fill(k, p->text, cx - i, cy + i, cx - i + 1, cy + i);
         }
-    } else {                                        /* two windows, one over the other */
+    } else if (which == CH_DEPTH) {                 /* two windows, one over the other */
         fill(k, p->dark, cx - 6, cy - 5, cx + 2, cy + 1);
         fill(k, p->bottom, cx - 5, cy - 4, cx + 1, cy);
         fill(k, p->dark, cx - 2, cy - 1, cx + 6, cy + 5);
         fill(k, p->text, cx - 1, cy, cx + 5, cy + 4);
+    } else {                                        /* ◢, in steps */
+        for (int32_t i = 0; i < 9; i++)
+            fill(k, p->text, r.MaxX - 3 - i, r.MaxY - 3 - (8 - i), r.MaxX - 3, r.MaxY - 3 - (8 - i));
     }
 }
 
@@ -117,22 +138,52 @@ void chrome_size(uint32_t flags, uint32_t iw, uint32_t ih, struct chrome *c, int
 
     c->flags = flags;
     c->w = iw + (bare ? 0 : 2 * BD);
-    c->h = ih + (bare ? 0 : TB + BD);
+    c->h = ih + (bare ? 0 : TB + chrome_bottom(flags));
     *ix = bare ? 0 : (int32_t)BD;
     *iy = bare ? 0 : (int32_t)TB;
+}
+
+int32_t chrome_line(const struct TextFont *font)
+{
+    return font ? font->tf_YSize : 8;
+}
+
+int32_t chrome_width(const struct GfxIFace *g, const struct TextFont *font, const char *s, uint64_t n)
+{
+    struct RastPort rp = { 0 };
+
+    rp.rp_Font = font;
+    return g->TextLength(&rp, s, n);
+}
+
+void chrome_text(const struct GfxIFace *g, struct RastPort *rp, const struct TextFont *font,
+                 int32_t x, int32_t y, const char *s, uint64_t n, uint32_t pen, uint32_t shadow)
+{
+    g->SetFont(rp, font);
+    rp->rp_DrawMode = JAM1;
+    if (shadow) {
+        rp->rp_FgPen = shadow;
+        g->Text(rp, x, y + 1, s, n);
+    }
+    rp->rp_FgPen = pen;
+    g->Text(rp, x, y, s, n);
+    g->SetFont(rp, nullptr);
 }
 
 void chrome_draw(const struct GfxIFace *g, struct BitMap *top, struct BitMap *side,
                  const struct chrome *c)
 {
     const struct pens *p = c->active ? &active : &inactive;
-    struct canvas k = { .g = g, .c = c };
+    const struct TextFont *font = nullptr;
+    struct canvas k = { .g = g, .c = c, .bb = (int32_t)chrome_bottom(c->flags) };
     int32_t w = (int32_t)c->w, h = (int32_t)c->h, tx1 = w - (int32_t)BD - 5;
     struct GfxRect r;
     uint64_t n = 0;
 
     if (c->flags & WFLG_BORDERLESS)
         return;
+    if (c->fonts)
+        font = c->active ? c->fonts->bold : c->fonts->sans;
     g->InitRastPort(&k.top, top);
     g->InitRastPort(&k.side, side);
     fill(&k, p->bottom, 0, 0, w - 1, h - 1);
@@ -152,48 +203,49 @@ void chrome_draw(const struct GfxIFace *g, struct BitMap *top, struct BitMap *si
     fill(&k, p->dark, w - 1, 0, w - 1, h - 1);
     fill(&k, p->light, 1, 1, w - 2, 1);             /* the light from the top left */
     fill(&k, p->light, 1, 1, 1, h - 2);
-    bevel(&k, (int32_t)BD - 1, (int32_t)TB - 1, w - (int32_t)BD, h - (int32_t)BD, p->dark, p->light);
+    bevel(&k, (int32_t)BD - 1, (int32_t)TB - 1, w - (int32_t)BD, h - k.bb, p->dark, p->light);
     draw_gadget(&k, p, CH_DEPTH);
     draw_gadget(&k, p, CH_CLOSE);
+    draw_gadget(&k, p, CH_SIZE);
 
     if (gadget(c, CH_DEPTH, &r) || gadget(c, CH_CLOSE, &r))   /* the leftmost */
         tx1 = r.MinX - 4;
     while (c->title && n < INTUI_TITLE && c->title[n])
         n++;
     k.top.rp_Clip = (struct GfxRect){ 6, 2, tx1, (int32_t)TB - 3 };
-    k.top.rp_FgPen = p->text;
-    k.top.rp_DrawMode = JAM1;
-    g->Text(&k.top, 10, ((int32_t)TB - 8) / 2, c->title ? c->title : "", n);
+    chrome_text(g, &k.top, font, 10, ((int32_t)TB - chrome_line(font)) / 2, c->title ? c->title : "", n,
+                p->text, c->active ? PEN_SHADOW : 0);
 }
 
 void chrome_parts(const struct chrome *c, const struct BitMap *top, const struct BitMap *side,
                   struct ic_window *w)
 {
     int32_t cw = (int32_t)c->w, ch = (int32_t)c->h, tb = (int32_t)TB, bd = (int32_t)BD;
+    int32_t bb = (int32_t)chrome_bottom(c->flags);
 
     if (c->flags & WFLG_BORDERLESS) {
         w->nparts = 1;
         return;
     }
-    w->part[1] = (struct ic_part){ { 0, 0, cw - 1, tb - 1 }, top, 0, 0 };
-    w->part[2] = (struct ic_part){ { 0, ch - bd, cw - 1, ch - 1 }, top, 0, tb };
-    w->part[3] = (struct ic_part){ { 0, tb, bd - 1, ch - bd - 1 }, side, 0, 0 };
-    w->part[4] = (struct ic_part){ { cw - bd, tb, cw - 1, ch - bd - 1 }, side, bd, 0 };
+    w->part[1] = (struct ic_part){ { 0, 0, cw - 1, tb - 1 }, top, 0, 0, 0 };
+    w->part[2] = (struct ic_part){ { 0, ch - bb, cw - 1, ch - 1 }, top, 0, tb, 0 };
+    w->part[3] = (struct ic_part){ { 0, tb, bd - 1, ch - bb - 1 }, side, 0, 0, 0 };
+    w->part[4] = (struct ic_part){ { cw - bd, tb, cw - 1, ch - bb - 1 }, side, bd, 0, 0 };
     w->nparts = 5;
 }
 
 unsigned chrome_hit(const struct chrome *c, int32_t x, int32_t y)
 {
-    int32_t w = (int32_t)c->w, h = (int32_t)c->h;
+    int32_t w = (int32_t)c->w, h = (int32_t)c->h, bb = (int32_t)chrome_bottom(c->flags);
     struct GfxRect r;
 
     if (x < 0 || y < 0 || x >= w || y >= h)
         return CH_NONE;
     if (c->flags & WFLG_BORDERLESS)
         return CH_INSIDE;
-    if (x >= (int32_t)BD && x < w - (int32_t)BD && y >= (int32_t)TB && y < h - (int32_t)BD)
+    if (x >= (int32_t)BD && x < w - (int32_t)BD && y >= (int32_t)TB && y < h - bb)
         return CH_INSIDE;
-    for (unsigned which = CH_DEPTH; which <= CH_CLOSE; which++)
+    for (unsigned which = CH_DEPTH; which <= CH_SIZE; which++)
         if (gadget(c, which, &r) && x >= r.MinX && x <= r.MaxX && y >= r.MinY && y <= r.MaxY)
             return which;
     return y < (int32_t)TB ? CH_TITLE : CH_FRAME;

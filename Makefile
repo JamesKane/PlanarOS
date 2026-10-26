@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V8.3 done
+EXPECT := V8.4 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -358,16 +358,18 @@ font-fuzz: $(FONT_FUZZ)
 # intuition's compositor (servers/intuition/compose.c) on the host with the
 # sanitizers, over made-up windows with and without chrome, against a
 # naive compositor that redraws everything: through lib/gfx's scalar
-# entries, and NEON's too on an Arm host. Then the chrome (chrome.c) and
-# a client's events (events.c) alone.
+# entries, and NEON's too on an Arm host. Then the chrome (chrome.c), the
+# screen bar, menus and requesters (bar.c), in System Sans from lib/font
+# linked in, and a client's events (events.c) alone.
 INTUITION_TEST := build/intuition/intuition-test
-INTUITION_HOST_SRCS := $(addprefix servers/intuition/,compose.c chrome.c events.c test.c)
+INTUITION_HOST_SRCS := $(addprefix servers/intuition/,compose.c chrome.c bar.c events.c test.c)
 
 $(INTUITION_TEST): $(GFX_SRCS) $(GFX_NEON) $(INTUITION_HOST_SRCS) $(wildcard servers/intuition/*.h) \
+		$(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/utility/span.c \
 		lib/gfx/rows.h include/planar/gfx.h include/planar/intuition.h
 	@mkdir -p $(dir $@)
-	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/intuition) $(if $(GFX_NEON),-DGFX_TEST_NEON) \
-	  $(GFX_SRCS) $(GFX_NEON) $(INTUITION_HOST_SRCS) -o $@
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/intuition) -Ilib/font $(if $(GFX_NEON),-DGFX_TEST_NEON) \
+	  $(GFX_SRCS) $(GFX_NEON) $(FONT_SRCS) lib/utility/span.c $(INTUITION_HOST_SRCS) -o $@
 
 intuition-test: $(INTUITION_TEST)
 	@$(INTUITION_TEST)

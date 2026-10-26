@@ -1,6 +1,7 @@
 /*
  * conformance/window.c -- intuition's windows, presented, worked by the
- * mouse and keys, and outliving the servers (v7-plan steps 3 to 5)
+ * mouse and keys, and outliving the servers (v7-plan steps 3 to 5; V8
+ * step 4: menus, a resize and requesters)
  *
  * Started by hwdb's window test (servers/hwdb/intuition.c) once it has
  * started intuition. Through intuition.library, with bitmaps from
@@ -37,10 +38,20 @@
  *    the active window alone; a window dragged by its title bar, sent
  *    back and brought forward by its depth gadget, and closed by its
  *    close gadget's IDCMP_CLOSEWINDOW. The chrome isn't read back, only
- *    the windows' insides and the backdrop.
+ *    the windows' insides and the backdrop; nor the screen bar.
  * 6. A client that has stopped (this program, started again with
- *    STOPPED): its window dragged and raised all the same, and taken off
- *    the screen a second after its close gadget, which it never answers.
+ *    STOPPED): its window dragged and raised all the same, and a second
+ *    after its close gadget, which it never answers, intuition asks
+ *    whether to close it. Close: hwdb ends it, and its window goes.
+ * 6a. V8 step 4, with the mouse: a window with a menu strip, a menu
+ *    opened by a click on its title in the screen bar (drawn over the
+ *    window, as read back) and an item chosen; another held open by the
+ *    right button, a CHECKIT item checked; one chosen by its key with
+ *    the GUI key; the system menu's About, and its requester's OK. The
+ *    window resized by its size gadget: told the new size, its old
+ *    buffer shown and the backdrop past it, then new buffers given and
+ *    the old ones let go of; and held to its least size. An EasyRequest
+ *    from a second task, answered by a click on its middle button.
  * 7. kill-window: a client (this program again, KILLED) with two windows
  *    over one of this one's, killed. They're gone from the screen by the
  *    next latch but one, and intuition lets go of their bitmaps, which
@@ -230,7 +241,7 @@ static void taken_off(const void *k)
 /* Where a window is: its top left, its inside's offset from there, and
  * its inside's size. */
 struct place {
-    int32_t left, top, bl, bt, iw, ih;
+    int32_t left, top, bl, bt, br, bb, iw, ih;
 };
 
 static struct place place_of(const void *k)
@@ -240,15 +251,22 @@ static struct place place_of(const void *k)
 
     if (o)
         return (struct place){ o->x, o->y, o->chrome ? (int32_t)INTUI_BORDER : 0,
-                               o->chrome ? (int32_t)INTUI_TITLEBAR : 0, (int32_t)o->w, (int32_t)o->h };
+                               o->chrome ? (int32_t)INTUI_TITLEBAR : 0, o->chrome ? (int32_t)INTUI_BORDER : 0,
+                               o->chrome ? (int32_t)INTUI_BORDER : 0, (int32_t)o->w, (int32_t)o->h };
+    /* As resized: intuition's sync words have its inside's size. */
     return (struct place){ w->w_Sync->is_LeftEdge, w->w_Sync->is_TopEdge, w->w_BorderLeft,
-                           w->w_BorderTop, (int32_t)w->w_Width, (int32_t)w->w_Height };
+                           w->w_BorderTop, w->w_BorderRight, w->w_BorderBottom,
+                           (int32_t)w->w_Sync->is_Width, (int32_t)w->w_Sync->is_Height };
 }
 
+/* A window's inside at (x, y): its buffer shown last, and past it (a
+ * window resized, not yet given new buffers) the backdrop. */
 static uint32_t shown_px(const struct Window *w, int32_t x, int32_t y)
 {
     const struct BitMap *bm = w->w_BitMap[(w->w_Back + w->w_Buffers - 1) % w->w_Buffers];
 
+    if (x >= (int32_t)bm->bm_Width || y >= (int32_t)bm->bm_Height)
+        return BACKDROP;
     return ((const uint32_t *)((const uint8_t *)bm->bm_BaseAddr + (uint64_t)y * bm->bm_BytesPerRow))[x];
 }
 
@@ -257,9 +275,8 @@ static bool from(const void *k, int32_t x, int32_t y, uint32_t *px)
 {
     struct place p = place_of(k);
     const struct other *o = other_of(k);
-    int32_t br = p.bl ? (int32_t)INTUI_BORDER : 0;
 
-    if (x < p.left || y < p.top || x >= p.left + p.bl + p.iw + br || y >= p.top + p.bt + p.ih + br)
+    if (x < p.left || y < p.top || x >= p.left + p.bl + p.iw + p.br || y >= p.top + p.bt + p.ih + p.bb)
         return false;
     x -= p.left + p.bl;
     y -= p.top + p.bt;
@@ -277,6 +294,8 @@ static uint32_t screen_px(int32_t x, int32_t y)
     if (x >= ptr_x && y >= ptr_y &&
         (p = pointer_pixel((uint32_t)(x - ptr_x) / ptr_scale, (uint32_t)(y - ptr_y) / ptr_scale)) >> 24)
         return p;
+    if (y < (int32_t)INTUI_SCREENBAR)
+        return CHROME;                  /* the screen bar, in front of every window */
     for (unsigned i = 0; i < nshown; i++)
         if (from(order[i], x, y, &p))
             return p;
@@ -373,7 +392,7 @@ static int open_lib(void)
 
     CHECK((lib = IExec->OpenLibrary("gfx.library", 7)));
     CHECK((IGfx = (struct GfxIFace *)IExec->GetInterface(lib, "main", 1)));
-    CHECK((lib = IExec->OpenLibrary("intuition.library", 7)) && lib->lib_Version == 7);
+    CHECK((lib = IExec->OpenLibrary("intuition.library", 7)) && lib->lib_Version == 8);
     CHECK((IIntuition = (struct IntuitionIFace *)IExec->GetInterface(lib, "main", 1)));
     CHECK(IIntuition->Data.if_Size == sizeof(struct IntuitionIFace));
     return 0;
@@ -972,6 +991,10 @@ static bool gadget_click(const void *k, int32_t from_right)
 
 constexpr int32_t CLOSE_GADGET = 15, DEPTH_GADGET = 39;    /* their middles, from the right */
 
+static bool requests_are(uint32_t n, uint64_t ms);
+static bool click_on(struct GfxRect r);
+static int64_t sharers(uint64_t address);
+
 static struct BitMap *cbm, *dbm;
 static struct Window wc, wd;
 static int64_t hung = -1;
@@ -1087,12 +1110,23 @@ static int input_half(bool readable)
     CHECK(gadget_click(HUNG, DEPTH_GADGET));            /* it, from the back to the front */
     to_front(HUNG);
     CHECK(screen_is(readable, 364, 146, 40, 80));
-    CHECK(gadget_click(HUNG, CLOSE_GADGET));            /* never answered */
+    CHECK(gadget_click(HUNG, CLOSE_GADGET));            /* never answered: asked about */
+    CHECK(requests_are(1, 3000) && info(m) == 0);
+    CHECK(click_on(m->im_ReqButton[0]));                /* Close: hwdb ends it */
     for (uint64_t until = CurrentTime() + 3000 * MS; info(m) == 0 && m->im_Windows != windows;)
         if (CurrentTime() > until)
-            return failed("the stopped client's window was never taken off");
+            return failed("the stopped client's window never went");
         else
             nap(10);
+    CHECK(requests_are(0, 1000));
+    for (uint64_t until = CurrentTime() + 1000 * MS;; nap(10)) {
+        struct ProcessInfo pi;
+
+        if (QueryProcess((Handle)hung, &pi) == 0 && pi.pi_State >= PROCS_EXITED)
+            break;
+        if (CurrentTime() > until)
+            return failed("the stopped client wasn't ended");
+    }
     taken_off(HUNG);
     CHECK(screen_is(readable, 408, 146, 76, 80));       /* the backdrop, right of d */
     ends();
@@ -1100,8 +1134,261 @@ static int input_half(bool readable)
     taken_off(&wd);
     IGfx->FreeBitMap(cbm);
     IGfx->FreeBitMap(dbm);
-    KPrintF("window: input: a stopped client's window dragged and raised, and taken off a second "
-            "after its close gadget");
+    KPrintF("window: input: a stopped client's window dragged and raised, asked about a second "
+            "after its close gadget, and ended by hwdb on Close");
+    return 0;
+}
+
+/* --- 6a: menus, a resize and requesters (V8 step 4). --- */
+
+/* Requesters on the screen, within 'ms'. */
+static bool requests_are(uint32_t n, uint64_t ms)
+{
+    struct IntuiMsg *m = in.in_Call;
+    uint64_t until = CurrentTime() + ms * MS;
+
+    while (info(m) == 0 && m->im_Requests != n)
+        if (CurrentTime() > until)
+            return false;
+        else
+            nap(5);
+    return true;
+}
+
+/* The menu intuition says is open (0 none, 1 the system's, 2 on the
+ * strip's), within a second. */
+static bool menu_is(uint32_t menu)
+{
+    struct IntuiMsg *m = in.in_Call;
+    uint64_t until = CurrentTime() + 1000 * MS;
+
+    while (info(m) == 0 && m->im_Menu != menu)
+        if (CurrentTime() > until) {
+            KPrintF("window: menu %lu open, not %lu", (uint64_t)m->im_Menu, (uint64_t)menu);
+            return false;
+        } else {
+            nap(5);
+        }
+    return true;
+}
+
+static bool click_on(struct GfxRect r)
+{
+    if (!point_at((r.MinX + r.MaxX) / 2, (r.MinY + r.MaxY) / 2))
+        return false;
+    click();
+    return true;
+}
+
+/* The next event but buttons and keys: w's MENUPICK of 'code', a CHECKIT
+ * item 'checked' or not. */
+static bool picked(const struct Window *w, uint16_t code, uint32_t checked)
+{
+    struct IntuiEvent ev;
+
+    do
+        if (!next_event(&ev, false))
+            return false;
+    while (ev.iev_Class == IDCMP_MOUSEBUTTONS || ev.iev_Class == IDCMP_RAWKEY ||
+           ev.iev_Class == IDCMP_ACTIVEWINDOW || ev.iev_Class == IDCMP_INACTIVEWINDOW);
+    if (ev.iev_Window == w->w_Id && ev.iev_Class == IDCMP_MENUPICK && ev.iev_Code == code &&
+        ev.iev_Char == checked)
+        return true;
+    KPrintF("window: heard class %lx code %lx (%lu) of window %lu, not menu pick %lx (%lu)",
+            (uint64_t)ev.iev_Class, (uint64_t)ev.iev_Code, (uint64_t)ev.iev_Char, (uint64_t)ev.iev_Window,
+            (uint64_t)code, (uint64_t)checked);
+    return false;
+}
+
+/* w's IDCMP_NEWSIZE, at an inside of iw by ih, and the sync words so. */
+static bool sized(const struct Window *w, int32_t iw, int32_t ih)
+{
+    struct IntuiEvent ev;
+
+    do
+        if (!next_event(&ev, false))
+            return false;
+    while (ev.iev_Class == IDCMP_MOUSEBUTTONS || ev.iev_Class == IDCMP_ACTIVEWINDOW ||
+           ev.iev_Class == IDCMP_INACTIVEWINDOW);
+    if (ev.iev_Window == w->w_Id && ev.iev_Class == IDCMP_NEWSIZE && ev.iev_MouseX == iw &&
+        ev.iev_MouseY == ih && (int32_t)w->w_Sync->is_Width == iw && (int32_t)w->w_Sync->is_Height == ih)
+        return true;
+    KPrintF("window: heard class %lx at %ld, %ld of window %lu, not a new size of %ld by %ld",
+            (uint64_t)ev.iev_Class, (int64_t)ev.iev_MouseX, (int64_t)ev.iev_MouseY, (uint64_t)ev.iev_Window,
+            (int64_t)iw, (int64_t)ih);
+    return false;
+}
+
+static const struct NewMenu strip[] = {
+    { NM_TITLE, "Project", nullptr, 0 },
+    { NM_ITEM, "Open", nullptr, 0 },
+    { NM_ITEM, "Save", "s", 0 },
+    { NM_ITEM, NM_BARLABEL, nullptr, 0 },
+    { NM_ITEM, "Quit", "Q", 0 },
+    { NM_TITLE, "Options", nullptr, 0 },
+    { NM_ITEM, "Snap to grid", nullptr, CHECKIT },
+    { NM_END, nullptr, nullptr, 0 },
+};
+
+/* The EasyRequest of a second task, on a connection of its own, as
+ * this one's calls go on meanwhile. */
+static struct {
+    struct Intuition in;
+    int64_t answer;
+    uint64_t done;
+} easy;
+
+static void asker(uint64_t)
+{
+    const struct EasyStruct es = { sizeof es, 0, "A question", "Which one?\nThe middle, please.",
+                                   "Left|Middle|Right" };
+
+    easy.answer = IIntuition->OpenIntuition(&easy.in, CurrentTime() + 1000 * MS);
+    if (easy.answer == 0) {
+        easy.answer = IIntuition->EasyRequest(&easy.in, nullptr, &es);
+        IIntuition->CloseIntuition(&easy.in);
+    }
+    __atomic_store_n(&easy.done, 1, __ATOMIC_RELEASE);
+    WakeAddr(&easy.done, 1);
+    ExitTask(0);
+}
+
+static int desktop_half(bool readable)
+{
+    struct IntuiMsg *m = in.in_Call;
+    struct BitMap *ebm, *fbm;
+    struct Window we;
+    struct GfxRect menu;
+    struct place p;
+    struct IntuiEvent ev;
+    uint32_t want, got;
+    int32_t item0, item1;
+    uint64_t until;
+    int64_t task;
+
+    while (IIntuition->GetIntuiEvent(&in, &ev))
+        ;                               /* what the windows before said, closed now */
+    CHECK((ebm = IGfx->AllocBitMap(200, 120, PIXFMT_XRGB8888, 0, nullptr)) &&
+          (fbm = IGfx->AllocBitMap(240, 150, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &we, { WA_Left, 120 }, { WA_Top, 100 }, { WA_Title, (uint64_t)"menus" },
+                         { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_ACTIVATE },
+                         { WA_IDCMP, IDCMP_MENUPICK | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS }, { WA_MinWidth, 80 },
+                         { WA_MinHeight, 50 }, { WA_BitMap, (uint64_t)ebm }) == 0);
+    CHECK(we.w_BorderBottom == (int32_t)INTUI_SIZEBORDER && we.w_BorderRight == (int32_t)INTUI_BORDER);
+    picture(&we.w_RPort, 200, 120, 0x46556e, "menus");
+    CHECK(IIntuition->SetMenuStrip(&we, strip) == 0);
+    CHECK(IIntuition->PresentWindow(&we, nullptr, 0) == 0);
+    to_front(&we);
+    CHECK(on_screen(&we, 1) && active_is(&we));
+    CHECK(screen_is(readable, 124, 126, 200, 120));
+
+    /* A title clicked: its menu over the window, then Save chosen. */
+    CHECK(info(m) == 0 && m->im_TitleX[1] > m->im_TitleX[0] && m->im_TitleX[2] > m->im_TitleX[1]);
+    CHECK(point_at(m->im_TitleX[1], 14));
+    click();
+    CHECK(menu_is(2) && info(m) == 0 && m->im_MenuRect.MinY == (int32_t)INTUI_SCREENBAR);
+    menu = m->im_MenuRect;
+    item0 = m->im_ItemY[0];
+    item1 = m->im_ItemY[1];
+    if (menu.MaxY > 99)
+        menu.MaxY = 99;                 /* above the window's chrome, which the model doesn't know */
+    CHECK(expect(menu.MinX, menu.MinY, (uint32_t)(menu.MaxX - menu.MinX + 1), (uint32_t)(menu.MaxY - menu.MinY + 1),
+                 &want));
+    for (until = CurrentTime() + 1000 * MS; readable;)     /* the menu drawn there, not what's under it */
+        if (read_screen(menu.MinX, menu.MinY, (uint32_t)(menu.MaxX - menu.MinX + 1),
+                        (uint32_t)(menu.MaxY - menu.MinY + 1), &got) == 0 && got != want)
+            break;
+        else if (CurrentTime() > until)
+            return failed("the menu wasn't drawn over the window");
+    CHECK(point_at(menu.MinX + 30, item1));
+    click();
+    CHECK(picked(&we, FULLMENUNUM(0, 1, NOSUB), 0) && menu_is(0));
+    CHECK(screen_is(readable, menu.MinX, menu.MinY, (uint32_t)(menu.MaxX - menu.MinX + 1),
+                    (uint32_t)(menu.MaxY - menu.MinY + 1)));
+
+    /* Held by the right button from Options' title to its first item:
+     * checked; and Save by its key, with the GUI key. */
+    CHECK(info(m) == 0 && point_at(m->im_TitleX[2], 14));
+    KPrintF("window: send drag 0 %ld right", (int64_t)(item0 - 14));
+    CHECK(picked(&we, FULLMENUNUM(1, 0, NOSUB), 1) && menu_is(0));
+    KPrintF("window: send keys meta_l-s");
+    CHECK(picked(&we, FULLMENUNUM(0, 1, NOSUB), 0));
+
+    /* The system menu's About, and its requester's OK. */
+    CHECK(info(m) == 0 && point_at(m->im_TitleX[0], 14));
+    click();
+    CHECK(menu_is(1) && info(m) == 0);
+    CHECK(point_at(m->im_MenuRect.MinX + 30, m->im_ItemY[0]));
+    nap(300);                                           /* its frame shown, then on QEMU */
+    KPrintF("window: send screendump menu");            /* saved, to be looked at */
+    click();
+    CHECK(requests_are(1, 1000) && info(m) == 0);
+    nap(300);
+    KPrintF("window: send screendump about");
+    CHECK(click_on(m->im_ReqButton[0]) && requests_are(0, 1000));
+    CHECK(screen_is(readable, 124, 126, 200, 120));
+    KPrintF("window: menus: a title clicked open over the window and an item chosen, another held "
+            "open by the right button, a key with GUI, the system menu's About and its OK");
+
+    /* The clock, where there's an RTC: intuition looks every 5 s until it's there. */
+    {
+        struct MsgPort rtc;
+
+        if (ConnectPort(&rtc, "rtc.0", SIG_DISPLAY, 2, 256) == 0) {
+            ClosePort(&rtc);
+            for (until = CurrentTime() + 6000 * MS; info(m) == 0 && !m->im_Clock;)
+                if (CurrentTime() > until)
+                    return failed("the screen bar's clock never showed the RTC's time");
+                else
+                    nap(20);
+            KPrintF("window: the clock shows %lu:%02lu UTC, from the RTC", m->im_Clock / 3600 % 24,
+                    m->im_Clock / 60 % 60);
+        } else {
+            KPrintF("window: no RTC here: the screen bar shows no clock");
+        }
+    }
+
+    /* Resized by its corner, 40 by 30 bigger: its old buffer shown, the
+     * backdrop past it. */
+    p = place_of(&we);
+    CHECK(point_at(p.left + p.bl + p.iw + p.br - 9, p.top + p.bt + p.ih + p.bb - 9));
+    KPrintF("window: send drag 40 30 left");
+    CHECK(sized(&we, 240, 150) && info(m) == 0);       /* and where the pointer went */
+    CHECK(screen_is(readable, p.left + p.bl, p.top + p.bt, 240, 150));
+    CHECK(IIntuition->ChangeWindowBuffers(&we, fbm, nullptr) == 0 && we.w_Width == 240 && we.w_Height == 150);
+    picture(&we.w_RPort, 240, 150, 0x3a6298, "resized");
+    CHECK(IIntuition->PresentWindow(&we, nullptr, 0) == 0 && on_screen(&we, we.w_Frame));
+    CHECK(screen_is(readable, p.left + p.bl, p.top + p.bt, 240, 150));
+    for (until = CurrentTime() + 1000 * MS; sharers((uint64_t)ebm->bm_BaseAddr) != 1;)
+        if (CurrentTime() > until)
+            return failed("intuition didn't let go of a resized window's old buffer");
+        else
+            nap(5);
+
+    /* Far smaller: held to its least size. */
+    p = place_of(&we);
+    CHECK(point_at(p.left + p.bl + p.iw + p.br - 9, p.top + p.bt + p.ih + p.bb - 9));
+    KPrintF("window: send drag -250 -200 left");
+    CHECK(sized(&we, 80, 50) && info(m) == 0);
+    CHECK(screen_is(readable, p.left + p.bl, p.top + p.bt, 80, 50));
+    CHECK(screen_is(readable, p.left + 90, p.top, 240 + 8 - 90, 150 + 26 + 16));    /* where it was */
+    KPrintF("window: resize: told the new size, the old buffer shown and the backdrop past it, new "
+            "buffers taken and the old let go of; held to its least size");
+
+    /* EasyRequest: a second task asks, this one answers the middle. */
+    CHECK((task = CreateTask(asker, 0)) >= 0);
+    CHECK(requests_are(1, 3000) && info(m) == 0 && click_on(m->im_ReqButton[1]));
+    for (until = CurrentTime() + 2000 * MS; !__atomic_load_n(&easy.done, __ATOMIC_ACQUIRE);)
+        if (WaitAddr(&easy.done, 0, until) == ERR_TIMEOUT)
+            return failed("EasyRequest wasn't answered");
+    CHECK(easy.answer == 2 && requests_are(0, 1000));
+    CloseHandle((Handle)task);
+    KPrintF("window: EasyRequest: three buttons, the middle clicked, answered 2");
+
+    CHECK(IIntuition->CloseWindow(&we) == 0);
+    taken_off(&we);
+    IGfx->FreeBitMap(ebm);
+    IGfx->FreeBitMap(fbm);
     return 0;
 }
 
@@ -1472,6 +1759,8 @@ int main(uint64_t arg)
     ends();
     if (input && input != NO_INPUT)
         return input;
+    if (!input && (r = desktop_half(readable)))
+        return r;
     if ((r = kill_window(readable)))
         return r;
 

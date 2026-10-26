@@ -4,8 +4,9 @@
  *
  * A rectangle to repaint is taken by the windows front to back: the
  * front window it meets gives the part they share, blits from the
- * bitmaps of the window's parts, and the up to four pieces of it beside
- * that go on to the windows behind. What no window covers is the
+ * bitmaps of the window's parts (or fills, for a part of a flat colour),
+ * and the up to four pieces of it beside that go on to the windows
+ * behind. What no window covers is the
  * backdrop. So each pixel is written once, and the screen is never read.
  */
 #include "compose.h"
@@ -107,15 +108,28 @@ static void damage_whole(struct ic_screen *s, const struct ic_window *w)
         add(&s->now, r);
 }
 
-bool ic_add(struct ic_screen *s, struct ic_window *w)
+static bool insert(struct ic_screen *s, struct ic_window *w, unsigned at)
 {
     if (s->nz == IC_WINDOWS)
         return false;
-    for (unsigned i = s->nz; i > 0; i--)
+    for (unsigned i = s->nz; i > at; i--)
         s->z[i] = s->z[i - 1];
-    s->z[0] = w;
+    s->z[at] = w;
     s->nz++;
     damage_whole(s, w);
+    return true;
+}
+
+bool ic_add(struct ic_screen *s, struct ic_window *w)
+{
+    return insert(s, w, s->pinned);
+}
+
+bool ic_pin(struct ic_screen *s, struct ic_window *w)
+{
+    if (!insert(s, w, 0))
+        return false;
+    s->pinned++;
     return true;
 }
 
@@ -124,6 +138,8 @@ void ic_remove(struct ic_screen *s, struct ic_window *w)
     for (unsigned i = 0; i < s->nz; i++)
         if (s->z[i] == w) {
             damage_whole(s, w);
+            if (i < s->pinned)
+                s->pinned--;
             for (s->nz--; i < s->nz; i++)
                 s->z[i] = s->z[i + 1];
             return;
@@ -132,11 +148,11 @@ void ic_remove(struct ic_screen *s, struct ic_window *w)
 
 void ic_raise(struct ic_screen *s, struct ic_window *w)
 {
-    for (unsigned i = 0; i < s->nz; i++)
+    for (unsigned i = s->pinned; i < s->nz; i++)
         if (s->z[i] == w) {
-            for (; i > 0; i--)
+            for (; i > s->pinned; i--)
                 s->z[i] = s->z[i - 1];
-            s->z[0] = w;
+            s->z[s->pinned] = w;
             damage_whole(s, w);
             return;
         }
@@ -144,7 +160,7 @@ void ic_raise(struct ic_screen *s, struct ic_window *w)
 
 void ic_lower(struct ic_screen *s, struct ic_window *w)
 {
-    for (unsigned i = 0; i < s->nz; i++)
+    for (unsigned i = s->pinned; i < s->nz; i++)
         if (s->z[i] == w) {
             for (; i + 1 < s->nz; i++)
                 s->z[i] = s->z[i + 1];
@@ -152,6 +168,16 @@ void ic_lower(struct ic_screen *s, struct ic_window *w)
             damage_whole(s, w);
             return;
         }
+}
+
+struct ic_window *ic_front(const struct ic_screen *s)
+{
+    return s->nz > s->pinned ? s->z[s->pinned] : nullptr;
+}
+
+struct ic_window *ic_back(const struct ic_screen *s)
+{
+    return s->nz > s->pinned ? s->z[s->nz - 1] : nullptr;
 }
 
 struct ic_window *ic_at(const struct ic_screen *s, int32_t x, int32_t y)
@@ -171,6 +197,14 @@ void ic_move(struct ic_screen *s, struct ic_window *w, int32_t x, int32_t y)
     damage_whole(s, w);
     w->x = x;
     w->y = y;
+    damage_whole(s, w);
+}
+
+void ic_resize(struct ic_screen *s, struct ic_window *w, uint32_t width, uint32_t height)
+{
+    damage_whole(s, w);
+    w->w = width;
+    w->h = height;
     damage_whole(s, w);
 }
 
@@ -226,6 +260,11 @@ static void paint(struct ic_screen *s, struct RastPort *rp, struct GfxRect r, un
             if (!meets(i, pr))
                 continue;
             c = common(i, pr);
+            if (!p->bm) {
+                rp->rp_FgPen = p->colour;
+                s->gfx->RectFill(rp, c.MinX, c.MinY, c.MaxX, c.MaxY);
+                continue;
+            }
             s->gfx->BltBitMap(p->bm, p->sx + c.MinX - pr.MinX, p->sy + c.MinY - pr.MinY, rp, c.MinX,
                               c.MinY, c.MaxX - c.MinX + 1, c.MaxY - c.MinY + 1, BLEND_SRC);
         }

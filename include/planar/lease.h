@@ -148,6 +148,11 @@ int64_t ColdReboot(Handle root);
  * 'buf': what was shown on the console, and what's still to be, every
  * process's lines among the kernel's. The bytes copied (V6 step 8). */
 int64_t ReadLog(Handle root, char *buf, uint32_t len);
+/* End the process at the other end of a connection that 'process', one
+ * the caller made, holds as 'conn' (V8 step 4: intuition's client not
+ * answering, which intuition asks hwdb to end). ERR_NOTFOUND if the
+ * other end has gone; ERR_RIGHTS if it's the caller or 'process'. */
+int64_t KillPeer(Handle root, Handle process, Handle conn);
 int64_t ReadConsole(char *buf, uint32_t len);
 
 struct MsiInfo {

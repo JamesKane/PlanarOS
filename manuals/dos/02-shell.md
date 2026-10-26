@@ -1,14 +1,16 @@
 # The Shell
 
-*Checked against V6.*
+*Checked against V6; the desktop and `SERIAL`, V8 step 4.*
 
 ## What it's for
 
-Typing commands. The Shell (`cmd/shell.c`) is itself a program on the disk, `C:shell`. It reads lines from the serial console and from a USB keyboard, runs each as a command loaded from `C:`, and its output, and the commands', goes to the console: the screen and the serial line both.
+Typing commands. The Shell (`cmd/shell.c`) is itself a program on the disk, `C:shell`. It reads lines from the serial console, and from a USB keyboard when there's no desktop, runs each as a command loaded from `C:`, and its output, and the commands', goes to the console: the screen and the serial line both.
+
+Its template is `FROM,SERIAL/S`. `FROM` runs a script's lines and ends (below). `SERIAL` reads the serial console alone, leaving the keyboard to intuition: hwdb starts the console Shell so when it starts the desktop.
 
 ## Booting to it
 
-`BOOTARGS=shell` boots to the Shell: the kernel skips its task tests and starts hwdb in its normal mode. hwdb starts the drivers, then `dos`, then `C:shell`, gives the Shell the console's input (`GrantConsole`), and starts either again if it ends. On QEMU:
+`BOOTARGS=shell` boots to the Shell: the kernel skips its task tests and starts hwdb in its normal mode. hwdb starts the drivers, then `dos`, then `C:shell SERIAL`, gives the Shell the console's input (`GrantConsole`), and starts either again if it ends. Once display has a screen, hwdb starts intuition too, which takes the mouse and the keyboard and shows the desktop over the console (V8 step 4; [Libraries ch. 13](../libraries/13-intuition.md)). `BOOTARGS="shell nointuition"` is V7's boot: no desktop, and `C:shell` reading the keyboard as well. On QEMU:
 
 ```
 make PLATFORM=qemu-virt-a64 EFI=1 run BOOTARGS=shell
@@ -102,7 +104,7 @@ int main(uint64_t arg)
 
 ## Rules
 
-- Input is polled every 10 ms: the serial console's (`ReadConsole`), and the keys typed on a USB keyboard, from `input`'s ring ([Devices ch. 7](../devices/07-input.md)), which the Shell takes when `input` is there and again after it restarts. Another client holding the ring keeps it: the Shell then has the serial console alone.
+- Input is polled every 10 ms: the serial console's (`ReadConsole`), and, unless `SERIAL`, the keys typed on a USB keyboard, from `input`'s ring ([Devices ch. 7](../devices/07-input.md)), which the Shell takes when `input` is there and again after it restarts. Another client holding the ring keeps it (intuition, with the desktop): the Shell then has the serial console alone.
 - A command owns nothing the Shell needs: it ends, and the Shell carries on.
 
 ## Differences from AmigaDOS

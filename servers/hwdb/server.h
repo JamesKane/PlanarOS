@@ -31,6 +31,7 @@ constexpr uint64_t HWDB_END = 1u << 1;      /* not the test: end when the Shell 
 constexpr uint64_t HWDB_FAULT = 1u << 2;    /* fault at once: init's test (servers/init) */
 constexpr uint64_t HWDB_LOOK = 1u << 3;     /* the window test holds its windows on the screen to be looked at */
 constexpr uint64_t HWDB_DRAG = 1u << 4;     /* the window test gives someone windows to drag, 60 s */
+constexpr uint64_t HWDB_NOINTUITION = 1u << 5;  /* not the test: no desktop; the Shell has the keyboard */
 
 enum unit_state : uint8_t {
     U_WAITING,          /* not all its devices ready */
@@ -79,6 +80,7 @@ struct hwdb {
     struct FirmwareInfo fb;     /* MapFirmware's: the GOP framebuffer, if any */
     uint64_t now;
     bool test, end, look, drag, stopping, finished;
+    bool desktop;               /* not the test: intuition started once there's a screen (V8 step 4) */
     unsigned errors;            /* teardown checks that failed */
     uint64_t quarantined;       /* DMA pages dead drivers left, all told */
     Handle dos;                 /* the dos server, the kill test's or the system's */
@@ -199,9 +201,11 @@ bool display_ask(void);             /* ask again; true once the answer is in */
 /* --- intuition (intuition.c): the server kept going while it's wanted; the window test. --- */
 
 void intuition_keep(void);          /* started, and again when it ends, while wanted; ended when stopping */
+void intuition_desktop(void);       /* the system's: wanted once display is up, unless "nointuition" */
 uint64_t intuition_due(void);       /* when it's to start again; 0 if running or not wanted */
 void intuition_conn_down(void);
 void intuition_conn_serve(struct MsgPort *mp);
+int64_t intuition_kill_client(uint64_t conn);   /* HWDB_KILL_CLIENT: its client on 'conn', ended */
 bool window_test(void);             /* the kill test's window step: true when it's over */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */

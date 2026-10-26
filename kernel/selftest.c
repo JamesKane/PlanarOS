@@ -1386,8 +1386,11 @@ static void run_system(void)
     task_set_signal(0, DEAD);
     kprintf("planar: starting the system\n");
     /* With "reboot", the Shell's EndShell ends the system and the board
-     * starts again (hwdb's HWDB_END). */
-    if (!(p = process_create_root("init", 5, bootargs_has("reboot") ? 2 : 0, task_self(), DEAD))) {
+     * starts again (hwdb's HWDB_END). With "nointuition", hwdb doesn't
+     * start the desktop, and the Shell has the keyboard (HWDB_NOINTUITION,
+     * V8 step 4). */
+    if (!(p = process_create_root("init", 5, (bootargs_has("reboot") ? 2 : 0) | (bootargs_has("nointuition") ? 32 : 0),
+                                  task_self(), DEAD))) {
         kprintf("planar: init couldn't be started\n");
         return;
     }
@@ -1508,6 +1511,9 @@ void selftest_tasks(void *)
     kprintf("V8.2 done\n");
     selftest_type();
     kprintf("V8.3 done\n");
+    /* hwdb's window test said what it saw of the screen bar, menus,
+     * resizing and requesters (V8.4 lines, servers/hwdb/intuition.c). */
+    kprintf("V8.4 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

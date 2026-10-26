@@ -66,6 +66,7 @@
 #define SYS_COLD_REBOOT     56
 #define SYS_READ_LOG        57
 #define SYS_QUERY_TASKS     58
+#define SYS_KILL_PEER       59
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)
