@@ -28,15 +28,12 @@
 #include <planar/syscalls.h>
 
 #include "power.h"
+#include "smt.h"
 
 constexpr uint64_t SMC_SHMEM = 0x84380000;
 constexpr uint32_t SMC_FID = 0xc2000001;
 constexpr uint32_t DB = 0x80;               /* MBX6's doorbell, from its base */
 
-/* The SMT layout. */
-enum : uint32_t { SMT_STATUS = 0x04, SMT_FLAGS = 0x10, SMT_LENGTH = 0x14, SMT_HEADER = 0x18,
-                  SMT_PAYLOAD = 0x1c, SMT_SIZE = 0x80 };
-constexpr uint32_t SMT_FREE = 1u << 0, SMT_ERROR = 1u << 1;
 constexpr unsigned SMT_WORDS = (SMT_SIZE - SMT_PAYLOAD) / 4;
 
 enum : uint32_t { P_BASE = 0x10, P_POWER = 0x11, P_CLOCK = 0x14 };
@@ -124,7 +121,7 @@ static int64_t call(struct chan *c, uint32_t proto, uint32_t msg, const uint32_t
     for (unsigned i = 0; i < n; i++)
         wr(c, SMT_PAYLOAD + 4 * i, in[i]);
     wr(c, SMT_LENGTH, 4 + 4 * n);
-    wr(c, SMT_STATUS, 0);
+    wr(c, SMT_STATUS, 0);                   /* busy: killed before the ring, hwdb frees it */
     barrier();
     if (c->doorbell) {
         *c->doorbell = 1;

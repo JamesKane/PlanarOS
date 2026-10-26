@@ -22,6 +22,7 @@
 #include <planar/devices/power.h>
 #include <planar/syscalls.h>
 
+#include "../../drv/power/smt.h"
 #include "server.h"
 
 void *memset(void *dst, int c, size_t n);
@@ -411,6 +412,45 @@ static bool asked_gpu(void)
 static bool late(uint64_t ms)
 {
     return hwdb.now - pt.at > ms * MS;
+}
+
+/*
+ * The stop method. power has no DMA, but a power killed mid-call leaves
+ * its SCMI channel busy for whoever uses it next (smt.h): on the CIX's
+ * SHM0, its first window is mailbox 6's channel, rung by a doorbell, and
+ * the other TF-A's, rung by an SMC. A channel rung is given power's own
+ * wait, 300 ms, to be answered. With no DMA, it's stopped either way.
+ */
+bool stop_power(struct unit *u)
+{
+    const struct hw_lease *ls = &hwdb.g.leases[u - hwdb.units];
+
+    for (unsigned r = 0; r < ls->nranges; r++) {
+        void *at;
+        int64_t e = MapLease(u->lease[r], &at);
+
+        if (e != 0 && e != ERR_EXISTS) {
+            say_unit(u, "its registers couldn't be mapped: its channels left as they are");
+            return true;
+        }
+    }
+    for (unsigned i = 0; i < ls->nnodes; i++) {
+        const struct hw_node *n = &hwdb.g.nodes[ls->nodes[i]];
+        bool first = true;
+
+        if (!hw_has_key(n, "CIXHA004"))
+            continue;
+        for (unsigned k = 0; k < n->nres; k++) {
+            if (n->res[k].kind != HW_MMIO || n->res[k].size < SMT_SIZE)
+                continue;
+            if (smt_release((volatile uint8_t *)n->res[k].base, !first, CurrentTime,
+                            CurrentTime() + 300 * MS))
+                say_unit(u, first ? "it left mailbox 6's channel busy: freed"
+                                  : "it left the SMC channel busy: freed");
+            first = false;
+        }
+    }
+    return true;
 }
 
 struct unit *power_unit(void)

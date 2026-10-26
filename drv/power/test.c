@@ -15,6 +15,7 @@
 #include <planar/syscalls.h>
 
 #include "power.h"
+#include "smt.h"
 
 static unsigned checks, failures;
 
@@ -358,6 +359,13 @@ static int64_t tfa(uint64_t x[4])
     return 0;
 }
 
+/* hwdb's clock for smt_release: each look a microsecond on. */
+static uint64_t tick(void)
+{
+    pw_delay_us(1);
+    return now_us;
+}
+
 static void test_scmi(void)
 {
     pw_reset();
@@ -398,7 +406,33 @@ static void test_scmi(void)
     CHECK(ask(2, POWER_QUERY, 0, "gpu") == ERR_TIMEOUT && now_us - t0 >= 300000);
     CHECK(ask(2, POWER_QUERY, 0, "gpu") == ERR_BUSY);      /* the channel is still its */
     mbx[STATUS] = 1;
+    mbx[0x80 / 4] = 0;                  /* its ring, never taken */
     hardware = scp;
+
+    /* hwdb's stop method on the channels a dead power left (smt.h). Free:
+     * left alone, at once. */
+    t0 = now_us;
+    CHECK(!smt_release((volatile uint8_t *)mbx, false, tick, now_us + 300000) && now_us == t0);
+    CHECK(!smt_release((volatile uint8_t *)smc_shm, true, tick, now_us + 300000));
+    /* Killed between busy and the ring: the SMC's freed at once, the
+     * mailbox's after the wait, and each answers the next power. */
+    smc_shm[STATUS] = 0;
+    CHECK(smt_release((volatile uint8_t *)smc_shm, true, tick, now_us + 300000) && now_us == t0);
+    CHECK(smc_shm[STATUS] == 1);
+    mbx[STATUS] = 0;
+    CHECK(smt_release((volatile uint8_t *)mbx, false, tick, now_us + 300000));
+    CHECK(now_us - t0 >= 300000 && mbx[STATUS] == 1);
+    /* Killed after the ring: the SCP's answer waited for, and kept. */
+    unsigned m1 = mbx_calls;
+
+    mbx[HEADER] = 0x14 << 10 | ((last_token[0] + 0x200) & 0x3ff) << 18;   /* clocks' version */
+    mbx[LENGTH] = 4;
+    mbx[STATUS] = 0;
+    mbx[0x80 / 4] = 1;
+    t0 = now_us;
+    CHECK(!smt_release((volatile uint8_t *)mbx, false, tick, now_us + 300000));
+    CHECK(mbx_calls == m1 + 1 && now_us - t0 < 1000 && mbx[PAYLOAD + 1] == 0x20000);
+    CHECK(ask(2, POWER_QUERY, 0, "gpu") == 0);
 
     CHECK(agent_bad == 0);
     bool untouched = true;          /* the doorbell (0x80) is the server's; above it, others' */

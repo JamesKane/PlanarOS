@@ -462,7 +462,7 @@ POWER_BUILD := build/power
 POWER_TEST := $(POWER_BUILD)/power-test
 POWER_SRCS := drv/power/core.c drv/power/model.c drv/power/k1.c drv/power/scmi.c drv/power/test.c
 
-$(POWER_TEST): $(POWER_SRCS) drv/power/power.h include/planar/devices/power.h
+$(POWER_TEST): $(POWER_SRCS) drv/power/power.h drv/power/smt.h include/planar/devices/power.h
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Idrv/power) $(POWER_SRCS) -o $@
 

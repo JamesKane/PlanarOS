@@ -686,6 +686,8 @@ static bool stop(struct unit *u, uint64_t quarantined)
         return stop_gpu(u);
     if (hw_streq(name, "gpu-rogue"))
         return stop_rogue(u);
+    if (hw_streq(name, "power"))
+        return stop_power(u);
     return quarantined == 0;    /* none: only a device that kept no DMA is safe (VQ24) */
 }
 

@@ -182,6 +182,7 @@ int64_t power_vote_set(const char *name, uint32_t tag, bool on);
 void test_power_answer(const struct PowerMsg *m);
 bool power_test(void);              /* the kill test's power step: true when it's over */
 struct unit *power_unit(void);
+bool stop_power(struct unit *u);    /* its SCMI channels free, as a kill may not leave them */
 
 /* --- display (display.c): its stop method, and its test. --- */
 
