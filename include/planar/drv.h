@@ -42,6 +42,12 @@ enum : uint32_t {
     HWDB_KILL_CLIENT = 7,   /* intuition's: its client on hm_Conn isn't answering; end it (V8 step 4) */
     HWDB_NEW_SHELL = 8,     /* intuition's: the system menu's Shell; a console window started (V8 step 5) */
     HWDB_NEW_PREFS = 9,     /* the Workbench's: Tools' Prefs started, unless it's running (V8 step 7) */
+    HWDB_TEST_KILL = 10,    /* the desktop test's: hm_Token's program killed; HWDB_TEST only (V8 step 8) */
+};
+
+/* HWDB_TEST_KILL's hm_Token: what's killed. */
+enum : uint32_t {
+    HWDB_KILL_WORKBENCH = 1, HWDB_KILL_PREFS, HWDB_KILL_SHELL, HWDB_KILL_INTUITION, HWDB_KILL_INPUT,
 };
 
 constexpr uint64_t DRV_STOP_MS = 1000;      /* a driver's time to stop, once asked */

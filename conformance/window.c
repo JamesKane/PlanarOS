@@ -98,11 +98,25 @@
  *    settings 6d saved in force again, read by input and intuition at
  *    their starts, then put back to their defaults and the files
  *    removed; and a click heard after. Exits 0, or the failed check's number.
+ *
+ * 9. With DESKTOP, hwdb's desktop round (V8 step 8): intuition and the
+ *    Workbench kept by hwdb as on the desktop, and killed under it in
+ *    turn (HWDB_TEST_KILL), the screen read back all the while (where it
+ *    can be) and never black. The Workbench, back with its icons. Prefs
+ *    and a Shell's conwin, both hwdb's: the conwin killed, its window and
+ *    con.1 gone; Prefs killed, its window gone and hwdb starting another.
+ *    Settings saved, then intuition killed under the Workbench and Prefs:
+ *    the console shows, the Workbench comes back on its next self in the
+ *    saved backdrop's colours, and Prefs doesn't; input killed, and back
+ *    with the saved settings. Then, with the mouse, a window dragged over
+ *    the Workbench, its frames' cost; with DRAG, by hand (5's drag) over
+ *    the Workbench. Exits 0, or the failed check's number.
  */
 #include <stddef.h>
 
 #include <planar/devices/display.h>
 #include <planar/devices/input.h>
+#include <planar/drv.h>
 #include <planar/intuition.h>
 #include <planar/prefs.h>
 #include <planar/syscalls.h>
@@ -120,14 +134,15 @@
 void *memset(void *dst, int c, size_t n);
 
 constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23, SIG_CONWIN = 24;  /* 22 is intuition.library's */
-constexpr int64_t SIG_DOS = 25, SIG_INPUT = 26, SIG_WB = 27;
+constexpr int64_t SIG_DOS = 25, SIG_INPUT = 26, SIG_WB = 27, SIG_HWDB = 28;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FRAMES = 120, TIMED = 10;
 constexpr unsigned PACED = 600, PACED_READ = 30;     /* a board's, 10 s at 60 Hz; QEMU's */
 constexpr uint32_t BACKDROP = 0x182038;     /* intuition's (compose.h's IC_BACKDROP) */
 constexpr uint32_t CHROME = 0x00c0ffee;     /* the model's: a pixel of the chrome, not read; clear, so no pixel drawn */
 constexpr int NO_INPUT = 1000;
-enum : uint64_t { FIRST, STOPPED, KILLED, SURVIVE, SURVIVE_MOUSE = 4 };     /* the argument's low byte */
+enum : uint64_t { FIRST, STOPPED, KILLED, SURVIVE, SURVIVE_MOUSE = 4, DESKTOP = 8 };     /* the argument's low byte */
+constexpr uint64_t DESKTOP_MOUSE = 1u << 4;     /* with DESKTOP: the mouse is there (5 ran) */
 constexpr uint64_t LOOK = 1u << 8;          /* hwdb's WINDOW_LOOK: hold the first windows on the screen */
 constexpr uint64_t DRAG = 1u << 9;          /* hwdb's WINDOW_DRAG: windows to drag by hand */
 constexpr unsigned DRAG_S = 300;            /* at most: until the close gadget */
@@ -1733,6 +1748,37 @@ static int drawer_is(bool readable, const char *path, int32_t x, int32_t y, stru
     return ok ? (int)d->count : -1;
 }
 
+/* The Workbench's backdrop window, in the colours 'top' and 'bottom',
+ * with the volumes' icons, as wb.h draws it, within 'ms'. The pointer
+ * must be at the screen's top right, on the screen bar but for a column. */
+static bool desk_is(bool readable, const struct wb_icon *icons, unsigned n, uint32_t top, uint32_t bottom,
+                    uint64_t ms)
+{
+    uint32_t bw = in.in_Width, bh = in.in_Height - INTUI_SCREENBAR;
+    struct TextFont *sans;
+    struct BitMap *bm;
+    struct RastPort rp;
+    bool ok;
+
+    if (!readable)
+        return true;
+    if (!(sans = IGfx->OpenTextFont(&(struct TextAttr){ "System Sans", 13, 0, 0 })))
+        return false;
+    if (!(bm = IGfx->AllocBitMap(bw, bh, PIXFMT_XRGB8888, 0, nullptr))) {
+        IGfx->CloseTextFont(sans);
+        return false;
+    }
+    IGfx->InitRastPort(&rp, bm);
+    wb_backdrop(IGfx, &rp, bw, bh, top, bottom);
+    for (unsigned i = 0; i < n; i++)
+        wb_icon_draw(IGfx, &rp, sans, &icons[i]);
+    ok = drawn_as(readable, 0, INTUI_SCREENBAR, bw - 1, bh, crc_rect(bm, 0, 0, bw - 1, bh), ms,
+                  "the Workbench's backdrop and volumes");
+    IGfx->FreeBitMap(bm);
+    IGfx->CloseTextFont(sans);
+    return ok;
+}
+
 /* A click on Prefs' window, given to this program's copy of it too:
  * the change that gives. */
 static bool prefs_click(struct UI *ui, uint32_t gadget, int32_t dx, int32_t dy, struct UIChange *c)
@@ -1761,15 +1807,12 @@ static int workbench_half(bool readable)
     static struct UI ui;
     struct IntuiMsg *m = in.in_Call;
     struct IntuiEvent ev;
-    struct TextFont *sans;
-    struct BitMap *bm;
-    struct RastPort rp;
     struct InputPrefs ip = {}, was;
     struct IntuiPrefs np = {};
     struct TagItem t[PREFS_TAGS + 1];
     struct UIChange c;
     struct GfxRect lr;
-    uint32_t bw = in.in_Width, bh = in.in_Height - INTUI_SCREENBAR, rate, speed;
+    uint32_t rate, speed;
     int32_t x0, y0, x1, y1, px0;
     int64_t proc;
     unsigned n, k;
@@ -1787,16 +1830,8 @@ static int workbench_half(bool readable)
      * screen's top right, on the screen bar but for a column. */
     CHECK((proc = CreateProcess("workbench", 0, SIG_WB, 0)) > 0);
     CHECK(windows_are(1, 10000));
-    CHECK((sans = IGfx->OpenTextFont(&(struct TextAttr){ "System Sans", 13, 0, 0 })));
-    CHECK((bm = IGfx->AllocBitMap(bw, bh, PIXFMT_XRGB8888, 0, nullptr)));
-    IGfx->InitRastPort(&rp, bm);
-    wb_backdrop(IGfx, &rp, bw, bh, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM);
-    for (unsigned i = 0; i < n; i++)
-        wb_icon_draw(IGfx, &rp, sans, &icons[i]);
-    CHECK(point_at((int32_t)bw - 1, 0));
-    CHECK(drawn_as(readable, 0, INTUI_SCREENBAR, bw - 1, bh, crc_rect(bm, 0, 0, bw - 1, bh), 5000,
-                   "the Workbench's backdrop and volumes"));
-    IGfx->FreeBitMap(bm);
+    CHECK(point_at((int32_t)in.in_Width - 1, 0));
+    CHECK(desk_is(readable, icons, n, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM, 5000));
     KPrintF("window: the Workbench: its backdrop and dos's %lu volumes' icons, read back as wb.h draws them",
             (uint64_t)n);
 
@@ -1892,7 +1927,6 @@ static int workbench_half(bool readable)
     CloseHandle((Handle)proc);
     CHECK(windows_are(0, 5000));
     CloseDos(&wdos);
-    IGfx->CloseTextFont(sans);
     while (IIntuition->GetIntuiEvent(&in, &ev))
         ;
     return 0;
@@ -2233,6 +2267,236 @@ static int survive(bool mouse)
     return 0;
 }
 
+/* --- 9: the desktop, killed under (V8 step 8). --- */
+
+static int64_t hwdb_ask(uint32_t op, uint32_t token)
+{
+    struct MsgPort mp;
+    struct HwdbMsg *m;
+    int64_t e;
+
+    if ((e = ConnectPort(&mp, "hwdb", SIG_HWDB, 2, 2 * sizeof *m)) != 0)
+        return e;
+    e = ERR_NOMEM;
+    if ((m = AllocMsg(&mp, sizeof *m))) {
+        memset(m, 0, sizeof *m);
+        m->hm_Msg.mn_Length = sizeof *m;
+        m->hm_Op = op;
+        m->hm_Token = token;
+        if ((e = DoMsgUntil(&mp, &m->hm_Msg, CurrentTime() + DRV_HWDB_MS * MS)) == 0)
+            e = m->hm_Msg.mn_Error;
+    }
+    ClosePort(&mp);
+    return e;
+}
+
+static uint32_t black;              /* the whole screen's CRC, were it black */
+static uint32_t screen_w, screen_h; /* kept: 'in' is cleared while intuition's away */
+static unsigned reads;              /* the screen read back while something was dead */
+
+/* The whole screen read back, if it can be: not black. */
+static bool lit(bool readable)
+{
+    uint32_t got;
+
+    if (!readable)
+        return true;
+    reads++;
+    if (read_screen(0, 0, screen_w, screen_h, &got) == 0 && got != black)
+        return true;
+    KPrintF("window: the screen went dark");
+    return false;
+}
+
+/* hwdb kills 'what' of the desktop's; the screen is lit for 300 ms at
+ * least and until 'n' windows are on it, 20 s at most. */
+static int killed_to(bool readable, uint32_t what, uint32_t n)
+{
+    struct IntuiMsg *m = in.in_Call;
+    uint64_t start = CurrentTime();
+
+    CHECK(hwdb_ask(HWDB_TEST_KILL, what) == 0);
+    for (;;) {
+        CHECK(lit(readable));
+        CHECK(info(m) == 0);
+        if (m->im_Windows == n && CurrentTime() - start > 300 * MS)
+            return 0;
+        CHECK(CurrentTime() - start < 20000 * MS);
+        nap(10);
+    }
+}
+
+/* A window of this program's dragged over the Workbench by its title
+ * bar, 'n' times: the frames intuition composed, and what each cost. */
+static int drag_over(void)
+{
+    struct IntuiMsg *m = in.in_Call;
+    struct BitMap *bm;
+    struct Window w;
+    uint64_t frames, nanos, pixels;
+    int32_t x = 400, y = 300;
+
+    CHECK((bm = IGfx->AllocBitMap(320, 200, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &w, { WA_Left, x }, { WA_Top, y }, { WA_Title, (uint64_t)"dragged" },
+                         { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET }, { WA_BitMap, (uint64_t)bm }) == 0);
+    picture(&w.w_RPort, 320, 200, 0x5b88c2, "dragged");
+    CHECK(IIntuition->PresentWindow(&w, nullptr, 0) == 0 && on_screen(&w, 1));
+    /* The mouse is input's again a little after input's restart: until
+     * then a move is lost, and asked for again. */
+    for (uint64_t until = CurrentTime() + 10000 * MS; !point_at(x + 60, y + 12);)
+        CHECK(CurrentTime() < until);
+    CHECK(info(m) == 0);
+    frames = m->im_Frames;
+    nanos = m->im_Nanos;
+    pixels = m->im_Pixels;
+    for (int i = 0; i < 12; i++) {
+        int32_t dx = i % 2 ? -100 : 100, left = w.w_Sync->is_LeftEdge;
+        uint64_t until = CurrentTime() + 2000 * MS;
+
+        KPrintF("window: send drag %ld 0 left", (int64_t)dx);
+        while (w.w_Sync->is_LeftEdge != left + dx)
+            if (CurrentTime() > until)
+                return failed("the dragged window didn't move");
+            else
+                nap(5);
+        nap(60);                        /* the drag's last frame, and the pace of the log */
+    }
+    CHECK(info(m) == 0 && m->im_Frames > frames);
+    frames = m->im_Frames - frames;
+    KPrintF("window: desktop: a window dragged over the Workbench: %lu frames composed, %lu us and %lu pixels "
+            "a frame", frames, (m->im_Nanos - nanos) / frames / 1000, (m->im_Pixels - pixels) / frames);
+    CHECK(IIntuition->CloseWindow(&w) == 0);
+    IGfx->FreeBitMap(bm);
+    return 0;
+}
+
+static int desktop(bool mouse, bool drag)
+{
+    static struct wb_icon icons[WB_VOLUMES];
+    struct IntuiMsg *m;
+    struct IntuiEvent ev;
+    struct IntuiPrefs np = {};
+    struct InputPrefs ip = {};
+    struct MsgPort con;
+    struct BitMap *bm;
+    struct RastPort rp;
+    const uint32_t top = pw_theme_top[1], bottom = pw_theme_bottom[1];    /* Ocean, to be saved */
+    const struct TagItem it[] = {
+        { PREFS_RepeatDelay, INPUT_DELAY_DEFAULT }, { PREFS_RepeatRate, 20 },
+        { PREFS_PointerSpeed, 150 }, { PREFS_PointerAccel, INPUT_ACCEL_DEFAULT }, { TAG_END, 0 },
+    };
+    const struct TagItem nt[] = {
+        { PREFS_Hud, 0 }, { PREFS_PointerSize, INTUI_POINTER_AUTO }, { PREFS_BackdropTop, top },
+        { PREFS_BackdropBottom, bottom }, { TAG_END, 0 },
+    };
+    unsigned n, opens;
+    uint64_t until;
+    bool readable, input;
+    uint32_t got = 0;
+    int64_t e;
+    int r;
+
+    if ((r = open_lib()))
+        return r;
+    CHECK(IIntuition->OpenIntuition(&in, CurrentTime() + 20000 * MS) == 0);
+    m = in.in_Call;
+    CHECK(display_up(0) == 0);
+    /* Read back where display composes the screen, with the mouse to
+     * move the pointer off what's read. */
+    readable = read_screen(0, 0, 1, 1, &got) == 0 && mouse;
+    screen_w = in.in_Width;
+    screen_h = in.in_Height;
+    if (readable) {
+        CHECK((bm = IGfx->AllocBitMap(in.in_Width, in.in_Height, PIXFMT_XRGB8888, 0, nullptr)));
+        IGfx->InitRastPort(&rp, bm);
+        rp.rp_FgPen = 0xff000000;
+        IGfx->RectFill(&rp, 0, 0, (int32_t)in.in_Width - 1, (int32_t)in.in_Height - 1);
+        black = crc_rect(bm, 0, 0, in.in_Width, in.in_Height);
+        IGfx->FreeBitMap(bm);
+    }
+    CHECK(OpenDosUntil(&wdos, SIG_DOS, CurrentTime() + 5000 * MS) == 0);
+    CHECK((n = wb_volumes(&wdos, icons, WB_VOLUMES)) > 0);
+    CHECK(IIntuition->GetPrefs(&in, &np) == 0 && np.ip_BackdropTop == INTUI_BACKDROP_TOP);
+
+    /* The Workbench, which hwdb started with intuition. */
+    CHECK(windows_are(1, 20000));
+    CHECK(!readable || point_at((int32_t)in.in_Width - 1, 0));
+    CHECK(desk_is(readable, icons, n, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM, 10000));
+    if ((r = killed_to(readable, HWDB_KILL_WORKBENCH, 1)))
+        return r;
+    CHECK(desk_is(readable, icons, n, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM, 10000));
+    KPrintF("window: desktop: the Workbench killed, and back with its %lu icons", (uint64_t)n);
+
+    /* Prefs and a Shell's conwin, hwdb's: the conwin killed, then Prefs. */
+    CHECK(hwdb_ask(HWDB_NEW_PREFS, 0) == 0 && windows_are(2, 10000));
+    CHECK(hwdb_ask(HWDB_NEW_PREFS, 0) == ERR_EXISTS);
+    CHECK(hwdb_ask(HWDB_NEW_SHELL, 0) == 0 && windows_are(3, 10000));
+    CHECK(inside_is(readable, sw_crc_ready, 10000, "the Shell's window with its prompt"));
+    if ((r = killed_to(readable, HWDB_KILL_SHELL, 2)))
+        return r;
+    CHECK(ConnectPort(&con, "con.1", SIG_CONWIN, 2, 256) == ERR_NOTFOUND);
+    if ((r = killed_to(readable, HWDB_KILL_PREFS, 1)))
+        return r;
+    CHECK(desk_is(readable, icons, n, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM, 5000));
+    CHECK(hwdb_ask(HWDB_NEW_PREFS, 0) == 0 && windows_are(2, 10000));
+    KPrintF("window: desktop: a Shell's conwin killed, its window and con.1 gone; Prefs killed, its window "
+            "gone, and another started");
+
+    /* Settings saved; then intuition killed under the Workbench and Prefs. */
+    CHECK(WritePrefs(&wdos, "input", it) == 0 && WritePrefs(&wdos, "intuition", nt) == 0);
+    CHECK(hwdb_ask(HWDB_TEST_KILL, HWDB_KILL_INTUITION) == 0);
+    until = CurrentTime() + 10000 * MS;
+    while ((e = IIntuition->WaitIntuiEvent(&in, until)) == 0)
+        while (IIntuition->GetIntuiEvent(&in, &ev))
+            ;
+    CHECK(e == ERR_PORT_DIED);
+    IIntuition->CloseIntuition(&in);
+    for (until = CurrentTime() + 20000 * MS;;) {
+        CHECK(lit(readable));
+        if (IIntuition->OpenIntuition(&in, CurrentTime() + 20 * MS) == 0)
+            break;
+        CHECK(CurrentTime() < until);
+    }
+    m = in.in_Call;
+    CHECK(windows_are(1, 20000));
+    nap(500);
+    CHECK(info(m) == 0 && m->im_Windows == 1);         /* Prefs ended with intuition, and wasn't started again */
+    CHECK(IIntuition->GetPrefs(&in, &np) == 0 && np.ip_BackdropTop == top && np.ip_BackdropBottom == bottom);
+    CHECK(!readable || point_at((int32_t)in.in_Width - 1, 0));
+    CHECK(desk_is(readable, icons, n, top, bottom, 10000));
+    KPrintF("window: desktop: intuition killed under the Workbench and Prefs: the Workbench back on its next "
+            "self, in the saved backdrop's colours; Prefs not");
+
+    /* input killed: back with the saved settings. */
+    opens = m->im_InputOpens;
+    input = m->im_Input;
+    CHECK(hwdb_ask(HWDB_TEST_KILL, HWDB_KILL_INPUT) == 0);
+    for (until = CurrentTime() + 30000 * MS; input && info(m) == 0 && m->im_InputOpens == opens; nap(10))
+        CHECK(lit(readable) && CurrentTime() < until);
+    CHECK(input_is(INPUT_DELAY_DEFAULT, 20, 150, 5000));
+    KPrintF("window: desktop: input killed, and back with the saved settings");
+
+    /* As they were, and the files gone; the Workbench told. */
+    ip = (struct InputPrefs){ INPUT_DELAY_DEFAULT, INPUT_RATE_DEFAULT, INPUT_SPEED_DEFAULT, INPUT_ACCEL_DEFAULT };
+    np = (struct IntuiPrefs){ 0, INTUI_POINTER_AUTO, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM };
+    CHECK(input_prefs(INPUT_SET, &ip) == 0 && IIntuition->SetPrefs(&in, &np) == 0);
+    CHECK(DeletePath(&wdos, "SYS:Prefs/Env-Archive/input.prefs") == 0 &&
+          DeletePath(&wdos, "SYS:Prefs/Env-Archive/intuition.prefs") == 0);
+    CHECK(desk_is(readable, icons, n, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM, 5000));
+    CloseDos(&wdos);
+    if (readable)
+        KPrintF("window: desktop: the screen read back %lu times while something was dead, never dark",
+                (uint64_t)reads);
+
+    /* The costs: a window dragged over the Workbench. */
+    if (mouse && (r = drag_over()))
+        return r;
+    if (drag && (r = by_hand()))
+        return r;
+    IIntuition->CloseIntuition(&in);
+    return 0;
+}
+
 int main(uint64_t arg)
 {
     struct BitMap *bm[3];
@@ -2240,6 +2504,8 @@ int main(uint64_t arg)
     bool readable;
     int r, input;
 
+    if ((arg & 0x0f) == DESKTOP)
+        return desktop(arg & DESKTOP_MOUSE, arg & DRAG);
     if ((arg & 0xff) == STOPPED)
         return stopped();
     if ((arg & 0xff) == KILLED) {

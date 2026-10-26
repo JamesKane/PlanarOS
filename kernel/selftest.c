@@ -1515,10 +1515,12 @@ void selftest_tasks(void *)
      * resizing and requesters (V8.4 lines, servers/hwdb/intuition.c). */
     kprintf("V8.4 done\n");
     /* And of a Shell in a console window (V8.5 lines, the same), and of
-     * ui.library's gadgets (V8.6), and of the Workbench and Prefs (V8.7). */
+     * ui.library's gadgets (V8.6), of the Workbench and Prefs (V8.7), and
+     * of the desktop killed under (V8.8, its desktop test). */
     kprintf("V8.5 done\n");
     kprintf("V8.6 done\n");
     kprintf("V8.7 done\n");
+    kprintf("V8.8 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

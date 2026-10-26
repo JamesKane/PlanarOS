@@ -210,6 +210,8 @@ int64_t intuition_new_shell(void);  /* HWDB_NEW_SHELL: a conwin started, and its
 unsigned intuition_shells(void);    /* conwins running */
 int64_t intuition_new_prefs(void);  /* HWDB_NEW_PREFS: Prefs started, one at most; ERR_EXISTS if it's running */
 bool window_test(void);             /* the kill test's window step: true when it's over */
+bool desktop_test(void);            /* the kill test's desktop step (V8 step 8): true when it's over */
+int64_t intuition_test_kill(uint32_t what);     /* HWDB_TEST_KILL: during the desktop step only */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */
 void input_keep(void);              /* started, and again when it ends; ended when stopping */

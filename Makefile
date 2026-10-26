@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V8.7 done
+EXPECT := V8.8 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -114,7 +114,7 @@ QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercis
 	--forbid 'typing not exercised'
 # A QEMU machine with a screen (RV64's ramfb, AArch64's through edk2)
 # must show it: display's and intuition's tests may not be skipped there.
-QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] (screen|windows|input|supervision)): not exercised'
+QEMU_SCREEN_CHECK = --forbid '^\[hwdb\] V(5\.3 display|7\.[0-9] (screen|windows|input|supervision)|8\.[4-8] [^:]+): not exercised'
 
 # Link rules in mk/arch-*.mk name $$(OBJS) as a prerequisite before OBJS is
 # set below, so prerequisites get a second expansion.
@@ -157,8 +157,9 @@ $(BUILD)/%.S.o: %.S
 # Seconds a boot may take to reach EXPECT; a board over the serial
 # console needs minutes (mk/ky-x1.mk). RV64 QEMU's run near 20 once it
 # had a screen and display's tests (V7 step 1), and near 40 once the
-# window test typed at a Shell in a window (V8 step 5).
-BOOT_TIMEOUT ?= 60
+# window test typed at a Shell in a window (V8 step 5), and near 60 with
+# the Workbench and the desktop killed under (V8 steps 7 and 8).
+BOOT_TIMEOUT ?= 120
 
 # BOOT_LOG=file keeps the transcript.
 test: $(IMAGE) $(TEST_DEPS)

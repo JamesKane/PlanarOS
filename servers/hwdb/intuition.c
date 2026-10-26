@@ -37,6 +37,14 @@
  *    its buffers again from the new display; then input is killed. The
  *    client checks what it sees of each and ends 0.
  * Then intuition is no longer wanted, and display must free its buffers.
+ *
+ * The desktop test (V8 step 8, killtest.c's T_DESKTOP): intuition and
+ * the Workbench kept as on the desktop, and window.c's DESKTOP round as
+ * their client. It has hwdb kill (HWDB_TEST_KILL) the Workbench, Prefs,
+ * a Shell's conwin, intuition and input in turn, and checks what it sees
+ * of each. Then hwdb checks each it was to keep came back, and that once
+ * the desktop isn't wanted, nothing of it is left: its programs ended
+ * and let go of, and display's buffers what they were.
  */
 #include <stddef.h>
 
@@ -100,6 +108,7 @@ static struct {
     bool wanted;
     Handle proc;
     uint64_t due, started, delay;
+    unsigned starts;
 } wb;
 
 uint64_t intuition_due(void)
@@ -143,6 +152,7 @@ static void workbench_keep(void)
     }
     wb.proc = (Handle)p;
     wb.started = hwdb.now;
+    wb.starts++;
 }
 
 /* Wanted from now on, or not: then killed, and not started again. */
@@ -610,6 +620,180 @@ bool window_test(void)
         }
         lines();
         wt.step = W_DONE;
+        return true;
+    default:
+        return true;
+    }
+}
+
+/* --- The desktop test (V8 step 8). --- */
+
+enum : uint8_t { D_START, D_RUN, D_STOP, D_FREED, D_DONE };
+
+constexpr uint64_t WINDOW_DESKTOP = 8, DESKTOP_MOUSE = 1u << 4;    /* window.c's DESKTOP, and with the mouse */
+
+static struct {
+    uint8_t step;
+    bool on;                        /* HWDB_TEST_KILL may be asked */
+    uint64_t at;
+    Handle client;
+    uint32_t before;                /* display's buffers without intuition */
+    unsigned wb_starts, i_starts, kills;
+} dt;
+
+int64_t intuition_test_kill(uint32_t what)
+{
+    Handle h = 0;
+
+    if (!hwdb.test || !dt.on)
+        return ERR_BADARG;
+    shells_keep();
+    switch (what) {
+    case HWDB_KILL_WORKBENCH:
+        h = wb.proc;
+        break;
+    case HWDB_KILL_PREFS:
+        h = prefs;
+        break;
+    case HWDB_KILL_SHELL:
+        for (unsigned i = 0; i < SHELLS && !h; i++)
+            h = shells[i];
+        break;
+    case HWDB_KILL_INTUITION:
+        h = ik.proc;
+        break;
+    case HWDB_KILL_INPUT:
+        input_kill();
+        dt.kills++;
+        return 0;
+    default:
+        return ERR_BADARG;
+    }
+    if (!h)
+        return ERR_NOTFOUND;
+    dt.kills++;
+    return KillProcess(h);
+}
+
+static void desktop_fail(const char *what)
+{
+    struct hw_line l = { 0 };
+
+    hw_put(&l, "hwdb: desktop test: FAILED: ");
+    hw_put(&l, what);
+    say(l.text);
+    hwdb.errors++;
+    if (dt.client) {
+        KillProcess(dt.client);
+        CloseHandle(dt.client);
+        dt.client = 0;
+    }
+    dt.on = false;
+    wb.wanted = false;
+    if (wb.proc)
+        KillProcess(wb.proc);
+    intuition_want(false);
+    dt.step = D_DONE;
+}
+
+static bool dt_late(uint64_t ms)
+{
+    return hwdb.now - dt.at > ms * MS;
+}
+
+static void dt_next(uint8_t step)
+{
+    dt.step = step;
+    dt.at = hwdb.now;
+}
+
+bool desktop_test(void)
+{
+    struct ProcessInfo pi;
+    int64_t p, code;
+
+    switch (dt.step) {
+    case D_START:
+        if (!display_unit()) {
+            say("V8.8 desktop: not exercised: no screen here");
+            return true;
+        }
+        if (!dt.at)
+            dt.at = hwdb.now;
+        if (!display_ask()) {
+            if (dt_late(3000))
+                desktop_fail("display didn't say how many buffers it holds");
+            return dt.step == D_DONE;
+        }
+        dt.before = display_buffers();
+        dt.wb_starts = wb.starts;
+        dt.i_starts = ik.starts;
+        intuition_want(true);
+        wb.wanted = true;
+        workbench_keep();
+        p = CreateProcess("window", WINDOW_DESKTOP | (wt.input ? DESKTOP_MOUSE : 0) | (hwdb.drag ? WINDOW_DRAG : 0),
+                          SIG_DEAD, 0);
+        if (p < 0) {
+            desktop_fail("window couldn't be started");
+            return true;
+        }
+        dt.client = (Handle)p;
+        dt.on = true;
+        dt_next(D_RUN);
+        return false;
+    case D_RUN:
+        if (QueryProcess(dt.client, &pi) != 0 || pi.pi_State < PROCS_EXITED) {
+            if (dt_late(150000 + (hwdb.drag ? 300000 : 0)))
+                desktop_fail("window's desktop round didn't finish");
+            return dt.step == D_DONE;
+        }
+        code = pi.pi_State == PROCS_EXITED ? pi.pi_ExitCode : -1;
+        CloseHandle(dt.client);
+        dt.client = 0;
+        dt.on = false;
+        if (code != 0) {
+            desktop_fail("window's checks of the desktop failed");
+            return true;
+        }
+        /* Started, then again after its own death and intuition's. */
+        if (wb.starts - dt.wb_starts < 3 || ik.starts - dt.i_starts < 2) {
+            desktop_fail("the Workbench or intuition wasn't started again after its death");
+            return true;
+        }
+        wb.wanted = false;
+        if (wb.proc)
+            KillProcess(wb.proc);
+        intuition_want(false);
+        dt_next(D_STOP);
+        return false;
+    case D_STOP:
+        shells_keep();
+        if (ik.proc || wb.proc || prefs || intuition_shells()) {
+            if (dt_late(3000))
+                desktop_fail("the desktop's programs wouldn't end");
+            return dt.step == D_DONE;
+        }
+        dt_next(D_FREED);
+        return false;
+    case D_FREED:
+        if (!display_ask() || display_buffers() != dt.before) {
+            if (dt_late(3000))
+                desktop_fail("display didn't free a dead intuition's buffers");
+            return dt.step == D_DONE;
+        }
+        {
+            struct hw_line l = { 0 };
+
+            hw_put(&l, "V8.8 desktop ok: ");
+            hw_put_dec(&l, dt.kills);
+            hw_put(&l, " kills under the desktop: the Workbench back with its icons; Prefs and a Shell's "
+                       "conwin gone with their windows, and let go of; intuition back with the Workbench "
+                       "on it, and with input its saved settings; ");
+            hw_put(&l, display_native() || !wt.input ? "the screen not read back here"
+                                                      : "the screen read back throughout, never dark");
+            say(l.text);
+        }
+        dt.step = D_DONE;
         return true;
     default:
         return true;

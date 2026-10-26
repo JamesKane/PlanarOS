@@ -11,8 +11,10 @@
  * through the process data: this program opens it only to shape a run
  * for TextRun. Then the scene, by the table and by the scalar entries:
  * its CRC must be the host's. Then the costs: a glyph drawn into the
- * cache, a line of 80 from it, and a filled path. Exits 0, or the step
- * that failed.
+ * cache, a line of 80 from it, and a filled path; and (V8 step 8) a
+ * 1920 by 1080 screen of the Shell's text, System Mono 13 px as conwin
+ * draws it, each line cleared and drawn. Exits 0, or the step that
+ * failed.
  */
 #include <planar/font.h>
 #include <planar/gfx.h>
@@ -63,6 +65,45 @@ static int scene(const struct GfxIFace *g, uint32_t *crc)
     return 0;
 }
 
+/* A 1920 by 1080 screen of the Shell's text, every cell a character,
+ * as conwin draws a line: its background, then its text (JAM1). The
+ * glyphs are cached first, as a Shell's soon are. */
+static int screenful(void)
+{
+    static char line[1920];
+    struct BitMap *bm;
+    struct RastPort rp;
+    struct TextFont *tf;
+    uint32_t cols, rows;
+    uint64_t t0, t1;
+
+    CHECK(50, (bm = IGfx->AllocBitMap(1920, 1080, PIXFMT_XRGB8888, 0, nullptr)));
+    IGfx->InitRastPort(&rp, bm);
+    rp.rp_DrawMode = JAM1;
+    CHECK(51, (tf = IGfx->OpenTextFont(&(struct TextAttr){ "System Mono", 13, 0, 0 })) && tf->tf_XSize);
+    IGfx->SetFont(&rp, tf);
+    cols = 1920 / tf->tf_XSize;
+    rows = 1080 / tf->tf_YSize;
+    for (uint32_t i = 0; i < cols; i++)
+        line[i] = (char)('!' + i % 94);
+    IGfx->Text(&rp, 0, 0, line, 94);
+    t0 = CurrentTime();
+    for (uint32_t r = 0; r < rows; r++) {
+        int32_t y = (int32_t)(r * tf->tf_YSize);
+
+        rp.rp_FgPen = 0xff101820;
+        IGfx->RectFill(&rp, 0, y, 1919, y + tf->tf_YSize - 1);
+        rp.rp_FgPen = 0xffd8dee9;
+        IGfx->Text(&rp, 0, y, line + r % 7, cols - 7);
+    }
+    t1 = CurrentTime();
+    KPrintF("typetest: a 1920x1080 screen of the Shell's text, %lu lines of %lu in System Mono 13 px: %lu us",
+            (uint64_t)rows, (uint64_t)(cols - 7), (t1 - t0) / 1000);
+    IGfx->CloseTextFont(tf);
+    IGfx->FreeBitMap(bm);
+    return 0;
+}
+
 /* Microseconds: a glyph into the cache, and a line of 80 from it; a
  * 200 px rounded rectangle filled, and its mask's blend. */
 static int costs(void)
@@ -100,7 +141,7 @@ static int costs(void)
             "%lu us; a 200 px rounded rectangle filled %lu us", glyph, cached, fill);
     IGfx->CloseTextFont(tf);
     IGfx->FreeBitMap(bm);
-    return 0;
+    return screenful();
 }
 
 int main(void)

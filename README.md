@@ -125,7 +125,7 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 | V5. GPU queue leases on both boards, native scanout, `power`, USB input, futexes | 2026-10-22 |
 | V6. Foundations: §17's libraries, interface tables and the shared library region, `init` and supervision, deadlines | 2026-10-22 |
 | V7. Workbench I: intuition, windows from client-owned bitmaps, gfx.library, input and focus, servers dying under it | Built on QEMU and both boards; the CIX's 10-run kill test waits |
-| V8. Workbench II: `font.library`, type and paths, the screen bar and menus, the Shell in a window, `ui.library`, the Workbench and Prefs | In progress: steps 1 to 7 built on QEMU |
+| V8. Workbench II: `font.library`, type and paths, the screen bar and menus, the Shell in a window, `ui.library`, the Workbench and Prefs | In progress: steps 1 to 7 built on QEMU, and step 8's desktop kill test and costs there |
 
 Decided so far (the full register is [questions.md](docs/questions.md)):
 - Copy what we can from omega (VQ1).
@@ -138,4 +138,4 @@ Decided so far (the full register is [questions.md](docs/questions.md)):
 - FAT32 plus a modern native filesystem (VQ14).
 - Board order RV2 → CIX → RK3588 → Q8B (VQ19).
 
-Next: V8's step 8 on the boards ([plan](docs/v8-plan.md#8-supervision-and-the-boards)): the kill test with the desktop's programs killed under it, and the costs of text and of a frame with text, 10 runs in a row on each board. Before V8's exit, its font fuzzer must also run an hour with no finding. Then V7's remaining board checks close it.
+Next: V8's step 8 on the boards ([plan](docs/v8-plan.md#8-supervision-and-the-boards)): the kill test, which now kills the desktop's programs under it, 10 runs in a row on each board; the costs of text and of a drag over the desktop measured there; and the desktop tried by hand. Before V8's exit, its font fuzzer must also run an hour with no finding. Then V7's remaining board checks close it.

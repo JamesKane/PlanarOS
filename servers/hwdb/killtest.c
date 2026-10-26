@@ -56,7 +56,8 @@ constexpr int64_t SIG_CLIENT = 20;      /* a client's connection */
 constexpr int64_t SIG_SLEEP = 21;       /* a client's alarm */
 
 enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_STOPS, T_REPORT, T_GIVEUP,
-                       T_RETRY, T_DRAIN, T_POWER, T_DISPLAY, T_WINDOW, T_INPUT, T_GPU, T_LOAD, T_STOP, T_END };
+                       T_RETRY, T_DRAIN, T_POWER, T_DISPLAY, T_WINDOW, T_DESKTOP,
+                       T_INPUT, T_GPU, T_LOAD, T_STOP, T_END };
 
 enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
 
@@ -913,6 +914,10 @@ static void step(void)
         break;
     case T_WINDOW:
         if (window_test())
+            phase = T_DESKTOP;
+        break;
+    case T_DESKTOP:
+        if (desktop_test())
             phase = T_INPUT;
         break;
     case T_INPUT:
@@ -952,6 +957,7 @@ uint64_t test_deadline(void)
     case T_POWER:
     case T_DISPLAY:
     case T_WINDOW:
+    case T_DESKTOP:
     case T_INPUT:
     case T_GPU:
     case T_LOAD:
