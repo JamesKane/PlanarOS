@@ -59,6 +59,12 @@ enum : uint32_t {
  * display composes the screen itself, buffers are cached anyway. */
 constexpr uint32_t DISPLAYA_CACHED = 1u << 0;
 
+/* DisplayMsg.dm_Flags from DISPLAY_INFO. CACHED: a client that writes
+ * most of its buffer's pixels each frame (intuition's composing) does so
+ * faster into cached buffers, cleaned, than into NC ones (the RV2's: V7
+ * decision 3). Advice only: either kind works everywhere. */
+constexpr uint32_t DISPLAYI_CACHED = 1u << 0;
+
 /* Formats: 32 bits a pixel, blue in the low byte. */
 enum : uint32_t {
     DISPLAY_XRGB8888 = 1,       /* opaque */
@@ -97,7 +103,7 @@ struct DisplayMsg {
     uint32_t dm_Count;                  /* planes: of the output, or in dm_Set */
     uint32_t dm_Buffers;                /* DISPLAY_INFO: buffers allocated, every client's */
     uint32_t dm_Crc;                    /* DISPLAY_READ */
-    uint32_t dm_Flags;                  /* DISPLAY_ALLOC: DISPLAYA_* */
+    uint32_t dm_Flags;                  /* DISPLAY_ALLOC: DISPLAYA_* in; DISPLAY_INFO: DISPLAYI_* out */
     union {
         struct DisplayPlaneInfo dm_Plane[DISPLAY_PLANES];   /* DISPLAY_INFO */
         struct DisplayPlane dm_Set[DISPLAY_PLANES];         /* DISPLAY_COMMIT */

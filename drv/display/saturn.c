@@ -134,5 +134,5 @@ static bool vblank(struct dp_out *o, bool *latched)
 }
 
 const struct dp_backend dp_saturn = {
-    .name = "saturn", .take = take, .program = program, .vblank = vblank, .dma = true,
+    .name = "saturn", .take = take, .program = program, .vblank = vblank, .dma = true, .cached = true,
 };

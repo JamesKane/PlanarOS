@@ -54,6 +54,7 @@ struct dp_backend {
      * where the CPU doesn't compose the screen. */
     uint32_t (*pixel)(const struct dp_out *o, uint32_t x, uint32_t y);
     bool dma;                       /* its buffers are DMA Areas (the controller reads them) */
+    bool cached;                    /* DISPLAYI_CACHED: composing into cached buffers is faster */
 };
 
 extern const struct dp_backend dp_komeda, dp_saturn, dp_fb;

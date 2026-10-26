@@ -173,7 +173,7 @@ On the boards (V7 step 6), at 60 Hz on 1920×1080, a frame presented just after 
 | A 640×480 window dragged (0.32 Mpx a frame) | 2.38 ms | 1.05 ms | 0.085–0.098 ms | 0.19–0.21 ms |
 | The pointer alone: nothing composed, its commit | 14 µs | | 3–5 µs | |
 
-intuition composes into NC on both today; which memory each board should use is the plan's decision 3, still open.
+So intuition composes into whichever display says is faster (`DISPLAYI_CACHED`, [devices ch. 10](../devices/10-display.md)): cached on the RV2, cleaning each frame's damage before its commit, and NC on the CIX. `INTUITION_COSTS` measures the other kind against it.
 
 ## Rules
 

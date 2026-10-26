@@ -114,6 +114,7 @@ static int64_t info(struct dp_out *o, struct DisplayMsg *m)
     m->dm_Sync = (uint64_t)o->sync;
     m->dm_Count = o->nplanes;
     m->dm_Buffers = dp_live_buffers(o);
+    m->dm_Flags = o->be->cached ? DISPLAYI_CACHED : 0;
     for (unsigned p = 0; p < DISPLAY_PLANES; p++)
         m->dm_Plane[p] = p < o->nplanes ? o->plane[p] : (struct DisplayPlaneInfo){ 0 };
     return 0;

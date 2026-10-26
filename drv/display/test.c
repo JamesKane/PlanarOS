@@ -215,6 +215,7 @@ static void test_komeda(void)
     CHECK(o.width == 640 && o.height == 480 && o.nplanes == 3);
     CHECK(o.be_words[3 + 1] == L1 && o.be_words[3 + 2] == L3);    /* the layers the GOP left off */
     CHECK(o.plane[2].di_Flags & DISPLAYP_CURSOR);
+    CHECK(ask(&o, 0, DISPLAY_INFO) == 0 && msg.dm_Flags == 0);     /* decision 3: NC is faster here */
     CHECK(r32(cix, DOU + K_IRQ_MASK) & K_DOU_PL0);
     CHECK((r32(cix, L2 + K_CONTROL) & K_L_EN) && r32(cix, CU + K_CU_INPUT_ID(1)) == 0x1020);
 
@@ -337,6 +338,7 @@ static void test_saturn(void)
     CHECK(dp_start(&o, &dp_saturn, false));
     latching = false;
     CHECK(o.width == 1920 && o.height == 1080 && o.nplanes == 3);
+    CHECK(ask(&o, 0, DISPLAY_INFO) == 0 && msg.dm_Flags == DISPLAYI_CACHED);   /* cached, here */
     /* U-Boot's layer moved to the bottom, all of it; the line buffer split. */
     CHECK(r32(k1, S_SLOT(7) + S_SLOT_EN) == (1 | 3 << 1) && r32(k1, S_SLOT(0) + S_SLOT_EN) == 0);
     CHECK(r32(k1, S_SLOT(7) + S_SLOT_TOP_RIGHT) == 1919u << 16 && r32(k1, S_SLOT(7) + S_SLOT_BOTTOM) == 1079);

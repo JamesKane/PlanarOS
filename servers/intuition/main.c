@@ -124,6 +124,7 @@ static struct {
     unsigned back;
     int32_t px, py;
     bool flipping, pointer_moved;
+    bool cached;                    /* the screen buffers: DISPLAYI_CACHED, cleaned each frame */
     uint64_t flip_seq;
     uint64_t period;                /* the vblanks', from display's refresh */
     uint64_t frame_due;             /* a frame nobody waits for, to be started then; 0 none */
@@ -328,8 +329,10 @@ static int64_t screen_up(uint64_t deadline)
         it.dm->dm_Plane[1].di_MaxWidth < it.width || it.dm->dm_Plane[1].di_MaxHeight < it.height ||
         !(it.dm->dm_Plane[2].di_Formats & 1u << DISPLAY_ARGB8888))
         return ERR_NOSYS;
+    it.cached = it.dm->dm_Flags & DISPLAYI_CACHED;     /* decision 3: whichever display says is faster */
     for (unsigned b = 0; b < 2; b++)
-        if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, 0, &it.buf[b], &it.sbm[b])) != 0)
+        if ((e = alloc(it.width, it.height, DISPLAY_XRGB8888, it.cached ? DISPLAYA_CACHED : 0, &it.buf[b],
+                       &it.sbm[b])) != 0)
             return e;
     uint32_t ps = pointer_scale(it.width, it.height);
 
@@ -438,6 +441,24 @@ static void taken_away(void)
     }
 }
 
+void drv_dma_clean(const void *p, uint64_t n);
+
+/* What a frame composed into 'to' (its damage 'd', the last frame's and
+ * its own, as ic_compose repainted them), cleaned to memory: a cached
+ * screen buffer's, before its commit. */
+static void clean(const struct ic_damage d[2], const struct BitMap *to)
+{
+    for (unsigned k = 0; k < 2; k++)
+        for (unsigned i = 0; i < d[k].n; i++) {
+            struct GfxRect r = d[k].r[i];
+
+            for (int32_t y = r.MinY; y <= r.MaxY; y++)
+                drv_dma_clean((uint8_t *)to->bm_BaseAddr + (uint64_t)y * to->bm_BytesPerRow +
+                                  (uint64_t)r.MinX * 4,
+                              (uint64_t)(r.MaxX - r.MinX + 1) * 4);
+        }
+}
+
 /* What composing the next frame should take: its pixels at the worst
  * rate of the last big frames. None yet (the first frame, the whole
  * screen): a period, so it's composed at once. */
@@ -494,9 +515,12 @@ static void frame(void)
     memset(it.dm, 0, sizeof *it.dm);
     if (compose) {
         uint64_t px = it.screen.painted;
+        struct ic_damage d[2] = { it.screen.last, it.screen.now };
 
         t = CurrentTime();
         ic_compose(&it.screen, &it.sbm[it.back]);
+        if (it.cached)
+            clean(d, &it.sbm[it.back]);
         t = CurrentTime() - t;
         px = it.screen.painted - px;
         if (px >= RATE_PIXELS)
@@ -1212,13 +1236,11 @@ static void input_events(void)
 constexpr uint64_t INTUITION_COSTS = 1;
 constexpr unsigned COST_FRAMES = 60;
 
-void drv_dma_clean(const void *p, uint64_t n);
-
 /* COST_FRAMES frames of 's' composed into 'b[0]' and 'b[1]' in turn, 'w'
  * damaged whole or dragged 8 right and 4 down each: the ns a frame, and
- * the pixels. 'clean': each frame's damage, its bounds, cleaned after,
- * as a cached screen buffer needs before its commit. */
-static uint64_t cost(struct ic_screen *s, struct BitMap *b, struct ic_window *w, bool drag, bool clean,
+ * the pixels. 'cached': each frame's damage cleaned after, as frame()
+ * does for a cached screen buffer. */
+static uint64_t cost(struct ic_screen *s, struct BitMap *b, struct ic_window *w, bool drag, bool cached,
                      uint64_t *px)
 {
     uint64_t t, p0;
@@ -1229,42 +1251,34 @@ static uint64_t cost(struct ic_screen *s, struct BitMap *b, struct ic_window *w,
     t = CurrentTime();
     p0 = s->painted;
     for (unsigned f = 0; f < COST_FRAMES; f++) {
-        struct GfxRect r = { INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN };
-        struct ic_damage d[2] = { s->last, s->now };
         struct BitMap *to = &b[f & 1];
+        struct ic_damage d[2];
 
         if (drag)
             ic_move(s, w, w->x + 8, w->y + 4);
         else
             ic_damage_window(s, w, (struct GfxRect){ 0, 0, (int32_t)w->w - 1, (int32_t)w->h - 1 });
+        d[0] = s->last;
         d[1] = s->now;
         ic_compose(s, to);
-        if (!clean)
-            continue;
-        for (unsigned k = 0; k < 2; k++)
-            for (unsigned i = 0; i < d[k].n; i++) {
-                r.MinX = d[k].r[i].MinX < r.MinX ? d[k].r[i].MinX : r.MinX;
-                r.MinY = d[k].r[i].MinY < r.MinY ? d[k].r[i].MinY : r.MinY;
-                r.MaxX = d[k].r[i].MaxX > r.MaxX ? d[k].r[i].MaxX : r.MaxX;
-                r.MaxY = d[k].r[i].MaxY > r.MaxY ? d[k].r[i].MaxY : r.MaxY;
-            }
-        for (int32_t y = r.MinY; y <= r.MaxY; y++)
-            drv_dma_clean((uint8_t *)to->bm_BaseAddr + (uint64_t)y * to->bm_BytesPerRow + (uint64_t)r.MinX * 4,
-                          (uint64_t)(r.MaxX - r.MinX + 1) * 4);
+        if (cached)
+            clean(d, to);
     }
     *px = (s->painted - p0) / COST_FRAMES;
     return (CurrentTime() - t) / COST_FRAMES;
 }
 
-/* Composing's costs on display's NC screen buffers and on two cached
- * ones (decision 3): the whole screen, and a 640x480 window dragged,
+/* Composing's costs into NC screen buffers and into cached ones
+ * (decision 3), intuition's own and two of the other kind: the whole
+ * screen, and a 640x480 window dragged,
  * each from a bitmap of the screen's size. Then the pointer alone,
  * which composes nothing: its commit, call to answer. Said, not checked. */
 static void costs(void)
 {
     static struct ic_screen s;
     struct ic_window full = { 0 }, small = { 0 };
-    struct BitMap cached[2] = { 0 };
+    struct BitMap other[2] = { 0 };
+    struct BitMap *nc = it.cached ? other : it.sbm, *cached = it.cached ? it.sbm : other;
     struct BitMap *src;
     struct RastPort rp;
     uint32_t id[2] = { 0 };
@@ -1281,7 +1295,8 @@ static void costs(void)
         it.gfx->RectFill(&rp, 0, (int32_t)y, (int32_t)it.width - 1, (int32_t)y + 7);
     }
     for (unsigned b = 0; b < 2; b++)
-        ok &= alloc(it.width, it.height, DISPLAY_XRGB8888, DISPLAYA_CACHED, &id[b], &cached[b]) == 0;
+        ok &= alloc(it.width, it.height, DISPLAY_XRGB8888, it.cached ? 0 : DISPLAYA_CACHED, &id[b],
+                    &other[b]) == 0;
     full = (struct ic_window){ .x = 0, .y = 0, .w = it.width, .h = it.height, .nparts = 1,
                                .part[0] = { { 0, 0, (int32_t)it.width - 1, (int32_t)it.height - 1 }, src, 0, 0 } };
     small = (struct ic_window){ .w = 640, .h = 480, .nparts = 1, .part[0] = { { 0, 0, 639, 479 }, src, 0, 0 } };
@@ -1291,14 +1306,14 @@ static void costs(void)
         ic_init(&s, it.gfx, it.width, it.height);
         small.x = small.y = 0;
         ic_add(&s, w);
-        c[k] = cost(&s, k & 1 ? cached : it.sbm, w, k & 2, k & 1, &px[k]);
+        c[k] = cost(&s, k & 1 ? cached : nc, w, k & 2, k & 1, &px[k]);
     }
     for (unsigned b = 0; b < 2; b++)
         if (id[b]) {
             memset(it.dm, 0, sizeof *it.dm);
             it.dm->dm_Buffer = id[b];
             display(DISPLAY_FREE);
-            ReleaseArea(cached[b].bm_BaseAddr);
+            ReleaseArea(other[b].bm_BaseAddr);
         }
     it.gfx->FreeBitMap(src);
     for (unsigned i = 0; ok && i < 10; i++) {
@@ -1317,7 +1332,7 @@ static void costs(void)
             WaitAddr(&it.ds->ds_Disp, it.ds->ds_Disp, CurrentTime() + 100 * MS);
     }
     if (!ok) {
-        say("intuition: costs: display wouldn't give cached buffers, or a commit");
+        say("intuition: costs: display wouldn't give the other kind of buffer, or a commit");
         return;
     }
     KPrintF("intuition: costs, %lu frames each: the whole screen %lu us into NC, %lu us into cached and "
