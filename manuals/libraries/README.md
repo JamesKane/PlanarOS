@@ -20,10 +20,11 @@
 | 12 | [gfx.library](12-gfx.md): bitmaps, rastports, `RectFill`, `BltBitMap`, bevels; paths, gradients and type, blended in linear light; on the CPU | Written, V7; paths and type, V8 |
 | 13 | [intuition](13-intuition.md): windows on the screen, from the program's own bitmaps, presented and composed; their chrome, focus and events; the screen bar, menus, resizing and requesters; programs and servers dying | Written, V7 steps 3 to 5; V8 step 4 |
 | 14 | [font.library](14-font.md): TrueType fonts read in place, the system's two, text shaped and broken into lines | Written, V8 |
+| 15 | [ui.library](15-ui.md): gadgets in a program's window, laid out, drawn and driven by its events: toggles, sliders, a selector, buttons, a list, a text field, split panes | Written, V8 step 6 |
 
 The RKM's Exec chapter on interrupts has no counterpart here: a driver's interrupts are its lease's lines (`BindIrq`, `AckWaitIrq`), in [Devices ch. 1](../devices/01-drivers.md).
 
-Where the RKM had chapters on graphics, chapter 12 is gfx.library's, chapter 13 is intuition's, and chapter 14 font.library's, where the RKM had diskfont.library's. Layers have no counterpart: intuition composes windows, so none draws over another's.
+Where the RKM had chapters on graphics, chapter 12 is gfx.library's, chapter 13 is intuition's, chapter 14 font.library's, where the RKM had diskfont.library's, and chapter 15 ui.library's, where it had GadTools'. Layers have no counterpart: intuition composes windows, so none draws over another's.
 
 ## Where Planar's Exec stands
 

@@ -59,6 +59,11 @@
  *    (servers/conwin/test.c). EndShell typed: the window goes. Then a
  *    conwin of this program's, killed once its prompt is up: its window
  *    gone by the next latch but one, and its console with it.
+ * 6c. V8 step 6: ui.library's gadgets, every one, in a window of this
+ *    program's (uiwin.h's), read back as the host draws it; then clicked,
+ *    dragged and typed through as uiwin.h's script says, each event into
+ *    HandleUIEvent and its damage presented, each step's change as the
+ *    host's (lib/ui/test.c), and read back again.
  * 7. kill-window: a client (this program again, KILLED) with two windows
  *    over one of this one's, killed. They're gone from the screen by the
  *    next latch but one, and intuition lets go of their bitmaps, which
@@ -86,12 +91,14 @@
 #include <planar/devices/display.h>
 #include <planar/intuition.h>
 #include <planar/syscalls.h>
+#include <planar/ui.h>
 
 #include "../servers/conwin/conwin.h"
 #include "../servers/intuition/pointer.h"
 #include "log.h"
 #include "shellwin.h"
 #include "typescene.h"
+#include "uiwin.h"
 
 void *memset(void *dst, int c, size_t n);
 
@@ -1419,24 +1426,31 @@ static bool windows_are(uint32_t n, uint64_t ms)
     return true;
 }
 
-/* con.1's window's inside as the host draws it ('crc'), within 'ms'; or
- * the screen can't be read here. */
-static bool inside_is(bool readable, uint32_t crc, uint64_t ms, const char *what)
+/* A window's inside, w by h at (x, y), as the host draws it ('crc'),
+ * within 'ms'; or the screen can't be read here. */
+static bool drawn_as(bool readable, int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t crc, uint64_t ms,
+                     const char *what)
 {
     uint64_t until = CurrentTime() + ms * MS;
-    int32_t x = CONWIN_LEFT + (int32_t)INTUI_BORDER, y = CONWIN_TOP + (int32_t)INTUI_TITLEBAR;
     uint32_t got = 0;
 
     if (!readable)
         return true;
     do
-        if (read_screen(x, y, SW_WIDTH, SW_HEIGHT, &got) == 0 && got == crc)
+        if (read_screen(x, y, w, h, &got) == 0 && got == crc)
             return true;
         else
             nap(20);
     while (CurrentTime() < until);
-    KPrintF("window: the Shell's window %s: %08lx, not the host's %08lx", what, (uint64_t)got, (uint64_t)crc);
+    KPrintF("window: %s: %08lx, not the host's %08lx", what, (uint64_t)got, (uint64_t)crc);
     return false;
+}
+
+/* con.1's window's inside. */
+static bool inside_is(bool readable, uint32_t crc, uint64_t ms, const char *what)
+{
+    return drawn_as(readable, CONWIN_LEFT + (int32_t)INTUI_BORDER, CONWIN_TOP + (int32_t)INTUI_TITLEBAR, SW_WIDTH,
+                    SW_HEIGHT, crc, ms, what);
 }
 
 static int shell_half(bool readable)
@@ -1454,12 +1468,12 @@ static int shell_half(bool readable)
     click();
     CHECK(windows_are(1, 5000));
     CHECK(point_at(10, (int32_t)in.in_Height - 40));   /* out of the way of the reading */
-    CHECK(inside_is(readable, sw_crc_ready, 5000, "with its prompt"));
+    CHECK(inside_is(readable, sw_crc_ready, 5000, "the Shell's window with its prompt"));
 
     /* A command typed: a script, by a second Shell, on the same console. */
     KPrintF("window: send text %s", sw_typed);
     KPrintF("window: send keys ret");
-    CHECK(inside_is(readable, sw_crc_done, 10000, "after the script"));
+    CHECK(inside_is(readable, sw_crc_done, 10000, "the Shell's window after the script"));
     KPrintF("window: send screendump shell");
     nap(300);
     KPrintF("window: send text EndShell");
@@ -1471,13 +1485,119 @@ static int shell_half(bool readable)
 
     /* A conwin killed under its Shell: the window gone, and the console. */
     CHECK((p = CreateProcess("conwin", 0, SIG_CONWIN, 0)) >= 0);
-    CHECK(windows_are(1, 5000) && inside_is(readable, sw_crc_ready, 5000, "with its prompt, again"));
+    CHECK(windows_are(1, 5000) &&
+          inside_is(readable, sw_crc_ready, 5000, "the Shell's window with its prompt, again"));
     CHECK(KillProcess((Handle)p) == 0);
     CHECK(windows_are(0, 100));
     CHECK(screen_is(readable, CONWIN_LEFT, CONWIN_TOP, outer_w, outer_h));
     CHECK(ConnectPort(&con, "con.1", SIG_CONWIN, 2, 256) == ERR_NOTFOUND);
     CloseHandle((Handle)p);
     KPrintF("window: Shell in a window: conwin killed under it, the window and con.1 gone at once");
+    return 0;
+}
+
+/* --- 6c: ui.library's gadgets (V8 step 6). --- */
+
+static struct UIIFace *IUI;
+
+/* The window's events into its UI, each change drawn and presented, until
+ * the step's own are in: a click's or a drag's button let go of, the
+ * text's characters, a key down. The last change in *last. */
+static bool pump(struct Window *w, struct UI *ui, const struct uw_step *s, struct UIChange *last)
+{
+    struct IntuiEvent ev;
+    struct UIChange c;
+    uint64_t chars = 0, want = 0;
+
+    while (s->action == UW_TEXT && s->text[want])
+        want++;
+    *last = (struct UIChange){};
+    while (next_event(&ev, true)) {
+        bool down = !(ev.iev_Code & RAWKEY_UP);
+
+        if (ev.iev_Window != w->w_Id)
+            continue;
+        if (IIntuition->WaitSafe(w, CurrentTime() + 1000 * MS) != 0)
+            return false;
+        if (IUI->HandleUIEvent(ui, &ev, &c))
+            *last = c;
+        if (ui->ui_NumDamage && IIntuition->PresentWindow(w, ui->ui_Damage, ui->ui_NumDamage) != 0)
+            return false;
+        ui->ui_NumDamage = 0;
+        if ((s->action == UW_CLICK || s->action == UW_DRAG) && ev.iev_Class == IDCMP_MOUSEBUTTONS &&
+            ev.iev_Code == SELECTUP)
+            return true;
+        if (s->action == UW_TEXT && ev.iev_Class == IDCMP_VANILLAKEY && ++chars == want)
+            return true;
+        if (s->action == UW_KEY && down && (ev.iev_Class == IDCMP_VANILLAKEY || ev.iev_Class == IDCMP_RAWKEY))
+            return true;
+    }
+    return false;
+}
+
+static int ui_half(bool readable)
+{
+    static struct UI ui;
+    static char field[UW_FIELD];
+    struct Library *lib;
+    struct BitMap *bm;
+    struct Window w;
+    struct UIChange last;
+    struct IntuiEvent ev;
+    int32_t ox, oy, x, y;
+
+    CHECK((lib = IExec->OpenLibrary("ui.library", 8)) && lib->lib_Version == 8);
+    CHECK((IUI = (struct UIIFace *)IExec->GetInterface(lib, "main", 1)));
+    CHECK(IUI->Data.if_Size == sizeof(struct UIIFace));
+    CHECK(IUI->InitUI(&ui, IGfx) == 0 && uw_build(IUI, &ui, field));
+    CHECK((bm = IGfx->AllocBitMap(UW_WIDTH, UW_HEIGHT, PIXFMT_XRGB8888, 0, nullptr)));
+    CHECK(OpenWindowTags(IIntuition, &in, &w, { WA_Left, UW_LEFT }, { WA_Top, UW_TOP },
+                         { WA_Title, (uint64_t)"ui.library" },
+                         { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE },
+                         { WA_IDCMP, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_VANILLAKEY | IDCMP_RAWKEY },
+                         { WA_BitMap, (uint64_t)bm }) == 0);
+    ui.ui_RPort = &w.w_RPort;
+    IUI->LayoutUI(&ui, w.w_Width, w.w_Height);
+    IUI->DrawUI(&ui);
+    ui.ui_NumDamage = 0;
+    CHECK(IIntuition->PresentWindow(&w, nullptr, 0) == 0);
+    ox = UW_LEFT + w.w_BorderLeft;
+    oy = UW_TOP + w.w_BorderTop;
+    CHECK(point_at(10, (int32_t)in.in_Height - 40));
+    CHECK(drawn_as(readable, ox, oy, UW_WIDTH, UW_HEIGHT, uw_crc_ready, 3000, "ui.library's window, first drawn"));
+
+    /* Clicked, dragged and typed through, as uiwin.h says, each change as it says. */
+    for (unsigned i = 0; i < sizeof uw_script / sizeof uw_script[0]; i++) {
+        const struct uw_step *s = &uw_script[i];
+
+        if (s->action == UW_CLICK || s->action == UW_DRAG) {
+            uw_point(&ui, s, &x, &y);
+            CHECK(point_at(ox + x, oy + y));
+        }
+        if (s->action == UW_CLICK)
+            click();
+        else if (s->action == UW_DRAG)
+            KPrintF("window: send drag %ld 0 left", (int64_t)s->drag);
+        else
+            KPrintF("window: send %s %s", s->action == UW_TEXT ? "text" : "keys", s->text);
+        CHECK(pump(&w, &ui, s, &last));
+        if (last.uc_Gadget != s->want || last.uc_Value != s->value || last.uc_Flags != s->flags)
+            KPrintF("window: ui.library's step %lu: gadget %lu changed to %ld (%lx), not %lu to %ld (%lx)",
+                    (uint64_t)i + 1, (uint64_t)last.uc_Gadget, (int64_t)last.uc_Value, (uint64_t)last.uc_Flags,
+                    (uint64_t)s->want, (int64_t)s->value, (uint64_t)s->flags);
+        CHECK(last.uc_Gadget == s->want && last.uc_Value == s->value && last.uc_Flags == s->flags);
+    }
+    CHECK(point_at(10, (int32_t)in.in_Height - 40));
+    while (next_event_within(&ev, true, 300))            /* the keys let go of, the pointer's moves */
+        ;
+    CHECK(drawn_as(readable, ox, oy, UW_WIDTH, UW_HEIGHT, uw_crc_done, 3000, "ui.library's window, clicked through"));
+    KPrintF("window: send screendump ui");
+    nap(300);
+    CHECK(IIntuition->CloseWindow(&w) == 0);
+    IUI->FreeUI(&ui);
+    IGfx->FreeBitMap(bm);
+    KPrintF("window: ui.library: a window of every gadget, clicked, dragged and typed through, %lu steps, each "
+            "change as the host's, read back as the host draws it", (uint64_t)(sizeof uw_script / sizeof uw_script[0]));
     return 0;
 }
 
@@ -1848,7 +1968,7 @@ int main(uint64_t arg)
     ends();
     if (input && input != NO_INPUT)
         return input;
-    if (!input && ((r = desktop_half(readable)) || (r = shell_half(readable))))
+    if (!input && ((r = desktop_half(readable)) || (r = shell_half(readable)) || (r = ui_half(readable))))
         return r;
     if ((r = kill_window(readable)))
         return r;

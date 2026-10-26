@@ -203,6 +203,8 @@
         kprintf("V8.4 done\n");
         kprintf("V8.5 shell window skipped: no tasks\n");
         kprintf("V8.5 done\n");
+        kprintf("V8.6 ui skipped: no tasks\n");
+        kprintf("V8.6 done\n");
         arch_halt();
     }
     sched_idle();

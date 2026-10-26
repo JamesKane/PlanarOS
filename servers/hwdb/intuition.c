@@ -329,10 +329,13 @@ static void lines(void)
         say("V8.5 shell window ok: the system menu's Shell, a console window in System Mono; a "
             "script run by a Shell in it, read back as the host draws it; EndShell; conwin killed "
             "under its Shell, the window and its console gone");
+        say("V8.6 ui ok: ui.library's gadgets in a window, every one, read back as the host draws "
+            "them; clicked, dragged and typed through, each change as the host's, and read back again");
     } else {
         say("V7.4 input: not exercised: nobody moved the mouse, or intuition had no input");
         say("V8.4 screen bar, menus and resize: not exercised: nobody moved the mouse");
         say("V8.5 shell window: not exercised: nobody moved the mouse");
+        say("V8.6 ui: not exercised: nobody moved the mouse");
     }
     say("V7.5 supervision ok: kill-window: a killed client's two windows gone from the screen, its "
         "Areas unshared, intuition's handles and pages back where they were");
@@ -361,6 +364,7 @@ bool window_test(void)
             say("V7.5 supervision: not exercised: no screen here");
             say("V8.4 screen bar, menus and resize: not exercised: no screen here");
             say("V8.5 shell window: not exercised: no screen here");
+            say("V8.6 ui: not exercised: no screen here");
             return true;
         }
         /* display's own count first: what intuition takes must come back. */

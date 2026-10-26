@@ -204,7 +204,7 @@ USER_BINS := $(patsubst %,$(BUILD)/user/%.bin,$(USER_PROGS))
 # ISA's base, so a RISC-V hart without V runs it: the vector unit's
 # memory functions are string.S's, renamed, which the kernel picks at
 # boot where the hart has V.
-USER_LIBS := exec utility gfx intuition font
+USER_LIBS := exec utility gfx intuition font ui
 LIB_CFLAGS := $(subst rv64gcv,rv64gc,$(USER_CFLAGS))
 LIB_LDFLAGS := $(subst /user.ld,/lib.ld,$(USER_LDFLAGS)) -Wl,-z,norelro
 LIB_exec_SRCS := libs/exec/base.c lib/exec/pool.c lib/exec/fmt.c lib/exec/task.c \
@@ -227,6 +227,9 @@ LIB_intuition_SRCS := libs/intuition/base.c lib/intuition/intuition.c lib/exec/m
 LIB_font_SRCS := libs/font/base.c $(filter-out %/test.c,$(wildcard lib/font/*.c)) lib/utility/span.c \
 	lib/rt/string.c
 $(BUILD)/libs/lib/font/fonts.o: $(wildcard lib/font/fonts/*.ttf)
+# ui.library's: lib/ui, with utility's tag lists linked in. It draws
+# through the caller's gfx.library.
+LIB_ui_SRCS := libs/ui/base.c lib/ui/ui.c lib/utility/tags.c lib/rt/string.c
 LIB_VEC := $(BUILD)/libs/vec-string.o
 LIB_HEAD := $(BUILD)/libs/lib/libhead.o
 LIB_BINS := $(patsubst %,$(BUILD)/libs/%.library.bin,$(USER_LIBS))

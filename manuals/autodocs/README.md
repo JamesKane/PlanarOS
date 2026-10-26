@@ -14,6 +14,7 @@
 | [gfx.md](gfx.md) | gfx.library: bitmaps, rastports and drawing; paths, gradients and type (`planar/gfx.h`, `lib/gfx`) |
 | [intuition.md](intuition.md) | intuition.library: windows on the screen, presented, and their events; menus, resizing and requesters (`planar/intuition.h`, `lib/intuition`) |
 | [font.md](font.md) | font.library: TrueType fonts read in place, their metrics, glyphs' outlines, shaping and lines (`planar/font.h`, `lib/font`) |
+| [ui.md](ui.md) | ui.library: gadgets in the caller's window, laid out, drawn and driven by its events (`planar/ui.h`, `lib/ui`) |
 
 ## All calls
 
@@ -22,6 +23,7 @@
 | AcceptConn | [exec](exec.md#execacceptconn) | kernel |
 | AcceptPort | [msg](msg.md#execacceptport) | library |
 | AckWaitIrq | [lease](lease.md#leaseackwaitirq) | kernel |
+| AddGadget | [ui](ui.md#uiaddgadget) | library, through `IUI` |
 | AddPart, FilePart, PathPart | [dos](dos.md#dosaddpart) | library |
 | AllocArea | [exec](exec.md#execallocarea) | kernel |
 | AllocBitMap | [gfx](gfx.md#gfxallocbitmap) | library, through `IGfx` |
@@ -33,8 +35,6 @@
 | AllocVec | [exec](exec.md#execallocvec) | library |
 | ArmPort | [msg](msg.md#execarmport) | library |
 | ArmTimer | [exec](exec.md#execarmtimer) | kernel |
-| BltBitMap | [gfx](gfx.md#gfxbltbitmap) | library, through `IGfx` |
-| BltMask | [gfx](gfx.md#gfxbltmask) | library, through `IGfx` |
 | BindIrq | [lease](lease.md#leasebindirq) | kernel |
 | blk_alloc | [blk](blk.md#blkblk_alloc) | library |
 | blk_close | [blk](blk.md#blkblk_close) | library |
@@ -45,6 +45,8 @@
 | blk_read, blk_write | [blk](blk.md#blkblk_read) | library |
 | blk_release | [blk](blk.md#blkblk_release) | library |
 | blk_submit | [blk](blk.md#blkblk_submit) | library |
+| BltBitMap | [gfx](gfx.md#gfxbltbitmap) | library, through `IGfx` |
+| BltMask | [gfx](gfx.md#gfxbltmask) | library, through `IGfx` |
 | CallHookPkt | [utility](utility.md#utilitycallhookpkt) | library |
 | ChangeWindowBuffers | [intuition](intuition.md#intuitionchangewindowbuffers) | library, through `IIntuition` |
 | ClearMenuStrip | [intuition](intuition.md#intuitionclearmenustrip) | library, through `IIntuition` |
@@ -56,10 +58,10 @@
 | CloseWindow | [intuition](intuition.md#intuitionclosewindow) | library, through `IIntuition` |
 | ColdReboot | [lease](lease.md#leasecoldreboot) | kernel |
 | ConnectPort, ConnectPortUntil | [msg](msg.md#execconnectport) | library |
-| CreateDir, DeletePath | [dos](dos.md#doscreatedir) | library |
-| CreateLease | [lease](lease.md#leasecreatelease) | kernel |
 | CopyMem | [exec](exec.md#execcopymem) | library |
 | CopyMemQuick | [exec](exec.md#execcopymemquick) | library |
+| CreateDir, DeletePath | [dos](dos.md#doscreatedir) | library |
+| CreateLease | [lease](lease.md#leasecreatelease) | kernel |
 | CreatePool, CreatePoolMem | [exec](exec.md#execcreatepool) | library |
 | CreatePort | [exec](exec.md#execcreateport) | kernel |
 | CreateProcess | [exec](exec.md#execcreateprocess) | kernel |
@@ -70,8 +72,9 @@
 | DeletePort | [exec](exec.md#execdeleteport) | kernel |
 | DoMsg | [msg](msg.md#execdomsg) | library |
 | DoMsgUntil | [msg](msg.md#execdomsguntil) | library |
-| DropInterface | [exec](exec.md#execdropinterface) | library, through `IExec` |
 | DrawBevel | [gfx](gfx.md#gfxdrawbevel) | library, through `IGfx` |
+| DrawUI | [ui](ui.md#uidrawui) | library, through `IUI` |
+| DropInterface | [exec](exec.md#execdropinterface) | library, through `IExec` |
 | drv_dma_clean, drv_dma_flush | [drv](drv.md#drvdrv_dma_clean) | library |
 | drv_hwdb_msg, drv_hwdb | [drv](drv.md#drvdrv_hwdb) | library |
 | drv_in_heap | [drv](drv.md#drvdrv_in_heap) | library |
@@ -97,6 +100,7 @@
 | FreeBitMap | [gfx](gfx.md#gfxfreebitmap) | library, through `IGfx` |
 | FreePooled | [exec](exec.md#execfreepooled) | library |
 | FreeSignal | [exec](exec.md#execfreesignal) | kernel |
+| FreeUI | [ui](ui.md#uifreeui) | library, through `IUI` |
 | FreeVec | [exec](exec.md#execfreevec) | library |
 | GetBitMapAttr | [gfx](gfx.md#gfxgetbitmapattr) | library, through `IGfx` |
 | GetGlyphMetrics | [font](font.md#fontgetglyphmetrics) | library, through `IFont` |
@@ -110,12 +114,15 @@
 | GrantFirmware | [lease](lease.md#leasegrantfirmware) | kernel |
 | GrantLease | [lease](lease.md#leasegrantlease) | kernel |
 | GrantRoot | [lease](lease.md#leasegrantroot) | kernel |
+| HandleUIEvent | [ui](ui.md#uihandleuievent) | library, through `IUI` |
 | InitBitMap | [gfx](gfx.md#gfxinitbitmap) | library, through `IGfx` |
 | InitRastPort | [gfx](gfx.md#gfxinitrastport) | library, through `IGfx` |
 | InitTmpRas | [gfx](gfx.md#gfxinittmpras) | library, through `IGfx` |
+| InitUI | [ui](ui.md#uiinitui) | library, through `IUI` |
 | KillPeer | [lease](lease.md#leasekillpeer) | kernel |
 | KillProcess | [exec](exec.md#execkillprocess) | kernel |
 | KLog | [exec](exec.md#execklog) | kernel |
+| LayoutUI | [ui](ui.md#uilayoutui) | library, through `IUI` |
 | LineSpacing | [font](font.md#fontlinespacing) | library, through `IFont` |
 | MapCodepoint | [font](font.md#fontmapcodepoint) | library, through `IFont` |
 | MapFirmware | [lease](lease.md#leasemapfirmware) | kernel |
@@ -145,22 +152,23 @@
 | QuerySystem | [exec](exec.md#execquerysystem) | kernel |
 | QueryTasks | [exec](exec.md#execquerytasks) | kernel |
 | RawDoFmt | [exec](exec.md#execrawdofmt) | library |
-| RectFill | [gfx](gfx.md#gfxrectfill) | library, through `IGfx` |
 | ReadArgs, FreeArgs | [dos](dos.md#dosreadargs) | library |
 | ReadConsole | [lease](lease.md#leasereadconsole) | kernel |
 | ReadFile, WriteFile | [dos](dos.md#dosreadfile) | library |
 | ReadLog | [lease](lease.md#leasereadlog) | kernel |
+| RectFill | [gfx](gfx.md#gfxrectfill) | library, through `IGfx` |
 | ReplyMsg | [msg](msg.md#execreplymsg) | library |
 | ReplyMsgLater | [msg](msg.md#execreplymsglater) | library |
 | ReportUnresponsive | [msg](msg.md#execreportunresponsive) | library, in `libexec.a` |
 | RevokeLease | [lease](lease.md#leaserevokelease) | kernel |
 | RunCommand | [dos](dos.md#dosruncommand) | library |
 | ScaleUnits | [font](font.md#fontscaleunits) | library, through `IFont` |
-| SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | SetConName, ConName | [dos](dos.md#dossetconname) | library |
 | SetFont | [gfx](gfx.md#gfxsetfont) | library, through `IGfx` |
+| SetGadgetAttrsA | [ui](ui.md#uisetgadgetattrsa) | library, through `IUI` |
 | SetMem | [exec](exec.md#execsetmem) | library |
 | SetMenuStrip | [intuition](intuition.md#intuitionsetmenustrip) | library, through `IIntuition` |
+| SetSignal | [exec](exec.md#execsetsignal) | kernel |
 | ShapeRun | [font](font.md#fontshaperun) | library, through `IFont` |
 | ShareArea | [exec](exec.md#execsharearea) | kernel |
 | Signal | [exec](exec.md#execsignal) | kernel |

@@ -2,7 +2,7 @@
 
 *Planar Reference Manuals, volume 4.* The public headers, `include/planar/`. They are the system's C ABI ([docs §7.2](../../docs/07-language-toolchain.md)): any other language binds to Planar through them.
 
-*Checked against V5; `gfx.h` and `font.h`, V8 step 3.*
+*Checked against V5; `gfx.h` and `font.h`, V8 step 3; `ui.h`, V8 step 6.*
 
 | Header | Contents | Used by |
 |---|---|---|
@@ -23,6 +23,7 @@
 | `planar/endian.h` | `get_be32`, `get_le64` and friends, for firmware formats | Drivers, `hwdb` |
 | `planar/utility.h` | utility.library: `struct TagItem`, `TAG_*`, `struct Hook`, the case and comparison calls, `SNPrintf`, `struct Span`, `struct Str`, `STR()`, the checked readers; `struct UtilityIFace` ([Libraries ch. 5](../libraries/05-utility.md)) | Any program |
 | `planar/gfx.h` | gfx.library: `struct BitMap`, `struct RastPort`, `struct TextFont`, `struct TextAttr`, `struct TmpRas`, `PIXFMT_*`, `BMF_*`, `BMA_*`, `BLEND_*`, `JAM1`/`JAM2`, `FPF_*`, `FSF_BOLD`; paths (`struct GfxPath`, `struct GfxPoint`, `PATH_*`, `PATHF_EVENODD`), masks (`struct GfxMask`) and gradients (`struct GfxGradient`, `GRADF_HORIZONTAL`); `struct GfxIFace` ([Libraries ch. 12](../libraries/12-gfx.md)) | Anything that draws; intuition and its clients |
+| `planar/ui.h` | ui.library: `struct UI`, `struct UIGadget`, `struct UIChange`, `UI_*` (kinds), `UIA_*` (tags), `TOGGLE_*`, `ALIGN_*`, `UIALIGN_*`, `UIPANE_*`, `UICF_*`; `struct UIIFace` ([Libraries ch. 15](../libraries/15-ui.md)) | Programs with gadgets in a window: Prefs and the Workbench |
 | `planar/intuition.h` | intuition's protocol and intuition.library: `struct Intuition`, `struct Window`, `struct IntuiEvent`, `struct IntuiSync`, `struct IntuiMsg`, `WA_*`, `WFLG_*`, `IDCMP_*`, `INTUI_*` (the chrome's and the screen bar's sizes); menus (`struct NewMenu`, `NM_*`, `CHECKIT`, `MENUNUM`, `ITEMNUM`) and requesters (`struct EasyStruct`); `struct IntuitionIFace` ([Libraries ch. 13](../libraries/13-intuition.md)) | Programs with windows; hwdb's window test |
 | `planar/font.h` | font.library: `struct FontFace`, `struct FontMetrics`, `struct GlyphMetrics`, `struct ShapedGlyph`, `struct GlyphRun`, `struct LineFit`, `struct LineSpacing`, `FONT_*` (faces, features, warnings), `GLYPHF_*`, `LINEF_*`, `ERR_BADFONT`, `ERR_UNSUPPORTED`; `struct FontIFace` ([Libraries ch. 14](../libraries/14-font.md)) | Programs that shape text; gfx.library |
 

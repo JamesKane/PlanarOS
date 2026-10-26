@@ -1,6 +1,6 @@
 # V8 plan: Workbench II, type and the desktop
 
-**Status: in progress (2026-10-26); decisions 1 to 11 taken as they leaned, decision 5 with the user's direction for later; steps 1 to 5 built.** Scoped from the [roadmap's V8 row](08-roadmap.md) and its decision on §14.7, §13.2 to §13.5 (the design language, the screen bar, the chrome, `ui.library`, the core programs), §14 (`font.library`), and what V7 deferred to V8 (its decisions 3, 4 and 6). The decisions at the end are taken.
+**Status: in progress (2026-10-26); decisions 1 to 11 taken as they leaned, decision 5 with the user's direction for later; steps 1 to 6 built.** Scoped from the [roadmap's V8 row](08-roadmap.md) and its decision on §14.7, §13.2 to §13.5 (the design language, the screen bar, the chrome, `ui.library`, the core programs), §14 (`font.library`), and what V7 deferred to V8 (its decisions 3, 4 and 6). The decisions at the end are taken.
 
 **Goal (§8):** proportional type everywhere text is drawn, from a font engine Planar wrote, checked on the host against FreeType and HarfBuzz. On it, the desktop on both boards: the screen bar and its menus, `ui.library`'s gadgets, the Workbench with the volumes as icons, Prefs, and the Shell in a window. The console Shell stays on the serial line.
 
@@ -153,6 +153,14 @@ Steps 1 and 2 are host work, and need nothing else. Step 3 needs 1. Step 4 needs
 - **Themes:** §13.2's tokens as one table, light and dark panes.
 
 **Tested by:** a host test drawing each gadget in each state into bitmaps, against references kept as CRCs (each reviewed once by eye, from a PNG the test writes), and driving them with synthetic events. `uitest` on QEMU: a window of every gadget, clicked through. `V8.6 ui ok`.
+
+**Built (2026-10-26), with what changed on the way:**
+- **ui.library** (`lib/ui/ui.c`, `libs/ui`, `planar/ui.h`): `InitUI`, `AddGadget` (by tags, `UIA_*`), `SetGadgetAttrsA`, `LayoutUI`, `DrawUI`, `HandleUIEvent`, `FreeUI`. The gadgets are a tree of up to 48 in the caller's `struct UI` (about 6 KiB), numbered as added, the first the root; a group is a row, a column or a split pane. As a shared library it keeps no data, so it draws through the caller's `IGfx`, and its path scratch is in the UI.
+- **Drawing:** every gadget sits on its pane's gradient and draws nothing outside its rectangle (a focusable one keeps 2 px around it for its amber ring), so one drawn again alone gives the pixels a whole drawing does. The damage is rectangles in the UI, for `PresentWindow`, up to intuition's 16 and then one around them.
+- **Events:** a toggle and a button act on release over them, a selector and a list on the press, a list's second press on a row within 500 ms is a double click (`UICF_DOUBLE`), a slider and the split's groove drag (`UICF_DRAG` while the button's down, and once more at the end), Tab and Shift-Tab move the focus, and the focused gadget takes its keys (a text field edits UTF-8, Return is `UICF_ENTER`).
+- **Layout:** a gadget's own size, then a group's room left over shared by weight, children aligned across it. A split keeps the width it was given while the window's too small for it, and has it back when the window grows.
+- **The HUD badge is opaque** `#232C40`, not 80%: decision 11.
+- **Tested by** `make ui-test` (the model: refusals, the window test's layout at three sizes, a text field's editing, a list's, a slider's and a selector's keys, Tab, the split dragged and held, a button let go of off it; every gadget in each state on both panes, `build/ui/states.ppm`, looked at once and kept as a CRC; then `conformance/uiwin.h`'s window clicked through, 17 steps, each change as uiwin.h has it, after each the part drawn again equal to a whole drawing and every changed pixel inside the damage; scalar and NEON alike) and `window.c` step 6c on QEMU, where `uitest` was planned: the same window opened from ui.library in the shared region, read back against the host's CRC, then clicked, dragged and typed through by boot-check (each step's change as the host's) and read back again; `build/screens/ui.ppm`. On RV64 and AArch64 (EFI), `V8.6 done`.
 
 ## 7. The Workbench and Prefs
 
