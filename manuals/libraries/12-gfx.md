@@ -72,7 +72,7 @@ IGfx->InitRastPort(&rp, &screen);
 
 ## Costs
 
-Measured by `conformance/gfx.c` under QEMU (TCG), a megapixel at a time. They're QEMU's costs, not the hardware's: TCG runs most vector instructions an element at a time, so the blend by RVV or NEON is slower here than the scalar loop it replaces. V7 step 6 measures the boards.
+Measured by `conformance/gfx.c` under QEMU (TCG), a megapixel at a time. They're QEMU's costs, not the hardware's: TCG runs most vector instructions an element at a time, so the blend by RVV or NEON is slower here than the scalar loop it replaces. The boards' are below.
 
 | | RV64 | AArch64 |
 |---|---|---|
@@ -81,6 +81,16 @@ Measured by `conformance/gfx.c` under QEMU (TCG), a megapixel at a time. They're
 | `BltBitMap` `BLEND_SRC_OVER`, scalar | 3.8 ms | 3.9 ms |
 | `BltBitMap` `BLEND_SRC_OVER`, by the table | 9.0 ms | 5.9 ms |
 | `Text`, a glyph | 354 ns | 318 ns |
+
+On the boards (V7 step 6, a megapixel at a time), where the vector unit's entries are the faster ones:
+
+| | the RV2 (X60, 256-bit RVV) | the CIX (A720, NEON) |
+|---|---|---|
+| `RectFill`, scalar | 1,283 µs | 546 µs |
+| `RectFill`, by the table | 529 µs (2.4×) | 84 µs (6.5×) |
+| `BltBitMap` `BLEND_SRC_OVER`, scalar | 29.8 ms | 5.96 ms |
+| `BltBitMap` `BLEND_SRC_OVER`, by the table | 6.8 ms (4.4×) | 1.08 ms (5.5×) |
+| `Text`, a glyph | 715 ns | 94 ns |
 
 ## Rules
 

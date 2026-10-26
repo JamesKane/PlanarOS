@@ -2,7 +2,7 @@
 
 *Checked against V5.*
 
-The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`). Their match tables are in `servers/hwdb/drivers.c`; their stop methods in `servers/hwdb/server.c`.
+The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`). Their match tables are in `servers/hwdb/drivers.c`; their stop methods in `servers/hwdb/server.c` (virtio, NVMe, SDHCI), and with each class's own code in hwdb: `display.c`, `input.c` (xhci), `gpu.c` and `power.c`.
 
 | Driver | Matches | Port | Interrupts | Stop method |
 |---|---|---|---|---|
@@ -45,7 +45,7 @@ Its stop method is in `servers/hwdb/display.c`, since a reset would blank the sc
 
 ## power
 
-`drv/power`: the clocks, resets and power domains, on the K1 (its APMU and PMU) and the CIX (SCMI to the system control processor, and power domains through TF-A), and QEMU's model in hwdb's test mode. hwdb votes for a driver's resources before it grants the lease, and drops the vote only after the driver's stop method has run. A restarted `power` keeps on what it finds on ([chapter 8](08-power.md)).
+`drv/power`: the clocks, resets and power domains, on the K1 (its APMU and PMU) and the CIX (SCMI to the system control processor, and power domains through TF-A), and QEMU's model in hwdb's test mode. hwdb votes for a driver's resources before it grants the lease, and drops the vote only after the driver's stop method has run. A restarted `power` keeps on what it finds on. Its stop method, in `servers/hwdb/power.c`, frees the CIX's SCMI channels a dead `power` left busy ([chapter 8](08-power.md)).
 
 ## gpu-panthor
 

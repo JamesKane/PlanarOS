@@ -154,7 +154,7 @@ intuition waits for display's and input's ports to come back with a task each, s
 
 ## Costs
 
-Measured by `conformance/window.c` under QEMU (TCG), on intuition's buffers, which are cached on QEMU. V7 step 6 measures the boards.
+Measured by `conformance/window.c` under QEMU (TCG), on intuition's buffers, which are cached on QEMU. The boards' are below.
 
 | | RV64 | AArch64 |
 |---|---|---|
@@ -164,6 +164,16 @@ Measured by `conformance/window.c` under QEMU (TCG), on intuition's buffers, whi
 | Frames shown of 120 so presented | 120, in 120 to 124 vblanks | 120, in 120 vblanks |
 
 The 3 calls are `WaitSafe`'s `WaitAddr`, the signal `PresentWindow`'s message gives a sleeping intuition, and `window.c`'s own `CurrentTime` for `WaitSafe`'s deadline. A frame presented a frame at a time takes one to two vblanks to latch: it waits for intuition's next frame, then for display's latch.
+
+On the boards (V7 step 6), at 60 Hz on 1920×1080, a frame presented just after a vblank latches at the next one: present to latch 16.6–16.7 ms on both, and none of 600 missed, for a 200×120 window and for one the screen's size. intuition's own costs (`INTUITION_COSTS`), composing into display's uncached (NC) buffers and into cached ones with each frame's damage cleaned:
+
+| | the RV2, NC | the RV2, cached | the CIX, NC | the CIX, cached |
+|---|---|---|---|---|
+| The whole screen (2.07 Mpx) | 4.29 ms | 4.12 ms | 0.39–0.40 ms | 0.70–0.76 ms |
+| A 640×480 window dragged (0.32 Mpx a frame) | 2.38 ms | 1.05 ms | 0.085–0.098 ms | 0.19–0.21 ms |
+| The pointer alone: nothing composed, its commit | 14 µs | | 3–5 µs | |
+
+intuition composes into NC on both today; which memory each board should use is the plan's decision 3, still open.
 
 ## Rules
 

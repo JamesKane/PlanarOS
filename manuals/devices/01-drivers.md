@@ -67,7 +67,7 @@ A class that moves real data uses `message`, so requests can be outstanding at o
 
 hwdb sees every death. The teardown is the kernel's and hwdb's, never the dead driver's:
 1. The kernel masks the driver's level-triggered lines at once, quarantines the DMA Areas it didn't free, and holds the memory clients lent it, their connection arenas (`li_LentPages`).
-2. hwdb runs the unit's **stop method**, which makes the device stop touching memory: virtio's status register to 0, NVMe's `CC.EN` to 0, SDHCI's Software Reset For All, a GPU's soft reset, every display plane off but the console's ([chapter 5](05-drivers.md)). A unit with no stop method is safe only if it kept no DMA; one that did stays quarantined and isn't restarted.
+2. hwdb runs the unit's **stop method**, which makes the device stop touching memory: virtio's status register to 0, NVMe's `CC.EN` to 0, SDHCI's Software Reset For All, a GPU's soft reset, every display plane off but the console's, xHCI's controllers halted; and for `power`, which has no DMA, the CIX's SCMI channels freed ([chapter 5](05-drivers.md)). A unit with no stop method is safe only if it kept no DMA; one that did stays quarantined and isn't restarted.
 3. hwdb calls `RevokeLease`, which frees the quarantine and the held memory, and starts the driver again.
 
 ## When a driver is asked to stop

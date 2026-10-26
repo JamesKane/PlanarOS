@@ -1,6 +1,6 @@
 # The power class
 
-*Checked against V5.*
+*Checked against V5; the deadline, V6; the stop method, V7 step 6.*
 
 ## What it's for
 
@@ -49,6 +49,15 @@ DoMsg(&mp, &m->pm_Msg);
 - Don't vote to keep something on for longer than you use it: dying is enough to let go, and so is `POWER_OFF`.
 - What the firmware left on stays on. Don't rely on a vote's end to turn a device off.
 - If power restarts, every vote is gone. hwdb votes again for its drivers. A client of its own sees `ERR_PORT_DIED` and must connect and vote again.
+- Wait for a vote's answer `POWER_DEADLINE_MS` (2 s) at most (`DoMsgUntil`), as xhci does. hwdb takes a vote it waited for longer as power's failure, and restarts it.
+
+## When power dies
+
+power has no DMA, but it may die in the middle of a call to the firmware. On the CIX, a channel is marked busy (its status 0) before it's rung, so a power killed between the two would leave it busy for good, for the next power and for the firmware's own use after a warm reset. hwdb's stop method (`stop_power`, `servers/hwdb/power.c`, through `drv/power/smt.h`) frees both of SHM0's channels:
+- TF-A's, rung by an SMC, is answered before the call returns, so busy means it was never rung: it's freed at once;
+- mailbox 6's may still be answered by the SCP: it gets power's own wait, 300 ms, and is freed then.
+
+hwdb says which one it freed. If power's registers can't be mapped, it's restarted all the same.
 
 ## The machines
 
