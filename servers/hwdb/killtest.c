@@ -47,8 +47,6 @@
 
 #include "server.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr unsigned CLIENTS = 8;
 constexpr unsigned ROUNDS = 12;         /* kills per unit with clients */
 constexpr uint64_t Y2020 = 1577836800;
@@ -77,7 +75,6 @@ static struct unit *live[64], *victim;
 static unsigned nlive, round, rounds, binding, victim_starts;
 static uint64_t wake, phase_at, seed, all_done_at;
 static Handle bench;                /* blkbench, measuring a block device; then dostest */
-static Handle dos;                  /* the file server, from T_DOS to the end */
 static unsigned measured;           /* block devices blkbench measured well */
 static bool files_ok, shell_ok;     /* dostest, and the Shell's script, passed */
 static unsigned benched;            /* clients whose devices it has measured */
@@ -346,12 +343,12 @@ static void settle(void)
 /* Each block device measured in turn, then the clients started. */
 static void bench_step(void)
 {
-    struct ProcessInfo pi;
+    int64_t code;
 
     if (bench) {
-        if (QueryProcess(bench, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+        if (!proc_ended(bench, &code))
             return;
-        if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+        if (code != 0)
             fail("blkbench failed");
         else
             measured++;
@@ -400,7 +397,7 @@ static void start_clients(void)
 /* With block devices: dos, and dostest against it. */
 static void dos_step(void)
 {
-    struct ProcessInfo pi;
+    int64_t code;
     int64_t p;
     bool any = false;
 
@@ -410,7 +407,7 @@ static void dos_step(void)
         start_clients();
         return;
     }
-    if (!dos) {
+    if (!hwdb.dos) {
         if ((p = CreateProcess("dos", 0, SIG_DEAD, 0)) < 0 ||
             (bench = (Handle)CreateProcess("dostest", 0, SIG_DEAD, 0)) == 0 || (int64_t)bench < 0) {
             fail("dos or dostest couldn't be started");
@@ -418,18 +415,18 @@ static void dos_step(void)
             start_clients();
             return;
         }
-        dos = hwdb.dos = (Handle)p;
+        hwdb.dos = (Handle)p;   /* the file server, from T_DOS to the end */
         phase_at = hwdb.now;
         return;
     }
-    if (QueryProcess(bench, &pi) != 0 || pi.pi_State < PROCS_EXITED) {
+    if (!proc_ended(bench, &code)) {
         if (hwdb.now - phase_at < 15000 * MS)
             return;
         fail("dostest didn't finish");
         KillProcess(bench);
         return;
     }
-    if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+    if (code != 0)
         fail("dostest failed");
     else
         files_ok = true;
@@ -442,7 +439,7 @@ static void dos_step(void)
 static void shell_step(void)
 {
     static struct Dos d;
-    struct ProcessInfo pi;
+    int64_t code;
 
     if (!bench) {
         int64_t p;
@@ -459,14 +456,14 @@ static void shell_step(void)
         phase_at = hwdb.now;
         return;
     }
-    if (QueryProcess(bench, &pi) != 0 || pi.pi_State < PROCS_EXITED) {
+    if (!proc_ended(bench, &code)) {
         if (hwdb.now - phase_at < 15000 * MS)
             return;
         fail("the Shell's script didn't finish");
         KillProcess(bench);
         return;
     }
-    if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+    if (code != 0)
         fail("a line of the Shell's script failed");
     else
         shell_ok = true;
@@ -585,7 +582,7 @@ static uint64_t name_arg(const char *s)
 
 static void report_step(void)
 {
-    struct ProcessInfo pi;
+    int64_t code;
 
     if (phase_at == 0) {
         reported = nullptr;
@@ -616,8 +613,8 @@ static void report_step(void)
         phase_at = hwdb.now;
         return;
     }
-    if (reporter && QueryProcess(reporter, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
-        if (pi.pi_State != PROCS_EXITED || pi.pi_ExitCode != 0)
+    if (reporter && proc_ended(reporter, &code)) {
+        if (code != 0)
             fail("reporter couldn't report");
         CloseHandle(reporter);
         reporter = 0;
@@ -833,9 +830,9 @@ static void stop_all(void)
     if (phase == T_STOP) {
         asked = hwdb.stops;
         clean = hwdb.stops_clean;
-        if (dos)
-            CloseHandle(dos);       /* which ends it, before its devices */
-        dos = hwdb.dos = 0;
+        if (hwdb.dos)
+            CloseHandle(hwdb.dos);  /* which ends it, before its devices */
+        hwdb.dos = 0;
         hwdb_stop_all();
         phase = T_END;
     }
@@ -861,6 +858,12 @@ static void stop_all(void)
 }
 
 static void step(void);
+
+/* From T_POWER, a test each, in the phases' order: true once it's over. */
+static bool (*const tests[])(void) = {
+    [T_POWER] = power_test, [T_DISPLAY] = display_test, [T_WINDOW] = window_test,
+    [T_DESKTOP] = desktop_test, [T_INPUT] = input_test, [T_GPU] = gpu_test, [T_LOAD] = gpu_load_test,
+};
 
 void test_step(void)
 {
@@ -905,32 +908,14 @@ static void step(void)
         drain();
         break;
     case T_POWER:
-        if (power_test())
-            phase = T_DISPLAY;
-        break;
     case T_DISPLAY:
-        if (display_test())
-            phase = T_WINDOW;
-        break;
     case T_WINDOW:
-        if (window_test())
-            phase = T_DESKTOP;
-        break;
     case T_DESKTOP:
-        if (desktop_test())
-            phase = T_INPUT;
-        break;
     case T_INPUT:
-        if (input_test())
-            phase = T_GPU;
-        break;
     case T_GPU:
-        if (gpu_test())
-            phase = T_LOAD;
-        break;
     case T_LOAD:
-        if (gpu_load_test())
-            phase = T_STOP;
+        if (tests[phase]())
+            phase++;
         break;
     case T_STOP:
     case T_END:

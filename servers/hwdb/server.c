@@ -1163,14 +1163,83 @@ void hwdb_facts(void)
     }
 }
 
+/* --- Programs kept going. --- */
+
+void kept_keep(struct kept *k)
+{
+    struct hw_line l = { 0 };
+    int64_t p, code;
+
+    if (hwdb.stopping) {
+        if (k->proc)
+            CloseHandle(k->proc);   /* which ends it */
+        k->proc = 0;
+        return;
+    }
+    if (k->proc && proc_ended(k->proc, &code)) {
+        if (k->quits && code == 0) {
+            hw_put(&l, "hwdb: ");
+            hw_put(&l, k->what);
+            hw_put(&l, " quit");
+            say(l.text);
+            k->wanted = false;
+        } else if (k->wanted && !hwdb.test) {
+            hw_put(&l, "hwdb: ");
+            hw_put(&l, k->what);
+            hw_put(&l, " ended: restarting it");
+            say(l.text);
+        }
+        CloseHandle(k->proc);
+        k->proc = 0;
+        /* Later each time it ends within a second of its start, to 1 s. */
+        k->delay = !k->steady && hwdb.now - k->started < 1000 * MS && k->delay ? k->delay * 2 : 10 * MS;
+        if (k->delay > 1000 * MS)
+            k->delay = 1000 * MS;
+        k->due = hwdb.now + k->delay;
+    }
+    if (!k->wanted || k->proc || hwdb.now < k->due)
+        return;
+    if ((p = CreateProcess(k->name, k->arg, SIG_DEAD, 0)) < 0) {
+        hw_put(&l, "hwdb: ");
+        hw_put(&l, k->what);
+        hw_put(&l, " couldn't be started");
+        say(l.text);
+        k->due = hwdb.now + 1000 * MS;
+        return;
+    }
+    k->proc = (Handle)p;
+    k->started = hwdb.now;
+    k->starts++;
+}
+
+uint64_t kept_due(const struct kept *k)
+{
+    return k->wanted && !k->proc ? k->due : 0;
+}
+
+uint64_t earliest(uint64_t a, uint64_t b)
+{
+    return !a ? b : !b ? a : a < b ? a : b;
+}
+
+bool proc_ended(Handle proc, int64_t *code)
+{
+    struct ProcessInfo pi;
+
+    if (QueryProcess(proc, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+        return false;
+    if (code)
+        *code = pi.pi_State == PROCS_EXITED ? pi.pi_ExitCode : -1;
+    return true;
+}
+
 /* --- The system (not the test): dos, then the Shell, kept going. --- */
 
-static Handle sys_dos, sys_shell;
+static Handle sys_shell;
 static uint64_t sys_due;
 
 static void system_step(void)
 {
-    struct ProcessInfo pi;
     struct Dos d;
     int64_t p;
 
@@ -1185,26 +1254,26 @@ static void system_step(void)
     if (hwdb.test || hwdb_busy() || hwdb.now < sys_due)
         return;
     intuition_desktop();
-    if (sys_dos && QueryProcess(sys_dos, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+    if (hwdb.dos && proc_ended(hwdb.dos, nullptr)) {
         say("hwdb: dos ended: restarting it");
-        CloseHandle(sys_dos);
-        sys_dos = hwdb.dos = 0;
+        CloseHandle(hwdb.dos);
+        hwdb.dos = 0;
     }
-    if (!sys_dos) {
+    if (!hwdb.dos) {
         if ((p = CreateProcess("dos", 0, SIG_DEAD, 0)) < 0) {
             say("hwdb: dos couldn't be started");
             sys_due = hwdb.now + 1000 * MS;
             return;
         }
-        sys_dos = hwdb.dos = (Handle)p;
+        hwdb.dos = (Handle)p;
     }
-    if (sys_shell && QueryProcess(sys_shell, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+    if (sys_shell && proc_ended(sys_shell, nullptr)) {
         CloseHandle(sys_shell);
         sys_shell = 0;
         if (hwdb.end) {             /* EndShell, on a board that goes back to its other system */
             say("hwdb: the Shell ended: stopping");
-            CloseHandle(sys_dos);
-            sys_dos = hwdb.dos = 0;
+            CloseHandle(hwdb.dos);
+            hwdb.dos = 0;
             hwdb_stop_all();
             return;
         }
@@ -1324,11 +1393,7 @@ int main(uint64_t arg, uint64_t root)
             system_step();
         if (hwdb.finished)
             break;
-        next = next_deadline();
-        if (input_due() && (!next || input_due() < next))
-            next = input_due();
-        if (intuition_due() && (!next || intuition_due() < next))
-            next = intuition_due();
+        next = earliest(earliest(next_deadline(), input_due()), intuition_due());
         ArmTimer(next, next ? SIG_TIMER : 0);
         got = WaitPorts(conns, nconns, 1ULL << SIG_PORT | 1ULL << SIG_CONN | 1ULL << SIG_DEAD |
                                            1ULL << SIG_ACPI_PORT | 1ULL << SIG_TIMER);

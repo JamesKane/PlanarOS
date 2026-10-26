@@ -25,48 +25,18 @@
 
 #include "server.h"
 
-void *memset(void *dst, int c, size_t n);
-
 /* --- input, kept going. --- */
 
-static struct {
-    Handle proc;
-    uint64_t due;
-    unsigned starts;
-} ip;
+static struct kept ip = { .name = "input", .what = "input", .wanted = true, .steady = true };
 
 void input_keep(void)
 {
-    struct ProcessInfo pi;
-    int64_t p;
-
-    if (hwdb.stopping) {
-        if (ip.proc)
-            CloseHandle(ip.proc);   /* which ends it */
-        ip.proc = 0;
-        return;
-    }
-    if (ip.proc && QueryProcess(ip.proc, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
-        if (!hwdb.test)
-            say("hwdb: input ended: restarting it");
-        CloseHandle(ip.proc);
-        ip.proc = 0;
-        ip.due = hwdb.now + 10 * MS;
-    }
-    if (ip.proc || hwdb.now < ip.due)
-        return;
-    if ((p = CreateProcess("input", 0, SIG_DEAD, 0)) < 0) {
-        say("hwdb: input couldn't be started");
-        ip.due = hwdb.now + 1000 * MS;
-        return;
-    }
-    ip.proc = (Handle)p;
-    ip.starts++;
+    kept_keep(&ip);
 }
 
 uint64_t input_due(void)
 {
-    return ip.proc ? 0 : ip.due;
+    return kept_due(&ip);
 }
 
 unsigned input_kill(void)
@@ -114,7 +84,6 @@ bool stop_xhci(struct unit *u)
 }
 
 /* --- The connection: test mode only. --- */
-
 
 static struct {
     bool up, waiting, answered;
@@ -227,15 +196,13 @@ static unsigned xhci_units(unsigned *deaths)
 /* 0 running, 1 ended well, 2 ended without keys (nobody typed), -1 badly. */
 static int client_state(void)
 {
-    struct ProcessInfo pi;
+    int64_t code;
 
-    if (QueryProcess(it.client, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+    if (!proc_ended(it.client, &code))
         return 0;
     CloseHandle(it.client);
     it.client = 0;
-    if (pi.pi_State != PROCS_EXITED)
-        return -1;
-    return pi.pi_ExitCode == 0 ? 1 : pi.pi_ExitCode == 2 ? 2 : -1;
+    return code == 0 ? 1 : code == 2 ? 2 : -1;
 }
 
 static bool start_client(uint64_t mode)

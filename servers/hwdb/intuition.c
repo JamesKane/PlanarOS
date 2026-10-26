@@ -53,106 +53,29 @@
 
 #include "server.h"
 
-void *memset(void *dst, int c, size_t n);
-
 /* --- intuition, kept going while it's wanted. --- */
 
 constexpr uint64_t INTUITION_COSTS = 1;   /* servers/intuition/main.c's */
 
 static void shells_keep(void);
-static void workbench_keep(void);
 
-static struct {
-    bool wanted;
-    Handle proc;
-    uint64_t due, started, delay;
-    unsigned starts;
-} ik;
+static struct kept ik = { .name = "intuition", .what = "intuition" };
+/* The Workbench, kept as intuition is while it's wanted; its Quit (0)
+ * says it no longer is. */
+static struct kept wb = { .name = "workbench", .what = "the Workbench", .quits = true };
 
 void intuition_keep(void)
 {
-    struct ProcessInfo pi;
-    int64_t p;
-
     shells_keep();
-    workbench_keep();
-    if (hwdb.stopping && ik.proc) {
-        CloseHandle(ik.proc);       /* which ends it */
-        ik.proc = 0;
-    }
-    if (ik.proc && QueryProcess(ik.proc, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
-        if (ik.wanted && !hwdb.test)
-            say("hwdb: intuition ended: restarting it");
-        CloseHandle(ik.proc);
-        ik.proc = 0;
-        ik.delay = hwdb.now - ik.started < 1000 * MS && ik.delay ? ik.delay * 2 : 10 * MS;
-        if (ik.delay > 1000 * MS)
-            ik.delay = 1000 * MS;
-        ik.due = hwdb.now + ik.delay;
-    }
-    if (!ik.wanted || hwdb.stopping || ik.proc || hwdb.now < ik.due)
-        return;
+    kept_keep(&wb);
     /* Its costs (v7-plan step 6) said once a test, on a controller. */
-    if ((p = CreateProcess("intuition", hwdb.test && !ik.starts && display_native() ? INTUITION_COSTS : 0,
-                           SIG_DEAD, 0)) < 0) {
-        say("hwdb: intuition couldn't be started");
-        ik.due = hwdb.now + 1000 * MS;
-        return;
-    }
-    ik.proc = (Handle)p;
-    ik.started = hwdb.now;
-    ik.starts++;
+    ik.arg = hwdb.test && !ik.starts && display_native() ? INTUITION_COSTS : 0;
+    kept_keep(&ik);
 }
-
-static struct {
-    bool wanted;
-    Handle proc;
-    uint64_t due, started, delay;
-    unsigned starts;
-} wb;
 
 uint64_t intuition_due(void)
 {
-    uint64_t a = ik.wanted && !ik.proc ? ik.due : 0, b = wb.wanted && !wb.proc ? wb.due : 0;
-
-    return !a ? b : !b ? a : a < b ? a : b;
-}
-
-/* The Workbench, kept as intuition is while it's wanted; its Quit (0)
- * says it no longer is. */
-static void workbench_keep(void)
-{
-    struct ProcessInfo pi;
-    int64_t p;
-
-    if (hwdb.stopping && wb.proc) {
-        CloseHandle(wb.proc);
-        wb.proc = 0;
-    }
-    if (wb.proc && QueryProcess(wb.proc, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
-        if (pi.pi_State == PROCS_EXITED && pi.pi_ExitCode == 0) {
-            say("hwdb: the Workbench quit");
-            wb.wanted = false;
-        } else if (wb.wanted) {
-            say("hwdb: the Workbench ended: restarting it");
-        }
-        CloseHandle(wb.proc);
-        wb.proc = 0;
-        wb.delay = hwdb.now - wb.started < 1000 * MS && wb.delay ? wb.delay * 2 : 10 * MS;
-        if (wb.delay > 1000 * MS)
-            wb.delay = 1000 * MS;
-        wb.due = hwdb.now + wb.delay;
-    }
-    if (!wb.wanted || hwdb.stopping || wb.proc || hwdb.now < wb.due)
-        return;
-    if ((p = CreateProcess("workbench", 0, SIG_DEAD, 0)) < 0) {
-        say("hwdb: the Workbench couldn't be started");
-        wb.due = hwdb.now + 1000 * MS;
-        return;
-    }
-    wb.proc = (Handle)p;
-    wb.started = hwdb.now;
-    wb.starts++;
+    return earliest(kept_due(&ik), kept_due(&wb));
 }
 
 /* Wanted from now on, or not: then killed, and not started again. */
@@ -163,6 +86,16 @@ static void intuition_want(bool on)
         KillProcess(ik.proc);
     if (on)
         intuition_keep();
+}
+
+/* intuition and the Workbench, wanted together or not at all. */
+static void desktop_want(bool on)
+{
+    intuition_want(on);
+    wb.wanted = on;
+    if (!on && wb.proc)
+        KillProcess(wb.proc);
+    kept_keep(&wb);
 }
 
 /* intuition's client on its connection 'conn' isn't answering, and the
@@ -184,9 +117,7 @@ void intuition_desktop(void)
     if (hwdb.test || !hwdb.desktop || ik.wanted || hwdb.stopping || !display_unit())
         return;
     say("hwdb: the desktop: intuition and the Workbench started, with the keyboard; the Shell on the serial line");
-    intuition_want(true);
-    wb.wanted = true;
-    workbench_keep();
+    desktop_want(true);
 }
 
 /* --- Shells in windows (V8 step 5): a conwin each, hwdb's own. --- */
@@ -199,15 +130,12 @@ static Handle prefs;                /* Tools' Prefs (V8 step 7) */
 /* Those that ended let go of; all ended when hwdb stops. */
 static void shells_keep(void)
 {
-    struct ProcessInfo pi;
-
-    if (prefs && (hwdb.stopping || (QueryProcess(prefs, &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
+    if (prefs && (hwdb.stopping || proc_ended(prefs, nullptr))) {
         CloseHandle(prefs);
         prefs = 0;
     }
-
     for (unsigned i = 0; i < SHELLS; i++)
-        if (shells[i] && (hwdb.stopping || (QueryProcess(shells[i], &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
+        if (shells[i] && (hwdb.stopping || proc_ended(shells[i], nullptr))) {
             CloseHandle(shells[i]);     /* which ends it, stopping */
             shells[i] = 0;
         }
@@ -238,13 +166,9 @@ int64_t intuition_new_shell(void)
 
 int64_t intuition_new_prefs(void)
 {
-    struct ProcessInfo pi;
     int64_t p;
 
-    if (prefs && (hwdb.stopping || (QueryProcess(prefs, &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
-        CloseHandle(prefs);
-        prefs = 0;
-    }
+    shells_keep();
     if (hwdb.stopping)
         return ERR_BUSY;
     if (prefs)
@@ -371,15 +295,12 @@ static bool late(uint64_t ms)
 }
 
 /* The client has ended: true, with its code (-1 if it faulted or was killed). */
-static bool ended(int64_t *code)
+static bool ended(Handle *client, int64_t *code)
 {
-    struct ProcessInfo pi;
-
-    if (QueryProcess(wt.client, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+    if (!proc_ended(*client, code))
         return false;
-    *code = pi.pi_State == PROCS_EXITED ? pi.pi_ExitCode : -1;
-    CloseHandle(wt.client);
-    wt.client = 0;
+    CloseHandle(*client);
+    *client = 0;
     return true;
 }
 
@@ -395,6 +316,14 @@ static bool start(uint64_t arg)
     wt.client = (Handle)p;
     wt.at = hwdb.now;
     return true;
+}
+
+/* Not there yet: failed with 'what' once 'ms' have passed. True if the test's over. */
+static bool waiting(uint64_t ms, const char *what)
+{
+    if (late(ms))
+        test_fail(what);
+    return wt.step == W_DONE;
 }
 
 static void next(uint8_t step)
@@ -451,7 +380,7 @@ bool window_test(void)
     int64_t code;
 
     /* The second round ends only once it's seen every death. */
-    if (wt.step >= W_CUE && wt.step < W_END && ended(&code)) {
+    if (wt.step >= W_CUE && wt.step < W_END && ended(&wt.client, &code)) {
         test_fail("window's second round ended early: its checks failed");
         return true;
     }
@@ -470,22 +399,16 @@ bool window_test(void)
         /* display's own count first: what intuition takes must come back. */
         if (!wt.at)
             wt.at = hwdb.now;
-        if (!display_ask()) {
-            if (late(3000))
-                test_fail("display didn't say how many buffers it holds");
-            return wt.step == W_DONE;
-        }
+        if (!display_ask())
+            return waiting(3000, "display didn't say how many buffers it holds");
         wt.before = display_buffers();
         intuition_want(true);
         next(W_UP);
         return false;
     case W_UP:
         /* Up, with hwdb's connection: what it holds now, it must hold after. */
-        if (!asked() || QueryProcess(ik.proc, &pi) != 0) {
-            if (late(10000))
-                test_fail("intuition didn't come up");
-            return wt.step == W_DONE;
-        }
+        if (!asked() || QueryProcess(ik.proc, &pi) != 0)
+            return waiting(10000, "intuition didn't come up");
         wt.handles = pi.pi_Handles;
         wt.pages = pi.pi_Pages;
         wt.starts = ik.starts;
@@ -498,11 +421,8 @@ bool window_test(void)
             test_fail("intuition ended under its client");
             return true;
         }
-        if (!ended(&code)) {
-            if (late(90000 + (hwdb.look ? 20000 : 0) + (hwdb.drag ? 300000 : 0)))
-                test_fail("window didn't finish");
-            return wt.step == W_DONE;
-        }
+        if (!ended(&wt.client, &code))
+            return waiting(90000 + (hwdb.look ? 20000 : 0) + (hwdb.drag ? 300000 : 0), "window didn't finish");
         if (code != 0 && code != NO_INPUT) {
             test_fail("window's checks failed");
             return true;
@@ -534,19 +454,13 @@ bool window_test(void)
         return false;
     case W_CUE:
         /* Its windows checked, and the third opened: intuition killed. */
-        if (!asked() || icn.got.im_Windows < 3) {
-            if (late(20000))
-                test_fail("window's second round never showed its three windows");
-            return wt.step == W_DONE;
-        }
+        if (!asked() || icn.got.im_Windows < 3)
+            return waiting(20000, "window's second round never showed its three windows");
         next(W_WITH);
         return false;
     case W_WITH:
-        if (!display_ask()) {
-            if (late(3000))
-                test_fail("display didn't say how many buffers it holds");
-            return wt.step == W_DONE;
-        }
+        if (!display_ask())
+            return waiting(3000, "display didn't say how many buffers it holds");
         wt.with = display_buffers();
         wt.starts = ik.starts;
         KillProcess(ik.proc);
@@ -554,19 +468,13 @@ bool window_test(void)
         return false;
     case W_I_BACK:
         /* Started again, and the client's windows open on it. */
-        if (ik.starts == wt.starts || !asked() || icn.got.im_Windows < 3) {
-            if (late(20000))
-                test_fail("intuition didn't come back with the client's windows");
-            return wt.step == W_DONE;
-        }
+        if (ik.starts == wt.starts || !asked() || icn.got.im_Windows < 3)
+            return waiting(20000, "intuition didn't come back with the client's windows");
         next(W_I_FREED);
         return false;
     case W_I_FREED:
-        if (!display_ask() || display_buffers() != wt.with) {
-            if (late(3000))
-                test_fail("display didn't free a dead intuition's buffers");
-            return wt.step == W_DONE;
-        }
+        if (!display_ask() || display_buffers() != wt.with)
+            return waiting(3000, "display didn't free a dead intuition's buffers");
         if (!(u = display_unit())) {
             test_fail("display wasn't running to be killed");
             return true;
@@ -578,21 +486,15 @@ bool window_test(void)
     case W_D_BACK:
         /* display back, and intuition's buffers taken from it again. */
         if (!(u = display_unit()) || u->deaths == wt.display_deaths || !display_ask() ||
-            display_buffers() != wt.with - wt.before) {
-            if (late(20000))
-                test_fail("intuition didn't take its buffers again from the restarted display");
-            return wt.step == W_DONE;
-        }
+            display_buffers() != wt.with - wt.before)
+            return waiting(20000, "intuition didn't take its buffers again from the restarted display");
         wt.before = 0;              /* the new display's, without intuition */
         wt.input_starts = input_kill();
         next(W_END);
         return false;
     case W_END:
-        if (!ended(&code)) {
-            if (late(60000))
-                test_fail("window's second round didn't finish");
-            return wt.step == W_DONE;
-        }
+        if (!ended(&wt.client, &code))
+            return waiting(60000, "window's second round didn't finish");
         if (code != 0) {
             test_fail("window's checks across the servers' deaths failed");
             return true;
@@ -605,19 +507,13 @@ bool window_test(void)
         next(W_STOP);
         return false;
     case W_STOP:
-        if (ik.proc) {
-            if (late(3000))
-                test_fail("intuition wouldn't die");
-            return wt.step == W_DONE;
-        }
+        if (ik.proc)
+            return waiting(3000, "intuition wouldn't die");
         next(W_FREED);
         return false;
     case W_FREED:
-        if (!display_ask() || display_buffers() != wt.before) {
-            if (late(3000))
-                test_fail("display didn't free a dead intuition's buffers");
-            return wt.step == W_DONE;
-        }
+        if (!display_ask() || display_buffers() != wt.before)
+            return waiting(3000, "display didn't free a dead intuition's buffers");
         lines();
         wt.step = W_DONE;
         return true;
@@ -689,16 +585,20 @@ static void desktop_fail(const char *what)
         dt.client = 0;
     }
     dt.on = false;
-    wb.wanted = false;
-    if (wb.proc)
-        KillProcess(wb.proc);
-    intuition_want(false);
+    desktop_want(false);
     dt.step = D_DONE;
 }
 
 static bool dt_late(uint64_t ms)
 {
     return hwdb.now - dt.at > ms * MS;
+}
+
+static bool dt_waiting(uint64_t ms, const char *what)
+{
+    if (dt_late(ms))
+        desktop_fail(what);
+    return dt.step == D_DONE;
 }
 
 static void dt_next(uint8_t step)
@@ -709,7 +609,6 @@ static void dt_next(uint8_t step)
 
 bool desktop_test(void)
 {
-    struct ProcessInfo pi;
     int64_t p, code;
 
     switch (dt.step) {
@@ -720,17 +619,12 @@ bool desktop_test(void)
         }
         if (!dt.at)
             dt.at = hwdb.now;
-        if (!display_ask()) {
-            if (dt_late(3000))
-                desktop_fail("display didn't say how many buffers it holds");
-            return dt.step == D_DONE;
-        }
+        if (!display_ask())
+            return dt_waiting(3000, "display didn't say how many buffers it holds");
         dt.before = display_buffers();
         dt.wb_starts = wb.starts;
         dt.i_starts = ik.starts;
-        intuition_want(true);
-        wb.wanted = true;
-        workbench_keep();
+        desktop_want(true);
         p = CreateProcess("window", WINDOW_DESKTOP | (wt.input ? DESKTOP_MOUSE : 0) | (hwdb.drag ? WINDOW_DRAG : 0),
                           SIG_DEAD, 0);
         if (p < 0) {
@@ -742,14 +636,8 @@ bool desktop_test(void)
         dt_next(D_RUN);
         return false;
     case D_RUN:
-        if (QueryProcess(dt.client, &pi) != 0 || pi.pi_State < PROCS_EXITED) {
-            if (dt_late(150000 + (hwdb.drag ? 300000 : 0)))
-                desktop_fail("window's desktop round didn't finish");
-            return dt.step == D_DONE;
-        }
-        code = pi.pi_State == PROCS_EXITED ? pi.pi_ExitCode : -1;
-        CloseHandle(dt.client);
-        dt.client = 0;
+        if (!ended(&dt.client, &code))
+            return dt_waiting(150000 + (hwdb.drag ? 300000 : 0), "window's desktop round didn't finish");
         dt.on = false;
         if (code != 0) {
             desktop_fail("window's checks of the desktop failed");
@@ -760,27 +648,17 @@ bool desktop_test(void)
             desktop_fail("the Workbench or intuition wasn't started again after its death");
             return true;
         }
-        wb.wanted = false;
-        if (wb.proc)
-            KillProcess(wb.proc);
-        intuition_want(false);
+        desktop_want(false);
         dt_next(D_STOP);
         return false;
     case D_STOP:
-        shells_keep();
-        if (ik.proc || wb.proc || prefs || intuition_shells()) {
-            if (dt_late(3000))
-                desktop_fail("the desktop's programs wouldn't end");
-            return dt.step == D_DONE;
-        }
+        if (ik.proc || wb.proc || prefs || intuition_shells())
+            return dt_waiting(3000, "the desktop's programs wouldn't end");
         dt_next(D_FREED);
         return false;
     case D_FREED:
-        if (!display_ask() || display_buffers() != dt.before) {
-            if (dt_late(3000))
-                desktop_fail("display didn't free a dead intuition's buffers");
-            return dt.step == D_DONE;
-        }
+        if (!display_ask() || display_buffers() != dt.before)
+            return dt_waiting(3000, "display didn't free a dead intuition's buffers");
         {
             struct hw_line l = { 0 };
 

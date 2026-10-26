@@ -26,8 +26,6 @@
 #include "../../drv/display/saturn.h"
 #include "server.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr uint64_t SPINS = 20000000;
 
 /* --- The stop method. --- */
@@ -194,12 +192,7 @@ struct unit *display_unit(void)
 
 static bool client_ended(int64_t *code)
 {
-    struct ProcessInfo pi;
-
-    if (QueryProcess(dt.client, &pi) != 0 || pi.pi_State < PROCS_EXITED)
-        return false;
-    *code = pi.pi_State == PROCS_EXITED ? pi.pi_ExitCode : -1;
-    return true;
+    return proc_ended(dt.client, code);
 }
 
 static bool start_client(uint64_t arg)

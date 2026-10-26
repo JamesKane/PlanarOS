@@ -23,8 +23,6 @@
 
 #include "server.h"
 
-void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-
 constexpr uint64_t ACPID_MS = 10000;        /* to load the namespace and describe it */
 constexpr uint64_t PAGE = 4096;
 constexpr uint64_t WINDOW_MAX = 1 << 20;    /* the most one region asks at once */

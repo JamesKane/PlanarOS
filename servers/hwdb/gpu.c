@@ -143,13 +143,13 @@ static struct unit *gpu_unit(void)
 /* 0 running, else its exit code + 1 (-1 if it didn't exit). */
 static int state_of(Handle *h)
 {
-    struct ProcessInfo pi;
+    int64_t code;
 
-    if (QueryProcess(*h, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+    if (!proc_ended(*h, &code))
         return 0;
     CloseHandle(*h);
     *h = 0;
-    return pi.pi_State == PROCS_EXITED ? (int)pi.pi_ExitCode + 1 : -1;
+    return code < 0 ? -1 : (int)code + 1;
 }
 
 static int client_state(void)

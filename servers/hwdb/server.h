@@ -198,6 +198,25 @@ struct unit *display_unit(void);    /* the console's display, running */
 uint32_t display_buffers(void);     /* display's, every client's, as last asked; UINT32_MAX: not known */
 bool display_ask(void);             /* ask again; true once the answer is in */
 
+/* --- A program hwdb keeps going (server.c): intuition, the Workbench, input. --- */
+
+struct kept {
+    const char *name;               /* its program */
+    const char *what;               /* what it's called when it's said */
+    uint64_t arg;                   /* its argument, at its next start */
+    bool wanted;
+    bool steady;                    /* started again 10 ms after every end, not later each time */
+    bool quits;                     /* an exit with 0 is a Quit: no longer wanted */
+    Handle proc;
+    uint64_t due, started, delay;
+    unsigned starts;
+};
+
+void kept_keep(struct kept *k);     /* its end let go of, and started again if it's wanted and due; ended when stopping */
+uint64_t kept_due(const struct kept *k);    /* when it's to start again; 0 if it isn't */
+uint64_t earliest(uint64_t a, uint64_t b);  /* the earlier deadline; 0 is none */
+bool proc_ended(Handle proc, int64_t *code);    /* it has ended: its exit code in *code (if asked), -1 if it faulted or was killed */
+
 /* --- intuition (intuition.c): the server kept going while it's wanted; the window test. --- */
 
 void intuition_keep(void);          /* started, and again when it ends, while wanted; ended when stopping */

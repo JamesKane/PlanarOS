@@ -25,8 +25,6 @@
 #include "../../drv/power/smt.h"
 #include "server.h"
 
-void *memset(void *dst, int c, size_t n);
-
 constexpr unsigned MSGS = 64;             /* a power of two: they're the ring's slots too */
 
 struct power power;
@@ -508,7 +506,6 @@ static void lines(void)
 /* One step; true when the test is over. */
 bool power_test(void)
 {
-    struct ProcessInfo pi;
     struct unit *pu;
     int64_t p;
 
@@ -551,7 +548,7 @@ bool power_test(void)
         pt.step = P_VOTED;
         return false;
     case P_VOTED:
-        if (QueryProcess(pt.voter, &pi) == 0 && pi.pi_State >= PROCS_EXITED) {
+        if (proc_ended(pt.voter, nullptr)) {
             test_fail("powervote ended before it was killed (its checks failed)");
             return true;
         }
@@ -567,7 +564,7 @@ bool power_test(void)
         pt.step = P_KILLED;
         return false;
     case P_KILLED:
-        if (QueryProcess(pt.voter, &pi) != 0 || pi.pi_State < PROCS_EXITED)
+        if (!proc_ended(pt.voter, nullptr))
             return false;
         if (!asked_gpu()) {
             if (late(3000))
