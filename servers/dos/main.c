@@ -209,7 +209,7 @@ static void mount_all(void)
         }
 }
 
-/* "VOLUME:path", or an assign's (SYS:, C:): the volume, and the path on it. */
+/* "VOLUME:path", or an assign's (SYS:, C:, S:): the volume, and the path on it. */
 static struct volume *resolve(const char *in, char *path, unsigned size)
 {
     unsigned colon = 0;
@@ -219,11 +219,11 @@ static struct volume *resolve(const char *in, char *path, unsigned size)
     if (!in[colon] || colon == 0)
         return nullptr;
     path[0] = '\0';
-    if ((colon == 3 && same(in, "sys", 3)) || (colon == 1 && same(in, "c", 1))) {
+    if ((colon == 3 && same(in, "sys", 3)) || (colon == 1 && (same(in, "c", 1) || same(in, "s", 1)))) {
         if (sys_vol < 0)
             return nullptr;
         if (colon == 1)
-            cat(path, size, "EFI/planar/C/");
+            cat(path, size, same(in, "c", 1) ? "EFI/planar/C/" : "EFI/planar/S/");
         cat(path, size, in + colon + 1);
         return &vols[sys_vol];
     }

@@ -1,0 +1,4 @@
+; A Shell in a window (V8 step 5): conformance/window.c types Shell FROM S:window
+Echo "Planar's Shell, in a window, in System Mono."
+Type S:greeting
+Echo "Box drawing ┌─┬─┐ ░▒▓█, Latin-1 café, and 0O 1lI"

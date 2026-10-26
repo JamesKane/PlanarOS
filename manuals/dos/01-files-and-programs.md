@@ -73,7 +73,7 @@ Commands are built from `cmd/NAME.c`, as ELF only, and put in `C:`: by `tools/mk
 - No locks (`Lock`, `CurrentDir`): a path names a file, and the Shell passes its current directory as text.
 - No `Open` returning a `BPTR` filehandle: a file is a number, and each read names its offset. The calls have the RKM's names where they do the RKM's job (`ReadArgs`, `AddPart`, `PutStr`, `Printf`, `CreateDir`), and names of their own where they don't (`OpenFile`, `ReadFile`, `ExaminePath`), so an Amiga programmer isn't misled.
 - No `Input()` and `Output()`: a command names its console (`struct Con`), and `ReadArgs` names its line.
-- Assigns are fixed: `SYS:` and `C:`. There's no `Assign` command yet.
+- Assigns are fixed: `SYS:`, `C:` and `S:` (`SYS:EFI/planar/S`, the scripts, V8 step 5). There's no `Assign` command yet.
 
 ## Functions used
 

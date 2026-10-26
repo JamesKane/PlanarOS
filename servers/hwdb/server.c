@@ -966,6 +966,8 @@ static void serve(unsigned c)
             unresponsive(m);
         } else if (op == HWDB_KILL_CLIENT) {
             m->hm_Msg.mn_Error = (int32_t)intuition_kill_client(m->hm_Conn);
+        } else if (op == HWDB_NEW_SHELL) {
+            m->hm_Msg.mn_Error = (int32_t)intuition_new_shell();
         } else if (u && op == HWDB_BIND && conn_unit[c] == UINT32_MAX) {
             conn_unit[c] = idx;
             bind_reply(u, m);

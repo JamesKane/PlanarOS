@@ -9,6 +9,11 @@
  * wanted. It has no device: a dead intuition's planes are display's to
  * turn off, as any client's.
  *
+ * The system menu's Shell (V8 step 5): intuition asks (HWDB_NEW_SHELL),
+ * and hwdb starts a conwin, a console window with a Shell in it, and
+ * holds it, so it outlives intuition's deaths. It's let go of when it
+ * ends, and ended when hwdb stops.
+ *
  * The test (killtest.c's T_WINDOW), on a machine with a screen, with
  * conformance/window.c as the client. hwdb watches intuition with
  * INTUI_INFO on a connection of its own, and display's buffers with
@@ -41,6 +46,8 @@ void *memset(void *dst, int c, size_t n);
 
 constexpr uint64_t INTUITION_COSTS = 1;   /* servers/intuition/main.c's */
 
+static void shells_keep(void);
+
 static struct {
     bool wanted;
     Handle proc;
@@ -53,6 +60,7 @@ void intuition_keep(void)
     struct ProcessInfo pi;
     int64_t p;
 
+    shells_keep();
     if (hwdb.stopping && ik.proc) {
         CloseHandle(ik.proc);       /* which ends it */
         ik.proc = 0;
@@ -116,6 +124,55 @@ void intuition_desktop(void)
         return;
     say("hwdb: the desktop: intuition started, with the keyboard; the Shell on the serial line");
     intuition_want(true);
+}
+
+/* --- Shells in windows (V8 step 5): a conwin each, hwdb's own. --- */
+
+constexpr unsigned SHELLS = 8;      /* conwin's con.1 to con.8 */
+
+static Handle shells[SHELLS];
+
+/* Those that ended let go of; all ended when hwdb stops. */
+static void shells_keep(void)
+{
+    struct ProcessInfo pi;
+
+    for (unsigned i = 0; i < SHELLS; i++)
+        if (shells[i] && (hwdb.stopping || (QueryProcess(shells[i], &pi) == 0 && pi.pi_State >= PROCS_EXITED))) {
+            CloseHandle(shells[i]);     /* which ends it, stopping */
+            shells[i] = 0;
+        }
+}
+
+int64_t intuition_new_shell(void)
+{
+    int64_t p;
+
+    shells_keep();
+    if (hwdb.stopping)
+        return ERR_BUSY;
+    for (unsigned i = 0; i < SHELLS; i++) {
+        if (shells[i])
+            continue;
+        if ((p = CreateProcess("conwin", 0, SIG_DEAD, 0)) < 0) {
+            say("hwdb: the system menu's Shell: conwin couldn't be started");
+            return p;
+        }
+        shells[i] = (Handle)p;
+        say("hwdb: the system menu's Shell: conwin started, a Shell in a window");
+        return 0;
+    }
+    return ERR_FULL;
+}
+
+unsigned intuition_shells(void)
+{
+    unsigned n = 0;
+
+    shells_keep();
+    for (unsigned i = 0; i < SHELLS; i++)
+        n += shells[i] != 0;
+    return n;
 }
 
 /* --- The connection: test mode only. --- */
@@ -269,9 +326,13 @@ static void lines(void)
         say("V8.4 resize ok: a window resized by its corner, told by IDCMP_NEWSIZE, its old buffer "
             "shown until new ones came and then let go of, held to its least size; EasyRequest "
             "answered by a click");
+        say("V8.5 shell window ok: the system menu's Shell, a console window in System Mono; a "
+            "script run by a Shell in it, read back as the host draws it; EndShell; conwin killed "
+            "under its Shell, the window and its console gone");
     } else {
         say("V7.4 input: not exercised: nobody moved the mouse, or intuition had no input");
         say("V8.4 screen bar, menus and resize: not exercised: nobody moved the mouse");
+        say("V8.5 shell window: not exercised: nobody moved the mouse");
     }
     say("V7.5 supervision ok: kill-window: a killed client's two windows gone from the screen, its "
         "Areas unshared, intuition's handles and pages back where they were");
@@ -299,6 +360,7 @@ bool window_test(void)
             say("V7.4 input: not exercised: no screen here");
             say("V7.5 supervision: not exercised: no screen here");
             say("V8.4 screen bar, menus and resize: not exercised: no screen here");
+            say("V8.5 shell window: not exercised: no screen here");
             return true;
         }
         /* display's own count first: what intuition takes must come back. */

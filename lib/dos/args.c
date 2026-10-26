@@ -377,7 +377,8 @@ void FreeArgs(struct RDArgs *rdArgs)
     }
 }
 
-/* The Shell's line: its directory, a newline, then the arguments. */
+/* The Shell's line: its directory (and a tab and its console, a window's), a
+ * newline, then the arguments. */
 void SplitArgs(uint64_t arg, char *cwd, unsigned cwdSize, const char **args)
 {
     const char *line = arg ? (const char *)arg : "";
@@ -387,9 +388,22 @@ void SplitArgs(uint64_t arg, char *cwd, unsigned cwdSize, const char **args)
     cwd[0] = '\0';
     for (const char *p = line; *p; p++)
         if (*p == '\n') {
-            for (const char *q = line; q < p && n < cwdSize - 1; q++)
+            const char *q = line, *tab = nullptr;
+            char con[CON_NAME];
+            unsigned k = 0;
+
+            for (; q < p && *q != '\t' && n < cwdSize - 1; q++)
                 cwd[n++] = *q;
             cwd[n] = '\0';
+            for (const char *t = line; t < p; t++)
+                if (*t == '\t' && !tab)
+                    tab = t;
+            if (tab) {                  /* the Shell's console, a window's */
+                for (q = tab + 1; q < p && k < CON_NAME - 1; q++)
+                    con[k++] = *q;
+                con[k] = '\0';
+                SetConName(con);
+            }
             *args = p + 1;
             break;
         }

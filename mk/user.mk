@@ -180,7 +180,7 @@ define user_dir_prog
 $(1)_OBJS := $$(patsubst %.c,$(BUILD)/user/%.o,$$(filter-out %/host.c %/test.c,$$(wildcard $(2)/*.c))) \
 	$(if $(filter drv/%,$(2)),$(USER_DRV)) $(if $(filter servers/acpid,$(2)),$(USER_ACPICA) $(USER_CLIB)) \
 	$(if $(filter servers/hwdb servers/dos,$(2)),$(USER_BLK)) \
-	$(if $(filter servers/hwdb drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
+	$(if $(filter servers/hwdb servers/conwin drv/gpu-panthor drv/gpu-rogue,$(2)),$(USER_DOS))
 $(BUILD)/user/$(1).elf: $$($(1)_OBJS) $(USER_RT) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) \
 		arch/$(ARCH)/user/user.ld
 	$$(CC) $(USER_LDFLAGS) $(USER_RT) $$($(1)_OBJS) $(USER_GFXLIB) $(USER_UTILLIB) $(USER_EXECLIB) $(USER_BUILTINS) -o $$@

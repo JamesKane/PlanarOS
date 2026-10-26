@@ -30,7 +30,9 @@ types those keys (QEMU's qcodes, a "shift-" prefix held over the key),
 "... send drag 10 -5 left" moves it with the button held. The window
 test asks as "window: send ..." (conformance/window.c), and "window:
 send screendump menus" saves the screen as build/screens/menus.ppm
-(QMP's screendump), to be looked at.
+(QMP's screendump), to be looked at. "window: send text Shell FROM S:x"
+types the rest of the line as it stands, a key (with Shift) a character,
+on a US keyboard.
 """
 
 import argparse
@@ -43,7 +45,7 @@ import subprocess
 import sys
 import time
 
-SEND = re.compile(rb"(?:inputtest|window): send (keys|mouse|move|drag|screendump) ([^\r\n]*)")
+SEND = re.compile(rb"(?:inputtest|window): send (keys|text|mouse|move|drag|screendump) ([^\r\n]*)")
 
 
 class Qmp:
@@ -97,6 +99,28 @@ class Qmp:
             for k in reversed(held):
                 self._events([key(k, False)])
 
+    # A character's key on a US keyboard, and whether it takes Shift.
+    _PLAIN = {" ": "spc", "-": "minus", "=": "equal", "[": "bracket_left", "]": "bracket_right",
+              ";": "semicolon", "'": "apostrophe", "`": "grave_accent", "\\": "backslash",
+              ",": "comma", ".": "dot", "/": "slash"}
+    _SHIFTED = {"!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8",
+                "(": "9", ")": "0", "_": "minus", "+": "equal", "{": "bracket_left",
+                "}": "bracket_right", ":": "semicolon", '"': "apostrophe", "~": "grave_accent",
+                "|": "backslash", "<": "comma", ">": "dot", "?": "slash"}
+
+    def text(self, line):
+        words = []
+        for ch in line:
+            if ch.isascii() and (ch.islower() or ch.isdigit()):
+                words.append(ch)
+            elif ch.isascii() and ch.isupper():
+                words.append("shift-" + ch.lower())
+            elif ch in self._PLAIN:
+                words.append(self._PLAIN[ch])
+            elif ch in self._SHIFTED:
+                words.append("shift-" + self._SHIFTED[ch])
+        self.keys(" ".join(words))
+
     def _move(self, dx, dy):
         self._events([{"type": "rel", "data": {"axis": "x", "value": int(dx)}},
                       {"type": "rel", "data": {"axis": "y", "value": int(dy)}}])
@@ -108,6 +132,8 @@ class Qmp:
         """What a "send" line asks for: keys, or the mouse."""
         if verb == "keys":
             return self.keys(words)
+        if verb == "text":
+            return self.text(words)
         self._connect()
         if verb == "screendump":
             name = re.sub(r"[^a-z0-9-]", "", words.strip()) or "screen"

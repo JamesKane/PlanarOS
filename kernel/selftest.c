@@ -1514,6 +1514,8 @@ void selftest_tasks(void *)
     /* hwdb's window test said what it saw of the screen bar, menus,
      * resizing and requesters (V8.4 lines, servers/hwdb/intuition.c). */
     kprintf("V8.4 done\n");
+    /* And of a Shell in a console window (V8.5 lines, the same). */
+    kprintf("V8.5 done\n");
     if (bootargs_has("hang")) {
         /* For checking a board's watchdog brings it back. */
         kprintf("planar: hanging, interrupts off\n");

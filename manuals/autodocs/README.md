@@ -122,7 +122,7 @@
 | MapLease | [lease](lease.md#leasemaplease) | kernel |
 | NextTagItem | [utility](utility.md#utilitynexttagitem) | library |
 | NextVolume | [dos](dos.md#dosnextvolume) | library |
-| OpenCon, WriteCon, PutStr, CloseCon | [dos](dos.md#dosopencon) | library |
+| OpenCon, WriteCon, PutStr, CloseCon, ReadCon | [dos](dos.md#dosopencon) | library |
 | OpenDos, OpenDosUntil, CloseDos | [dos](dos.md#dosopendos) | library |
 | OpenFile, CloseFile | [dos](dos.md#dosopenfile) | library |
 | OpenFont | [font](font.md#fontopenfont) | library, through `IFont` |
@@ -157,6 +157,7 @@
 | RunCommand | [dos](dos.md#dosruncommand) | library |
 | ScaleUnits | [font](font.md#fontscaleunits) | library, through `IFont` |
 | SetSignal | [exec](exec.md#execsetsignal) | kernel |
+| SetConName, ConName | [dos](dos.md#dossetconname) | library |
 | SetFont | [gfx](gfx.md#gfxsetfont) | library, through `IGfx` |
 | SetMem | [exec](exec.md#execsetmem) | library |
 | SetMenuStrip | [intuition](intuition.md#intuitionsetmenustrip) | library, through `IIntuition` |

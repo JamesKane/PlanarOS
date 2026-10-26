@@ -126,7 +126,10 @@ static unsigned fuzz(unsigned *cases)
 /* --- A console to write to. --- */
 
 static struct {
-    bool up;                        /* ConnectPort finds "con.0" */
+    bool up;                        /* ConnectPort finds the console */
+    const char *name;               /* its name: "con.0" if nullptr */
+    const char *typed;              /* what a DRV_READ answers with (DoMsg) */
+    int32_t read_error;
     bool slow;                      /* DoMsgUntil's deadline passes instead */
     int fail_after;                 /* DoMsg's that work before it goes; -1: never */
     unsigned reports;               /* ReportUnresponsive's */
@@ -145,7 +148,7 @@ uint64_t CurrentTime(void)
 
 int64_t ReportUnresponsive(const char *portName)
 {
-    if (strcmp(portName, "con.0") != 0)
+    if (strcmp(portName, fake.name ? fake.name : "con.0") != 0)
         abort();
     fake.reports++;
     return 0;
@@ -155,7 +158,7 @@ int64_t ConnectPort(struct MsgPort *mp, const char *name, int64_t sigbit, uint32
                     uint64_t heap)
 {
     (void)mp, (void)sigbit, (void)slots, (void)heap;
-    if (strcmp(name, "con.0") != 0)
+    if (strcmp(name, fake.name ? fake.name : "con.0") != 0)
         abort();
     fake.connects++;
     return fake.up ? 0 : ERR_NOTFOUND;
@@ -191,6 +194,24 @@ int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline)
     memcpy(fake.got + fake.n, r->dr_Data, r->dr_Len);
     fake.n += r->dr_Len;
     fake.msgs++;
+    return 0;
+}
+
+/* ReadCon's: a console window answering a read with what's typed. */
+int64_t DoMsg(struct MsgPort *mp, struct Message *m)
+{
+    struct DrvRequest *r = (struct DrvRequest *)m;
+    uint32_t n = fake.typed ? (uint32_t)strlen(fake.typed) : 0;
+
+    (void)mp;
+    if (r->dr_Op != DRV_READ || r->dr_Len > sizeof r->dr_Data)
+        abort();
+    m->mn_Error = fake.read_error;
+    n = n < r->dr_Len ? n : r->dr_Len;
+    memcpy(r->dr_Data, fake.typed, n);
+    r->dr_Len = n;
+    if (fake.typed)
+        fake.typed += n;
     return 0;
 }
 
@@ -282,6 +303,34 @@ static unsigned console(unsigned *cases)
     CloseCon(&c);
     CC(fake.logs == 2 && strlen(fake.log[0]) == sizeof c.cn_Line - 1 &&
        strlen(fake.log[1]) == 200 - (sizeof c.cn_Line - 1));
+
+    /* A console window's (V8 step 5): named by the Shell's line, read a line at a time. */
+    {
+        char cwd[DOS_PATH], buf[64];
+        const char *args;
+
+        SplitArgs((uint64_t)"SYS:C\nFROM x", cwd, sizeof cwd, &args);
+        CC(!strcmp(cwd, "SYS:C") && !strcmp(args, "FROM x") && !strcmp(ConName(), "con.0"));
+        SplitArgs((uint64_t)"SYS:EFI\tcon.1\nFROM x", cwd, sizeof cwd, &args);
+        CC(!strcmp(cwd, "SYS:EFI") && !strcmp(args, "FROM x") && !strcmp(ConName(), "con.1"));
+        fake_reset(true, -1);
+        fake.name = "con.1";
+        fake.typed = "a line\nand more";
+        OpenCon(&c, 16);
+        PutStr(&c, "> ");
+        CC(c.cn_Open && got("> "));
+        CC(ReadCon(&c, buf, 4) == 4 && !memcmp(buf, "a li", 4));
+        CC(ReadCon(&c, buf, sizeof buf) == 11 && !memcmp(buf, "ne\nand more", 11));
+        CC(ReadCon(&c, buf, sizeof buf) == 0);                 /* the end of the input */
+        fake.read_error = ERR_BADARG;
+        CC(ReadCon(&c, buf, sizeof buf) == ERR_BADARG);
+        CloseCon(&c);
+        CC(ReadCon(&c, buf, sizeof buf) == ERR_PORT_DIED);     /* closed */
+        SetConName("a name far longer than a console's");
+        CC(strlen(ConName()) == CON_NAME - 1);
+        SetConName(nullptr);
+        CC(!strcmp(ConName(), "con.0"));
+    }
     return 0;
 }
 

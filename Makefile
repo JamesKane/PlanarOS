@@ -74,7 +74,7 @@ PORTABLE_SRCS := \
 CHECK_FLAGS :=
 FULL_CHECK := --forbid 'skipped: (?!not asked for)' --forbid '^\[[a-z0-9]+\] .*\x1b'
 
-EXPECT := V8.4 done
+EXPECT := V8.5 done
 
 CFLAGS := -std=c23 -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -O2 -g
 
@@ -139,7 +139,7 @@ $(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
 
-.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test font-oracle font-fuzz clean
+.PHONY: all run test test-all compare-hw vq3 soak check hwdb-test dos-test power-test display-test rt-test exec-test utility-test span-fuzz clib-test dos-lib-test gfx-test intuition-test conwin-test font-oracle font-fuzz clean
 .DEFAULT_GOAL := all
 
 all: $(IMAGE)
@@ -156,8 +156,9 @@ $(BUILD)/%.S.o: %.S
 
 # Seconds a boot may take to reach EXPECT; a board over the serial
 # console needs minutes (mk/ky-x1.mk). RV64 QEMU's run near 20 once it
-# had a screen and display's tests (V7 step 1).
-BOOT_TIMEOUT ?= 40
+# had a screen and display's tests (V7 step 1), and near 40 once the
+# window test typed at a Shell in a window (V8 step 5).
+BOOT_TIMEOUT ?= 60
 
 # BOOT_LOG=file keeps the transcript.
 test: $(IMAGE) $(TEST_DEPS)
@@ -197,6 +198,7 @@ test-all:
 	@$(MAKE) --no-print-directory dos-lib-test
 	@$(MAKE) --no-print-directory gfx-test
 	@$(MAKE) --no-print-directory intuition-test
+	@$(MAKE) --no-print-directory conwin-test
 	@$(MAKE) --no-print-directory font-oracle
 	@$(MAKE) --no-print-directory font-fuzz
 
@@ -373,6 +375,24 @@ $(INTUITION_TEST): $(GFX_SRCS) $(GFX_NEON) $(INTUITION_HOST_SRCS) $(wildcard ser
 
 intuition-test: $(INTUITION_TEST)
 	@$(INTUITION_TEST)
+
+# A console window's text (servers/conwin/term.c) on the host with the
+# sanitizers: what's written, the scrollback, typing; then drawn in
+# System Mono from lib/font linked in, scalar and NEON, in pieces as
+# whole, to the CRCs conformance/window.c reads back on QEMU
+# (conformance/shellwin.h).
+CONWIN_TEST := build/conwin/conwin-test
+CONWIN_HOST_SRCS := $(addprefix servers/conwin/,term.c test.c)
+
+$(CONWIN_TEST): $(GFX_SRCS) $(GFX_NEON) $(CONWIN_HOST_SRCS) $(wildcard servers/conwin/*.h) \
+		$(FONT_SRCS) $(FONT_FILES) lib/font/sfnt.h lib/utility/span.c conformance/shellwin.h \
+		cmd/scripts/window lib/gfx/rows.h include/planar/gfx.h
+	@mkdir -p $(dir $@)
+	$(CROSS_CC) $(HWDB_CFLAGS:-Iservers/hwdb=-Iservers/conwin) -Ilib/font $(if $(GFX_NEON),-DGFX_TEST_NEON) \
+	  $(GFX_SRCS) $(GFX_NEON) $(FONT_SRCS) lib/utility/span.c $(CONWIN_HOST_SRCS) -o $@
+
+conwin-test: $(CONWIN_TEST)
+	@$(CONWIN_TEST)
 
 # One QEMU machine described three ways (mk/qemu-virt-a64.mk): the device
 # tree from -kernel, the device tree through edk2, and ACPI through edk2.

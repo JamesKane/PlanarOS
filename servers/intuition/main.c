@@ -41,7 +41,8 @@
  * buffer shown clipped (or the backdrop beyond it) until the client
  * gives buffers of the new size, taken at its next present. Requesters
  * are windows of intuition's own: a client's EasyRequest, answered when
- * chosen; the system menu's About; and a window whose close gadget gets
+ * chosen; the system menu's About (its Shell asks hwdb for a console
+ * window: HWDB_NEW_SHELL, V8 step 5); and a window whose close gadget gets
  * no CloseWindow within the deadline, which asks whether to close it,
  * and on Close asks hwdb to end its client (HWDB_KILL_CLIENT).
  *
@@ -1235,8 +1236,8 @@ static void clock_tick(void)
     rearm();
 }
 
-/* The system menu: About; the rest wait for what does them (the Shell
- * in a window, step 5; Reboot and Shutdown, power). */
+/* The system menu: About, and Shell (a console window, hwdb's: V8 step
+ * 5); Reboot and Shutdown wait for power to have them. */
 static void system_menu(void)
 {
     static const char *const items[] = { "About Planar", nullptr, "Shell", nullptr, "Reboot", "Shutdown" };
@@ -1252,7 +1253,7 @@ static void system_menu(void)
             continue;
         }
         copy(mi->mi_Label, items[i], INTUI_LABEL);
-        mi->mi_Flags = i ? NM_ITEMDISABLED : 0;
+        mi->mi_Flags = i > 2 ? NM_ITEMDISABLED : 0;
     }
 }
 
@@ -1367,6 +1368,7 @@ static void pick(struct window *w, unsigned index, unsigned menu, unsigned item,
 }
 
 static void about(void);
+static void new_shell(void);
 
 /* The menus closed, and the highlighted item chosen if it can be. */
 static void menu_choose(uint64_t time)
@@ -1381,6 +1383,8 @@ static void menu_choose(uint64_t time)
     if (system) {
         if (m.hot == 0)
             about();
+        else if (m.hot == 2)
+            new_shell();
         return;
     }
     if (w && m.strip == &w->strip)
@@ -1639,25 +1643,42 @@ static int64_t requested(unsigned c, struct IntuiMsg *m, const struct IntuiMsg *
     return 0;
 }
 
-/* hwdb asked to end client c, which isn't answering (V8 step 4): true
- * if it did. */
-static bool kill_client(unsigned c)
+/* A request of hwdb's, on a connection made for it: 0 or why not. */
+static int64_t hwdb_call(uint32_t op, uint64_t conn)
 {
     struct MsgPort mp;
     struct HwdbMsg *m;
     int64_t e = ERR_NOMEM;
 
-    if (ConnectPort(&mp, "hwdb", SIG_CALL, 2, 2 * sizeof *m) != 0)
-        return false;
+    if ((e = ConnectPort(&mp, "hwdb", SIG_CALL, 2, 2 * sizeof *m)) != 0)
+        return e;
     if ((m = AllocMsg(&mp, sizeof *m))) {
         memset(m, 0, sizeof *m);
         m->hm_Msg.mn_Length = sizeof *m;
-        m->hm_Op = HWDB_KILL_CLIENT;
-        m->hm_Conn = (uint64_t)it.mp[c].mp_Conn;
+        m->hm_Op = op;
+        m->hm_Conn = conn;
         if ((e = DoMsgUntil(&mp, &m->hm_Msg, CurrentTime() + CALL_DEADLINE)) == 0)
             e = m->hm_Msg.mn_Error;
     }
     ClosePort(&mp);
+    return e;
+}
+
+/* The system menu's Shell: hwdb starts a console window (V8 step 5). */
+static void new_shell(void)
+{
+    int64_t e = hwdb_call(HWDB_NEW_SHELL, 0);
+
+    if (e != 0)
+        KPrintF("intuition: hwdb wouldn't start a Shell in a window (%ld)", e);
+}
+
+/* hwdb asked to end client c, which isn't answering (V8 step 4): true
+ * if it did. */
+static bool kill_client(unsigned c)
+{
+    int64_t e = hwdb_call(HWDB_KILL_CLIENT, (uint64_t)it.mp[c].mp_Conn);
+
     if (e == 0)
         say("intuition: a client not answering, ended by hwdb as asked");
     else

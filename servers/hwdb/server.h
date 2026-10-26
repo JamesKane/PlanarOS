@@ -206,6 +206,8 @@ uint64_t intuition_due(void);       /* when it's to start again; 0 if running or
 void intuition_conn_down(void);
 void intuition_conn_serve(struct MsgPort *mp);
 int64_t intuition_kill_client(uint64_t conn);   /* HWDB_KILL_CLIENT: its client on 'conn', ended */
+int64_t intuition_new_shell(void);  /* HWDB_NEW_SHELL: a conwin started, and its Shell; hwdb's to end */
+unsigned intuition_shells(void);    /* conwins running */
 bool window_test(void);             /* the kill test's window step: true when it's over */
 
 /* --- input (input.c): the server kept going; xhci's stop method; the test. --- */

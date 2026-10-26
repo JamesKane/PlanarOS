@@ -1,6 +1,6 @@
 /*
- * lib/dos/con.c -- dos.library's console: OpenCon, WriteCon, PutStr,
- * Printf (planar/dos.h)
+ * lib/dos/con.c -- dos.library's console: SetConName, OpenCon, WriteCon,
+ * PutStr, Printf and ReadCon (planar/dos.h)
  */
 #include <stddef.h>
 
@@ -12,11 +12,30 @@
 void *memset(void *dst, int c, size_t n);
 void *memcpy(void *restrict dst, const void *restrict src, size_t n);
 
+/* The process's console. */
+static char con_name[CON_NAME] = "con.0";
+
+void SetConName(const char *name)
+{
+    unsigned i = 0;
+
+    if (!name || !name[0])
+        name = "con.0";
+    for (; name[i] && i < CON_NAME - 1; i++)
+        con_name[i] = name[i];
+    con_name[i] = '\0';
+}
+
+const char *ConName(void)
+{
+    return con_name;
+}
+
 void OpenCon(struct Con *c, int64_t sigbit)
 {
     memset(c, 0, sizeof *c);
     c->cn_SigBit = sigbit;
-    if (ConnectPort(&c->cn_Port, "con.0", sigbit, 4, 2 * sizeof(struct DrvRequest)) != 0)
+    if (ConnectPort(&c->cn_Port, con_name, sigbit, 4, 2 * sizeof(struct DrvRequest)) != 0)
         return;
     if (!(c->cn_Msg = AllocMsg(&c->cn_Port, sizeof(struct DrvRequest)))) {
         ClosePort(&c->cn_Port);
@@ -57,7 +76,7 @@ void WriteCon(struct Con *c, const char *text, uint32_t len)
                 continue;
             }
             if (e == ERR_TIMEOUT)
-                ReportUnresponsive("con.0");
+                ReportUnresponsive(con_name);
             /* The console went (display restarting): once more on a new
              * connection, else to the log from here. */
             ClosePort(&c->cn_Port);
@@ -133,4 +152,25 @@ uint64_t Printf(struct Con *c, const char *format, ...)
     n = VPrintf(c, format, args);
     va_end(args);
     return n;
+}
+
+int64_t ReadCon(struct Con *c, char *buffer, uint32_t length)
+{
+    struct DrvRequest *r = c->cn_Msg;
+    int64_t e;
+
+    if (!c->cn_Open)
+        return ERR_PORT_DIED;
+    memset(r, 0, sizeof *r);
+    r->dr_Msg.mn_Length = sizeof *r;
+    r->dr_Op = DRV_READ;
+    r->dr_Len = length < sizeof r->dr_Data ? length : sizeof r->dr_Data;
+    if ((e = DoMsg(&c->cn_Port, &r->dr_Msg)) != 0)
+        return e;
+    if (r->dr_Msg.mn_Error != 0)
+        return r->dr_Msg.mn_Error;
+    if (r->dr_Len > length || r->dr_Len > sizeof r->dr_Data)
+        return ERR_BADARG;
+    memcpy(buffer, r->dr_Data, r->dr_Len);
+    return r->dr_Len;
 }

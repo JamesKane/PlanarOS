@@ -1,10 +1,10 @@
 # dos: dos.library
 
-*Checked against V6; the deadlines, step 7.*
+*Checked against V6; the deadlines, step 7; a console window's console, V8 step 5.*
 
 The file calls, the loader, command lines and paths, and the console, in alphabetical order. The names are the RKM's (V6 step 6, [docs §17.4.4](../../docs/17-c-runtime-and-libraries.md)). The header is `planar/dos.h`; the code is `lib/dos/`, the archive `libdos.a`, linked into the commands (`cmd/`), hwdb, the GPU drivers and `dos*` conformance programs (`mk/user.mk`). None is a kernel call. The file calls each send one message to the `dos` server and wait (a trap when the server's asleep). `ReadArgs`, `AddPart`, `FilePart` and `PathPart` work on strings only and never ask the server. The volume is [DOS](../dos/README.md).
 
-A path is `VOLUME:dir/file`, or under an assign: `SYS:`, the volume holding `EFI/planar`, and `C:`, `SYS:EFI/planar/C`. Case doesn't matter.
+A path is `VOLUME:dir/file`, or under an assign: `SYS:`, the volume holding `EFI/planar`; `C:`, `SYS:EFI/planar/C`; and `S:`, `SYS:EFI/planar/S` (V8 step 5). Case doesn't matter.
 
 Errors are the kernel's (`planar/syscalls.h`), as the server gives them: `ERR_NOTFOUND` (no such volume or file), `ERR_RIGHTS` (a read-only volume, or a file not opened for writing), `ERR_EXISTS` (it's there already, or a directory isn't empty), `ERR_BUSY` (removing an open file), `ERR_FULL` (no room), `ERR_BADARG`, `ERR_BADHANDLE` (a file number not the caller's), `ERR_LIMIT` (64 files open in the server), and `ERR_PORT_DIED` if the server went. Every call to the server has a deadline, `DOS_DEADLINE_MS` (10 s, V6 step 7): past it the call gives `ERR_TIMEOUT` and hwdb is told dos is unresponsive (`ReportUnresponsive`), which restarts it; until dos answers the call it missed, the next ones give `ERR_BUSY`.
 
@@ -171,7 +171,7 @@ None known.
 ## dos/OpenCon
 
 **NAME**
-OpenCon, WriteCon, PutStr, CloseCon -- the console
+OpenCon, WriteCon, PutStr, CloseCon, ReadCon -- the console
 
 **SYNOPSIS**
 ```c
@@ -180,12 +180,21 @@ void OpenCon(struct Con *con, int64_t sigBit);
 void WriteCon(struct Con *con, const char *text, uint32_t length);
 void PutStr(struct Con *con, const char *string);
 void CloseCon(struct Con *con);
+int64_t ReadCon(struct Con *con, char *buffer, uint32_t length);   /* V8 step 5 */
 ```
 
 **FUNCTION**
-A program's output, as the Amiga's `Output()`. `OpenCon` connects to the display's console, "con.0". `WriteCon` sends text there, 64 bytes a message (`DRV_WRITE`); the display draws it and logs each line, so it reaches the serial console too. `PutStr` writes a string. `CloseCon` closes it. `Printf` formats onto it.
+A program's output, as the Amiga's `Output()`. `OpenCon` connects to the process's console: the display's, "con.0", unless it's been given a console window's ([SetConName](#dossetconname)). `WriteCon` sends text there, 64 bytes a message (`DRV_WRITE`); the display draws it and logs each line, so it reaches the serial console too, and a console window draws it in its window. `PutStr` writes a string. `CloseCon` closes it. `Printf` formats onto it.
 
-Without a console (no framebuffer, or the display gone), text goes to the kernel's log a line at a time, 159 bytes at most, and the rest of a line when `CloseCon` is called. If the console goes while it's being written (the display restarting), it's connected again once; after that, the log. A message the display hasn't answered in `CON_DEADLINE_MS` (1 s, V6 step 7) is reported to hwdb (`ReportUnresponsive("con.0")`) and treated as the console going.
+`ReadCon` reads what's typed at a console window (`DRV_READ`), as the Amiga's `Read(Input(), ...)` reads a `CON:` window. The window edits each line as it's typed and echoes it; this waits, however long, until one is ended with Return, then gives what's been typed, up to `length` bytes (64 at most), the line's newline included. A line longer than that comes over several calls.
+
+Without a console (no framebuffer, or the display gone), text goes to the kernel's log a line at a time, 159 bytes at most, and the rest of a line when `CloseCon` is called. If the console goes while it's being written (the display restarting), it's connected again once; after that, the log. A message the console hasn't answered in `CON_DEADLINE_MS` (1 s, V6 step 7) is reported to hwdb (`ReportUnresponsive` with the console's name) and treated as the console going.
+
+**RESULT**
+`ReadCon`: the bytes read; 0 at the end of the input (Ctrl-\ typed); or:
+- `ERR_PORT_DIED` -- the console has gone, or never opened.
+- `ERR_BADARG` -- the console has no keyboard (display's "con.0": the serial console is `ReadConsole`'s).
+- `ERR_BUSY` -- another of the process's tasks is reading on the same connection.
 
 **EXAMPLE**
 From `cmd/echo.c`:
@@ -198,14 +207,15 @@ CloseCon(&c);
 ```
 
 **NOTES**
-- None returns an error: output always goes somewhere.
-- The RKM's `PutStr` writes to `Output()`. Planar has no standard handles, so the console is named.
+- None of the output calls returns an error: output always goes somewhere.
+- The RKM's `PutStr` writes to `Output()`. Planar has no standard handles, so the console is named, and a process has one console for all its `Con`s.
+- `ReadCon` holds the `Con`'s one message until a line comes: don't write on the same `Con` from another task meanwhile.
 
 **BUGS**
 A display that restarts twice loses the program to the log for good.
 
 **SEE ALSO**
-[Printf](#dosprintf), [Devices ch. 3](../devices/03-console.md)
+[Printf](#dosprintf), [SetConName](#dossetconname), [Devices ch. 3](../devices/03-console.md)
 
 ---
 
@@ -448,6 +458,42 @@ None known.
 
 ---
 
+## dos/SetConName
+
+**NAME**
+SetConName, ConName -- the process's console (V8 step 5)
+
+**SYNOPSIS**
+```c
+#include <planar/dos.h>
+void SetConName(const char *name);
+const char *ConName(void);
+```
+
+**FUNCTION**
+The console a process's `OpenCon` opens: "con.0", the display's, until it's set; or a console window's, "con.1" to "con.8" ([Devices ch. 3](../devices/03-console.md)). `SetConName` sets it, up to `CON_NAME - 1` (15) bytes; `nullptr` or "" is "con.0". `ConName` says what it is. A `Con` already open stays on the console it opened.
+
+A command needn't call either: `SplitArgs` sets it from the line a Shell in a window starts it with.
+
+**EXAMPLE**
+From `cmd/shell.c`, for `Shell CON con.1`:
+```c
+CloseCon(&con);
+SetConName((const char *)a[2]);
+OpenCon(&con, SIG_CON);
+```
+
+**NOTES**
+The process's, not a task's: every task's `OpenCon` after it opens the same console. Not the RKM's: AmigaDOS's console was a handle, `Output()`, given to the process by the Shell that started it.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[OpenCon](#dosopencon), [SplitArgs](#dossplitargs)
+
+---
+
 ## dos/SplitArgs
 
 **NAME**
@@ -462,6 +508,8 @@ void SplitArgs(uint64_t arg, char *cwd, unsigned cwdSize, const char **args);
 **FUNCTION**
 Splits a command's `main` argument, the line the Shell gave `RunCommand`, into the current directory (up to its first newline) and the arguments after it. With no line, or none with a newline, `cwd` is "SYS:" and `args` the whole line.
 
+A Shell in a window (V8 step 5) puts its console's name after the directory and a tab: `"SYS:\tcon.1\nFROM S:test"`. `cwd` is then what's before the tab, and the name becomes the process's console (`SetConName`), so the command's `OpenCon`, called after this, opens the window's.
+
 **EXAMPLE**
 From `cmd/echo.c`, the arguments straight to `ReadArgs`:
 ```c
@@ -475,4 +523,4 @@ Not the RKM's: AmigaDOS gave a command its current directory as a lock, and its 
 None known.
 
 **SEE ALSO**
-[ReadArgs](#dosreadargs), [AddPart](#dosaddpart), [RunCommand](#dosruncommand)
+[ReadArgs](#dosreadargs), [AddPart](#dosaddpart), [RunCommand](#dosruncommand), [SetConName](#dossetconname)

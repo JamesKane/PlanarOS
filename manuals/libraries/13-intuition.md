@@ -1,6 +1,6 @@
 # 13. intuition: windows on the screen
 
-*Written, V7 step 3; input, focus, the chrome and dragging, V7 step 4; servers dying, V7 step 5; the screen bar, menus, resizing and requesters, V8 step 4.*
+*Written, V7 step 3; input, focus, the chrome and dragging, V7 step 4; servers dying, V7 step 5; the screen bar, menus, resizing and requesters, V8 step 4; the system menu's Shell, V8 step 5.*
 
 intuition puts windows on the screen. A program draws a window's pixels with gfx.library (chapter 12) into bitmaps of its own, and presents each frame. intuition composes the screen from every window's latest frame, on the CPU, and shows it. A window's pixels never cross IPC: intuition reads them where the program drew them, shared read-only ([docs §13.1](../../docs/13-workbench.md)). Around them it draws the window's chrome, its own pixels. It holds the mouse and the keyboard, moves the pointer, and drags and depth-arranges windows itself, telling each program what it asked to hear. It never writes a program's memory, and never waits for one.
 
@@ -129,7 +129,7 @@ if (ev.iev_Class == IDCMP_MENUPICK && MENUNUM(ev.iev_Code) == 0 && ITEMNUM(ev.ie
 - **Opening them.** A click on a title in the bar opens its menu, and a click on an item chooses it; a click anywhere else closes it. Or the right button, held down over the bar, or anywhere while the active window has a strip, opens the menus as the pointer reaches a title, and chooses the item it's let go over. A key with the GUI key held chooses the item with that key (`nm_CommKey`), with no menu open.
 - **`IDCMP_MENUPICK`** says which: `iev_Code` is the RKM's packed number, `MENUNUM` the menu and `ITEMNUM` the item in it, separators counted. Choosing a `CHECKIT` item checks it or unchecks it, and `iev_Char` says which it is now.
 - **Disabled** menus (`NM_MENUDISABLED`) and items (`NM_ITEMDISABLED`) are drawn muted and can't be chosen. A strip holds 8 menus and 64 items at most, labels of 23 bytes.
-- **The system menu**, under the mark: *About Planar*, which shows a requester of intuition's own; *Shell*, *Reboot* and *Shutdown*, disabled until step 5 and power have them.
+- **The system menu**, under the mark: *About Planar*, which shows a requester of intuition's own; *Shell*, a Shell in a window (V8 step 5): intuition asks hwdb (`HWDB_NEW_SHELL`), which starts a console window, `conwin`, that starts `C:shell` in it ([dos ch. 2](../dos/02-shell.md#in-a-window)); *Reboot* and *Shutdown*, disabled until power has them.
 
 ## Resizing
 

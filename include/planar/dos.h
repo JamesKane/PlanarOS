@@ -113,7 +113,10 @@ int64_t RunCommand(struct Dos *dos, const char *path, const char *args, int64_t 
 /*
  * A command's line from the Shell is its current directory, a newline,
  * then its arguments. SplitArgs splits what RunCommand passed (0 is "")
- * into the two.
+ * into the two. A Shell in a window (V8 step 5) puts its console's name
+ * after the directory and a tab ("SYS:\tcon.1\n..."): SplitArgs makes
+ * it the process's console (SetConName), so what the command writes goes
+ * to that window.
  */
 void SplitArgs(uint64_t arg, char *cwd, unsigned cwdSize, const char **args);
 
@@ -169,8 +172,19 @@ void FreeArgs(struct RDArgs *rdArgs);
  * the log. Printf formats as RawDoFmt does, 64 bytes a message. A
  * message the display hasn't answered in CON_DEADLINE_MS is reported to
  * hwdb, and the text goes on as if the console had gone.
+ *
+ * A process's console is "con.0" unless it's told another (V8 step 5):
+ * a console window's, "con.1" to "con.8" (servers/conwin), by SetConName
+ * or the Shell's line (SplitArgs). OpenCon opens the process's console
+ * as it is then. ReadCon reads what's typed at a console window, which
+ * edits a line as it's typed: up to 'length' bytes, waiting, however
+ * long, until a line is ended. How many; 0 at the end of the input
+ * (Ctrl-\); ERR_PORT_DIED once the console has gone; ERR_BADARG from
+ * display's con.0, which has no keyboard (the serial console's is
+ * ReadConsole's).
  */
 constexpr uint64_t CON_DEADLINE_MS = 1000;
+constexpr unsigned CON_NAME = 16;           /* a console's name, its end included */
 
 struct Con {
     struct MsgPort cn_Port;
@@ -182,11 +196,14 @@ struct Con {
     unsigned cn_Count;
 };
 
+void SetConName(const char *name);         /* nullptr or "": con.0 */
+const char *ConName(void);
 void OpenCon(struct Con *con, int64_t sigBit);
 void CloseCon(struct Con *con);
 void WriteCon(struct Con *con, const char *text, uint32_t length);
 void PutStr(struct Con *con, const char *string);
 uint64_t VPrintf(struct Con *con, const char *format, va_list args);
 uint64_t Printf(struct Con *con, const char *format, ...);
+int64_t ReadCon(struct Con *con, char *buffer, uint32_t length);
 
 #endif /* PLANAR_DOS_H */

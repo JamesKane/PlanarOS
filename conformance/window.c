@@ -52,6 +52,13 @@
  *    buffer shown and the backdrop past it, then new buffers given and
  *    the old ones let go of; and held to its least size. An EasyRequest
  *    from a second task, answered by a click on its middle button.
+ * 6b. V8 step 5: the system menu's Shell, a console window (conwin) with
+ *    a Shell in it; its inside read back with the prompt up, then a
+ *    command typed (shellwin.h's), a script run by a second Shell on the
+ *    same console, and read back again, each against the host's CRC
+ *    (servers/conwin/test.c). EndShell typed: the window goes. Then a
+ *    conwin of this program's, killed once its prompt is up: its window
+ *    gone by the next latch but one, and its console with it.
  * 7. kill-window: a client (this program again, KILLED) with two windows
  *    over one of this one's, killed. They're gone from the screen by the
  *    next latch but one, and intuition lets go of their bitmaps, which
@@ -80,13 +87,15 @@
 #include <planar/intuition.h>
 #include <planar/syscalls.h>
 
+#include "../servers/conwin/conwin.h"
 #include "../servers/intuition/pointer.h"
 #include "log.h"
+#include "shellwin.h"
 #include "typescene.h"
 
 void *memset(void *dst, int c, size_t n);
 
-constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23;     /* 22 is intuition.library's */
+constexpr int64_t SIG_DISPLAY = 20, SIG_HUNG = 21, SIG_KILL = 23, SIG_CONWIN = 24;  /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000;
 constexpr unsigned FRAMES = 120, TIMED = 10;
 constexpr unsigned PACED = 600, PACED_READ = 30;     /* a board's, 10 s at 60 Hz; QEMU's */
@@ -1392,6 +1401,86 @@ static int desktop_half(bool readable)
     return 0;
 }
 
+/* --- 6b: the Shell in a window (V8 step 5). --- */
+
+/* Every client's windows on the screen, within 'ms'. */
+static bool windows_are(uint32_t n, uint64_t ms)
+{
+    struct IntuiMsg *m = in.in_Call;
+    uint64_t until = CurrentTime() + ms * MS;
+
+    while (info(m) == 0 && m->im_Windows != n)
+        if (CurrentTime() > until) {
+            KPrintF("window: %lu windows on the screen, not %lu", (uint64_t)m->im_Windows, (uint64_t)n);
+            return false;
+        } else {
+            nap(5);
+        }
+    return true;
+}
+
+/* con.1's window's inside as the host draws it ('crc'), within 'ms'; or
+ * the screen can't be read here. */
+static bool inside_is(bool readable, uint32_t crc, uint64_t ms, const char *what)
+{
+    uint64_t until = CurrentTime() + ms * MS;
+    int32_t x = CONWIN_LEFT + (int32_t)INTUI_BORDER, y = CONWIN_TOP + (int32_t)INTUI_TITLEBAR;
+    uint32_t got = 0;
+
+    if (!readable)
+        return true;
+    do
+        if (read_screen(x, y, SW_WIDTH, SW_HEIGHT, &got) == 0 && got == crc)
+            return true;
+        else
+            nap(20);
+    while (CurrentTime() < until);
+    KPrintF("window: the Shell's window %s: %08lx, not the host's %08lx", what, (uint64_t)got, (uint64_t)crc);
+    return false;
+}
+
+static int shell_half(bool readable)
+{
+    struct IntuiMsg *m = in.in_Call;
+    uint32_t outer_w = SW_WIDTH + 2 * INTUI_BORDER, outer_h = SW_HEIGHT + INTUI_TITLEBAR + INTUI_SIZEBORDER;
+    struct MsgPort con;
+    int64_t p;
+
+    /* The system menu's Shell: a window, and its Shell's prompt. */
+    CHECK(windows_are(0, 1000) && info(m) == 0 && point_at(m->im_TitleX[0], 14));
+    click();
+    CHECK(menu_is(1) && info(m) == 0);
+    CHECK(point_at(m->im_MenuRect.MinX + 30, m->im_ItemY[2]));
+    click();
+    CHECK(windows_are(1, 5000));
+    CHECK(point_at(10, (int32_t)in.in_Height - 40));   /* out of the way of the reading */
+    CHECK(inside_is(readable, sw_crc_ready, 5000, "with its prompt"));
+
+    /* A command typed: a script, by a second Shell, on the same console. */
+    KPrintF("window: send text %s", sw_typed);
+    KPrintF("window: send keys ret");
+    CHECK(inside_is(readable, sw_crc_done, 10000, "after the script"));
+    KPrintF("window: send screendump shell");
+    nap(300);
+    KPrintF("window: send text EndShell");
+    KPrintF("window: send keys ret");
+    CHECK(windows_are(0, 3000));
+    CHECK(screen_is(readable, CONWIN_LEFT, CONWIN_TOP, outer_w, outer_h));
+    KPrintF("window: Shell in a window: the system menu's, its prompt, a script run by a second Shell on "
+            "its console and read back as the host draws it, and EndShell closing it");
+
+    /* A conwin killed under its Shell: the window gone, and the console. */
+    CHECK((p = CreateProcess("conwin", 0, SIG_CONWIN, 0)) >= 0);
+    CHECK(windows_are(1, 5000) && inside_is(readable, sw_crc_ready, 5000, "with its prompt, again"));
+    CHECK(KillProcess((Handle)p) == 0);
+    CHECK(windows_are(0, 100));
+    CHECK(screen_is(readable, CONWIN_LEFT, CONWIN_TOP, outer_w, outer_h));
+    CHECK(ConnectPort(&con, "con.1", SIG_CONWIN, 2, 256) == ERR_NOTFOUND);
+    CloseHandle((Handle)p);
+    KPrintF("window: Shell in a window: conwin killed under it, the window and con.1 gone at once");
+    return 0;
+}
+
 /* 6, the other end: a window, then nothing ever again. */
 static int stopped(void)
 {
@@ -1759,7 +1848,7 @@ int main(uint64_t arg)
     ends();
     if (input && input != NO_INPUT)
         return input;
-    if (!input && (r = desktop_half(readable)))
+    if (!input && ((r = desktop_half(readable)) || (r = shell_half(readable))))
         return r;
     if ((r = kill_window(readable)))
         return r;

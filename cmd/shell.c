@@ -6,9 +6,16 @@
  *   Shell FROM FILE    run FILE's lines, then end: 0 if all succeeded
  *   Shell SERIAL       the serial console's lines alone: intuition has
  *                      the keyboard (hwdb's, with the desktop: V8 step 4)
+ *   Shell CON con.1    in a console window (V8 step 5): its lines, and
+ *                      every command's output, there
  *
- * Its template is "FROM,SERIAL/S" (ReadArgs). Started from a Shell, it begins in
- * that one's current directory. A line's first word is a built-in (CD,
+ * Its template is "FROM,SERIAL/S,CON/K" (ReadArgs). Started from a Shell, it begins in
+ * that one's current directory, on its console. A console window's Shell
+ * is told its console by its line, as its commands are (SplitArgs); CON
+ * says it outright. There the window edits and echoes each line, and
+ * the Shell reads them whole (ReadCon); the end of the input (Ctrl-\)
+ * or the window's going ends it. Its number, in the prompt, is 1 on
+ * con.0 and n + 1 on con.n, and the prompt's in the window's green. A line's first word is a built-in (CD,
  * Help, EndShell) or a command, found in C: unless it names its volume
  * or directory; the rest of the line is its arguments, and it's given
  * the current directory with them (SplitArgs). The Shell waits for it
@@ -35,11 +42,13 @@ constexpr int64_t SIG_TICK = 19;
 constexpr int64_t SIG_INPUT = 20;
 constexpr uint64_t MS = 1000000;
 constexpr unsigned LINE = 200;
+static const char TEMPLATE[] = "FROM,SERIAL/S,CON/K";
 
 static struct Con con;
 static struct Dos dos;
 static char cwd[DOS_PATH] = "SYS:";
 static bool serial_only;                /* SERIAL: no keyboard of input's */
+static bool windowed;                   /* on a console window's console: its lines */
 static unsigned number = 1;             /* the Amiga's CLI number, for the prompt */
 
 static void say(const char *s)
@@ -137,6 +146,11 @@ static int run(const char *line)
     }
     for (const char *s = cwd; *s && k < DOS_ARGS - 2; s++)
         args[k++] = *s;
+    if (windowed) {                     /* its console, this one's */
+        args[k++] = '\t';
+        for (const char *s = ConName(); *s && k < DOS_ARGS - 2; s++)
+            args[k++] = *s;
+    }
     args[k++] = '\n';
     for (const char *s = rest; *s && k < DOS_ARGS - 1; s++)
         args[k++] = *s;
@@ -227,7 +241,41 @@ static int64_t keys_read(char *buf, unsigned n)
 
 static void prompt(void)
 {
-    Printf(&con, "%u.%s> ", number, cwd);
+    if (windowed)
+        Printf(&con, "\x1b[32m%u.%s>\x1b[0m ", number, cwd);  /* text.shell.prompt */
+    else
+        Printf(&con, "%u.%s> ", number, cwd);
+}
+
+/* Lines from a console window, which has edited and echoed them. */
+static int window_lines(void)
+{
+    char line[LINE];
+    unsigned n = 0;
+
+    say("Planar Shell. Type Help for help.\n");
+    prompt();
+    for (;;) {
+        char got[64];
+        int64_t r = ReadCon(&con, got, sizeof got);
+
+        if (r < 0)
+            return 1;                   /* the window went: no one's typing */
+        if (r == 0)
+            return 0;                   /* the end of the input */
+        for (int64_t i = 0; i < r; i++) {
+            if (got[i] != '\n') {
+                if (n < LINE - 1)
+                    line[n++] = got[i];
+                continue;
+            }
+            line[n] = '\0';
+            n = 0;
+            if (run(line) < 0)
+                return 0;
+            prompt();
+        }
+    }
 }
 
 /* Lines typed at the console, run as they're ended. */
@@ -316,7 +364,7 @@ static int script(const char *file)
 int main(uint64_t arg)
 {
     struct RDArgs ra = { 0 };
-    int64_t a[2] = { 0 };
+    int64_t a[3] = { 0 };
     char from[DOS_PATH];
     int64_t e;
 
@@ -324,8 +372,8 @@ int main(uint64_t arg)
     SplitArgs(arg, from, sizeof from, &ra.rda_Source);
     SNPrintf(cwd, sizeof cwd, "%s", from);
     OpenCon(&con, SIG_CON);
-    if (ReadArgs("FROM,SERIAL/S", a, &ra) != 0) {
-        Printf(&con, "Shell: %s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: FROM,SERIAL/S" : "FROM,SERIAL/S");
+    if (ReadArgs(TEMPLATE, a, &ra) != 0) {
+        Printf(&con, "Shell: %s%s%s\n", ra.rda_Why, ra.rda_Why[0] ? ". Template: " : "", TEMPLATE);
         CloseCon(&con);
         return 1;
     }
@@ -336,7 +384,24 @@ int main(uint64_t arg)
         return 1;
     }
     serial_only = a[1] != 0;
-    e = a[0] ? script((const char *)a[0]) : interactive();
+    if (a[2]) {                         /* CON: that console, not the line's */
+        CloseCon(&con);
+        SetConName((const char *)a[2]);
+        OpenCon(&con, SIG_CON);
+    }
+    windowed = Stricmp(ConName(), "con.0") != 0;
+    if (windowed) {
+        const char *d = ConName() + 4;     /* "con.n", n 1 to 8 */
+
+        number = *d >= '1' && *d <= '9' ? 1u + (unsigned)(*d - '0') : 1;
+        if (!con.cn_Open) {
+            Printf(&con, "Shell: no console %s\n", ConName());
+            FreeArgs(&ra);
+            CloseCon(&con);
+            return 1;
+        }
+    }
+    e = a[0] ? script((const char *)a[0]) : windowed ? window_lines() : interactive();
     FreeArgs(&ra);
     CloseCon(&con);
     return (int)e;
