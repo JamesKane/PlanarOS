@@ -42,6 +42,7 @@
 #include <stddef.h>
 
 #include <planar/blk.h>
+#include <planar/devices/host.h>
 #include <planar/dos.h>
 #include <planar/endian.h>
 #include <planar/syscalls.h>
@@ -58,7 +59,7 @@ enum phase : uint8_t { T_SETTLE, T_BENCH, T_DOS, T_SHELL, T_ROUNDS, T_STOPS, T_R
                        T_RETRY, T_DRAIN, T_POWER, T_DISPLAY, T_WINDOW, T_DESKTOP,
                        T_INPUT, T_GPU, T_LOAD, T_STOP, T_END };
 
-enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON };
+enum kind : uint8_t { K_RNG, K_RTC, K_BLOCK, K_CON, K_HOST };
 
 struct client {
     char port[16];
@@ -107,8 +108,8 @@ static bool plausible(const struct client *c, const struct DrvRequest *r)
     uint64_t v = 0;
     unsigned nonzero = 0;
 
-    if (c->kind == K_CON)
-        return r->dr_Len == 0;
+    if (c->kind == K_CON || c->kind == K_HOST)
+        return c->kind == K_HOST || r->dr_Len == 0;
     if (c->kind == K_RTC) {
         if (r->dr_Len != 8)
             return false;
@@ -228,7 +229,8 @@ static void client(uint64_t arg)
                 since = CurrentTime();
                 continue;
             }
-            if (e != 0 || !(m = AllocMsg(&mp, sizeof *m))) {
+            /* The host channel's message is its own, and longer. */
+            if (e != 0 || !(m = AllocMsg(&mp, c->kind == K_HOST ? sizeof(struct HostMsg) : sizeof *m))) {
                 c->bad++;
                 c->last_bad = e ? e : ERR_NOMEM;
                 if (e == 0)
@@ -241,10 +243,18 @@ static void client(uint64_t arg)
                 c->recovered++;
             lost = false;
         }
-        memset(m, 0, sizeof *m);
-        m->dr_Msg.mn_Length = sizeof *m;
-        m->dr_Op = c->kind == K_CON ? DRV_WRITE : DRV_READ;   /* a console's: nothing, written */
-        m->dr_Len = c->kind == K_RTC ? 8 : c->kind == K_CON ? 0 : 32;
+        if (c->kind == K_HOST) {
+            struct HostMsg *h = (struct HostMsg *)m;
+
+            memset(h, 0, sizeof *h);    /* nothing, written: answered without the host */
+            h->hm_Msg.mn_Length = sizeof *h;
+            h->hm_Op = HOST_WRITE;
+        } else {
+            memset(m, 0, sizeof *m);
+            m->dr_Msg.mn_Length = sizeof *m;
+            m->dr_Op = c->kind == K_CON ? DRV_WRITE : DRV_READ;   /* a console's: nothing, written */
+            m->dr_Len = c->kind == K_RTC ? 8 : c->kind == K_CON ? 0 : 32;
+        }
         e = DoMsg(&mp, &m->dr_Msg);
         if (e == ERR_PORT_DIED || m->dr_Msg.mn_Error == ERR_PORT_DIED) {
             c->deaths++;
@@ -316,6 +326,7 @@ static void settle(void)
             c->kind = hw_strneq(u->ports[k], "rtc.", 4)                                  ? K_RTC
                       : hw_strneq(u->ports[k], "nvme.", 5) || hw_strneq(u->ports[k], "sd.", 3) ? K_BLOCK
                       : hw_strneq(u->ports[k], "con.", 4)                                  ? K_CON
+                      : hw_strneq(u->ports[k], "host.", 5)                                 ? K_HOST
                                                                                                : K_RNG;
             c->unit = u;
             nclients++;

@@ -23,6 +23,7 @@
 #include <planar/devices/input.h>
 #include <planar/syscalls.h>
 
+#include "hostask.h"
 #include "log.h"
 
 constexpr int64_t SIG_INPUT = 20;
@@ -112,9 +113,10 @@ static bool next(struct InputEvent *e, uint64_t until)
     }
 }
 
+/* Asked of the host, where there's one; on a board, someone types. */
 static void send(const char *what)
 {
-    KPrintF("inputtest: send %s", what);
+    HostAsk("%s", what);
 }
 
 /* One round: 1 if it was typed and right, 0 if nothing came, or the

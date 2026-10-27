@@ -1,6 +1,6 @@
 # Plan: a host channel for tests, and port watches
 
-**Status: scoped (2026-10-26); decisions 1 to 6 taken as they leaned.** Two items from the simplify pass's altitude review (after V8 step 8's QEMU half), each a change to a mechanism that several programs work around today. Neither needs a board, so both can be done while the boards are busy. The decisions at the end are taken.
+**Status: in progress (2026-10-26); decisions 1 to 6 taken as they leaned; steps 1 to 4 (the channel) built.** Two items from the simplify pass's altitude review (after V8 step 8's QEMU half), each a change to a mechanism that several programs work around today. Neither needs a board, so both can be done while the boards are busy. The decisions at the end are taken.
 
 ## Why
 
@@ -92,6 +92,22 @@ Steps 1 to 4 (the channel) and 5 to 6 (watches) don't depend on each other. Step
 - **`boot-check.py`'s `SEND` pattern and its scraping** go, after both are moved over.
 - **The mutation:** window.c built with `-DLOG_FLOOD` logs 200 lines before each ask, and `make test` still passes. It's run once and recorded, not kept in `test-all`.
 - **Measured:** the RV64 boot's time before and after. The guessed waits add up to several seconds today.
+
+**Built (2026-10-26), steps 1 to 4, with what changed on the way:**
+- **`KLog` returns `ERR_FULL`** for a line it drops, and `KPrintF` passes it on. The test is `conformance/logflood.c`, the V2.4 flood: of its 500 lines, at least 400 must say `ERR_FULL`. A separate `klograte.c` wasn't needed.
+- **The device** is in `drv/virtio-mmio` as planned, publishing `host.0`. The driver now takes its devices' messages through drv.library's `message` callback, so a `HOST_READ` can be answered when a line comes. The entropy device's `DrvRequest`s go the same way, answered at once.
+  - It has its own messages (`struct HostMsg` in `planar/devices/host.h`), not `DrvRequest`s, whose 64 bytes are too few for a line.
+  - **A bug found on the way:** a write waits for its interrupt with `drv_wait_irq`, which takes the line's signal, and the line stays masked until it's acknowledged. The library's loop never saw that signal, so the host's answer never interrupted until the next write unmasked the line, and asks timed out at random. The write now gives the line back (`AckWaitIrq` with no mask). That's in drv.md now, for any driver that waits within a request.
+- **The kill test's client** of `host.0` (`K_HOST`) writes an empty line, which the driver answers without the host, instead of the planned ping and pong. It's the supervision that's tested there: the client recovers from every death. The round trip through the host is tested by every ask the window test makes. On RV64 the console is a unit of its own, so the kill test now has 6 drivers and 6 clients.
+- **The tests' end** is `conformance/hostask.h`, a header like `log.h`, not a `lib/hostchan`: only conformance programs ask.
+  - `HostAsk(fmt, ...)` connects on its first ask without waiting, so a machine with no channel says `ERR_NOTFOUND` at once. Once connected, it waits to reconnect across the driver's restarts.
+  - Asks are numbered from the clock's microseconds, so one program's numbers don't meet the last one's. The host answers a repeated number without acting twice.
+- **`boot-check.py`** serves `--host`'s socket, says each ask on its own output as `[host] ...`, and no longer scrapes the transcript. On AArch64's EFI boot, edk2 writes its console escapes to the virtconsole before Planar starts, so an ask is found anywhere in a line.
+- **window.c and inputtest.c** ask through it.
+  - `point_at`'s pacing is gone, and three `nap(300)`s after screendumps.
+  - The naps *before* screendumps stay: they wait for a frame to be shown, not for the host.
+- **The mutation:** every ask preceded by 200 `KLog` lines (inputtest's show "189 lines dropped") still passes on RV64.
+- **Measured:** RV64 and AArch64 (EFI) to `V8.8 done`.
 
 ## 5. WatchPort
 

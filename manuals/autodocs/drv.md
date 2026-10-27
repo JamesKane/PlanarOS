@@ -118,10 +118,13 @@ uint64_t drv_wait_irq(struct drv *d, struct drv_dev *dev, uint64_t ms);
 ```
 
 **FUNCTION**
-`drv_lease` gives the first range's lease, which carries the lines: the one to give `AllocDmaArea`. `drv_wait_irq` waits for `dev`'s line, at most `ms` milliseconds (0: no limit), and acknowledges it (`AckWaitIrq`). For Bind, before the library's loop runs.
+`drv_lease` gives the first range's lease, which carries the lines: the one to give `AllocDmaArea`. `drv_wait_irq` acknowledges `dev`'s line (`AckWaitIrq`, which unmasks it) and waits for it, at most `ms` milliseconds (0: no limit). For Bind, before the library's loop runs, or within a request.
 
 **RESULT**
 `drv_wait_irq`: the signals that came; the line's is signal 32 plus its index.
+
+**NOTES**
+- A level-triggered line that came is masked again by the kernel, as at any delivery, until it's acknowledged. The library's loop acknowledges only the lines it saw, so a driver that took the line's signal here in a request, and wants interrupts while it waits for its next, acknowledges it itself once it's done: `AckWaitIrq(drv_lease(d), line, 0)`. virtio-mmio's console does, after a write.
 
 **BUGS**
 None known.

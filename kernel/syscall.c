@@ -109,7 +109,7 @@ static int64_t sys_klog(struct task *self, uint64_t text)
         spin_unlock_irqrestore(&p->lock, was);
         if (!ok) {
             atomic_fetch_add(&klog_drops, 1);
-            return 0;
+            return ERR_FULL;    /* counted, and said with the next line that gets through */
         }
     }
     n = 0;

@@ -1173,14 +1173,14 @@ A kernel call.
 - `text` -- a string. Only the first 200 characters are written.
 
 **RESULT**
-0, or `ERR_BADADDR` if `text` isn't readable. A dropped line also returns 0.
+0 once the line is in the log's ring; `ERR_FULL` if it was dropped (over the rate), and counted; `ERR_BADADDR` if `text` isn't readable.
 
 **NOTES**
 - For bring-up and tests. A console device will replace it for programs.
 - The limit is per process, shared by its tasks (`kernel/syscall.c`).
 
 **BUGS**
-- Truncation is silent, and so, until the next line, is dropping.
+- Truncation is silent. A dropped line is said only to the caller (`ERR_FULL`) until the next line that gets through. Something that must reach the host goes on its own channel (`lib/hostchan`), not the log.
 - A line in the ring when the system hangs with interrupts off isn't shown. A halt, a reboot and a meditation show what's in it first.
 
 **SEE ALSO**

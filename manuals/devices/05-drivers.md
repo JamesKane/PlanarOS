@@ -10,7 +10,7 @@ The drivers built so far, each a program in the image's boot bundle (`drv/NAME/`
 | [sdhci](#sdhci) | `ky,x1-sdhci`, `spacemit,k1-sdhci`, `pciclass,080501` | `sd.N` (block) | Its line, else polled | Software Reset For All |
 | [display](#display) | `ky,dpu`, `CIXH5010`, `simple-framebuffer` | `con.0` (console), `display.0` | The DPU's vblank | Every plane off but the console's, latched |
 | [pci](04-pci.md) | `pci-host-ecam-generic`, `PNP0A08` | None | None | None needed |
-| [virtio-mmio](#virtio-mmio) | `virtio,mmio`, `LNRO0005` | `rng.N` | Its line | Status register to 0 |
+| [virtio-mmio](#virtio-mmio) | `virtio,mmio`, `LNRO0005` | `rng.N`, `host.0` | Its line | Status register to 0 |
 | [rtc-pl031](#rtcs), [rtc-goldfish](#rtcs) | `arm,pl031`, `ARMH0031`; `google,goldfish-rtc` | `rtc.N` | None | None needed |
 | [xhci](#xhci) | `pciclass,0c0330`, `ky,x1-dwc3`, `CIXH2031` | None: a client of `input` | Its line or MSI-X, else polled | USBCMD.R/S to 0, until halted |
 | [power](#power) | `ky,x1-pm-domain`, `ky,x1-ccu`, `ky,x1-reset`, `CIXHA004`, `planar,power-model` | `power` | SCMI's mailbox, else none | None needed: it keeps no DMA |
@@ -57,7 +57,13 @@ Its stop method is in `servers/hwdb/display.c`, since a reset would blank the sc
 
 ## virtio-mmio
 
-`drv/virtio-mmio`: QEMU's virtio-mmio slots, all the slots in a page as one unit. It drives the entropy device (`rng.N`: `DRV_READ` gives up to 64 random bytes) and declines every other slot.
+`drv/virtio-mmio`: QEMU's virtio-mmio slots, all the slots in a page as one unit. It drives two devices and declines every other slot:
+- **The entropy device**, `rng.N`: `DRV_READ` gives up to 64 random bytes.
+- **The first console**, `host.0`, the host channel (`planar/devices/host.h`). Port 0 only, without MULTIPORT, so a receive queue and a transmit queue. It has its own messages, not `DrvRequest`s: `HOST_WRITE` sends a line, and is answered once the device has it; `HOST_READ` is answered with the next whole line from the host, up to eight lines kept for reads still to come. On QEMU the other end is `tools/boot-check.py`, where tests ask for the mouse, keys and screendumps (`conformance/hostask.h`). It isn't a console: nothing logs through it, and no Shell reads it. A board has none, and a test that finds no `host.0` knows nobody's there to ask.
+
+Its devices' messages come through drv.library's `message` callback, so a `HOST_READ` is answered when a line comes, not when it's asked.
+
+**A line's signal taken by `drv_wait_irq`** is the driver's to give back (`AckWaitIrq` with no mask): the main loop never sees it, and the line stays masked. The console's write waits for its interrupt this way and gives it back after. Without that, the host's answer to a write never interrupts.
 
 ## RTCs
 

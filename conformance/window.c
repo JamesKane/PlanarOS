@@ -31,7 +31,7 @@
  *    on QEMU, said but not checked: its display composes the planes in
  *    software as it latches, the whole screen for intuition's plane.
  * 4. Both closed, and the backdrop read back where they were.
- * 5. The mouse and keys, which it asks for ("window: send ..."), as
+ * 5. The mouse and keys, which it asks the host for (hostask.h), as
  *    inputtest does: on QEMU the boot check sends them through QMP.
  *    Two windows with chrome: focus moved by a click, each event where
  *    it should be and the window clicked brought to the front; keys at
@@ -126,6 +126,7 @@
 #include "../servers/intuition/pointer.h"
 #include "../servers/prefs/prefswin.h"
 #include "../servers/workbench/wb.h"
+#include "hostask.h"
 #include "log.h"
 #include "shellwin.h"
 #include "typescene.h"
@@ -860,13 +861,12 @@ static int64_t info(struct IntuiMsg *m)
     return e;
 }
 
-/* The pointer to (x, y), asked for 100 pixels at a time (QEMU's mouse
- * reports one at once, 127 at most): false if it didn't move within 2 s
- * of asking (nobody's there to move it). The asks are paced to the
- * kernel's log rate (20 lines a second after 32), so none is dropped. */
+/* The pointer to (x, y), asked of the host 100 pixels at a time (QEMU's
+ * mouse reports one at once, 127 at most): false at once if there's no
+ * host to ask, or if the pointer didn't move within 2 s of the host's
+ * moving the mouse (input not back yet, after its death). */
 static bool point_at(int32_t x, int32_t y)
 {
-    static uint64_t asked;
     struct IntuiMsg *m = in.in_Call;
 
     for (unsigned tries = 0; tries < 40; tries++) {
@@ -881,10 +881,8 @@ static bool point_at(int32_t x, int32_t y)
         dy = y - ptr_y;
         dx = dx > 100 ? 100 : dx < -100 ? -100 : dx;
         dy = dy > 100 ? 100 : dy < -100 ? -100 : dy;
-        if (CurrentTime() - asked < 50 * MS)
-            nap((asked + 50 * MS - CurrentTime()) / MS + 1);
-        asked = CurrentTime();
-        KPrintF("window: send move %ld %ld", (int64_t)dx, (int64_t)dy);
+        if (HostAsk("move %ld %ld", (int64_t)dx, (int64_t)dy) != 0)
+            return false;
         was_x = ptr_x;
         was_y = ptr_y;
         while (info(m) == 0 && ptr_x == was_x && ptr_y == was_y)
@@ -898,7 +896,7 @@ static bool point_at(int32_t x, int32_t y)
 
 static void click(void)
 {
-    KPrintF("window: send mouse 0 0 left");
+    HostAsk("mouse 0 0 left");
 }
 
 /* The next event that isn't a move, or a move if 'moves', within 'ms'. */
@@ -977,7 +975,7 @@ static bool typed(const struct Window *w, const char *keys, const char *chars)
     struct IntuiEvent ev;
     bool up = false;
 
-    KPrintF("window: send keys %s", keys);
+    HostAsk("keys %s", keys);
     for (const char *c = chars; *c;) {
         if (!next_event(&ev, false) || ev.iev_Window != w->w_Id)
             return false;
@@ -1008,7 +1006,7 @@ static bool dragged(const void *k, int32_t x, int32_t y, int32_t dx, int32_t dy)
 
     if (!point_at(x, y))
         return false;
-    KPrintF("window: send drag %ld %ld left", (int64_t)dx, (int64_t)dy);
+    HostAsk("drag %ld %ld left", (int64_t)dx, (int64_t)dy);
     until = CurrentTime() + 1000 * MS;
     while (info(m) == 0 && (ptr_x != x + dx || ptr_y != y + dy))
         if (CurrentTime() > until)
@@ -1104,7 +1102,7 @@ static int input_half(bool readable)
     CHECK(heard(&wc, IDCMP_MOUSEBUTTONS, SELECTUP) && active_is(&wc));
     to_front(&wc);
     CHECK(screen_is(readable, 244, 146, 40, 60));       /* now c's */
-    KPrintF("window: send move 5 5");                   /* the active window hears it move */
+    HostAsk("move 5 5");                                /* the active window hears it move */
     do
         CHECK(next_event(&ev, true) && ev.iev_Window == wc.w_Id && ev.iev_Class == IDCMP_MOUSEMOVE);
     while (ev.iev_MouseX != 155 - 84 || ev.iev_MouseY != 125 - 86);
@@ -1361,9 +1359,9 @@ static int desktop_half(bool readable)
     /* Held by the right button from Options' title to its first item:
      * checked; and Save by its key, with the GUI key. */
     CHECK(info(m) == 0 && point_at(m->im_TitleX[2], 14));
-    KPrintF("window: send drag 0 %ld right", (int64_t)(item0 - 14));
+    HostAsk("drag 0 %ld right", (int64_t)(item0 - 14));
     CHECK(picked(&we, FULLMENUNUM(1, 0, NOSUB), 1) && menu_is(0));
-    KPrintF("window: send keys meta_l-s");
+    HostAsk("keys meta_l-s");
     CHECK(picked(&we, FULLMENUNUM(0, 1, NOSUB), 0));
 
     /* The system menu's About, and its requester's OK. */
@@ -1372,11 +1370,11 @@ static int desktop_half(bool readable)
     CHECK(menu_is(1) && info(m) == 0);
     CHECK(point_at(m->im_MenuRect.MinX + 30, m->im_ItemY[0]));
     nap(300);                                           /* its frame shown, then on QEMU */
-    KPrintF("window: send screendump menu");            /* saved, to be looked at */
+    HostAsk("screendump menu");                         /* saved, to be looked at */
     click();
     CHECK(requests_are(1, 1000) && info(m) == 0);
     nap(300);
-    KPrintF("window: send screendump about");
+    HostAsk("screendump about");
     CHECK(click_on(m->im_ReqButton[0]) && requests_are(0, 1000));
     CHECK(screen_is(readable, 124, 126, 200, 120));
     KPrintF("window: menus: a title clicked open over the window and an item chosen, another held "
@@ -1404,7 +1402,7 @@ static int desktop_half(bool readable)
      * backdrop past it. */
     p = place_of(&we);
     CHECK(point_at(p.left + p.bl + p.iw + p.br - 9, p.top + p.bt + p.ih + p.bb - 9));
-    KPrintF("window: send drag 40 30 left");
+    HostAsk("drag 40 30 left");
     CHECK(sized(&we, 240, 150) && info(m) == 0);       /* and where the pointer went */
     CHECK(screen_is(readable, p.left + p.bl, p.top + p.bt, 240, 150));
     CHECK(IIntuition->ChangeWindowBuffers(&we, fbm, nullptr) == 0 && we.w_Width == 240 && we.w_Height == 150);
@@ -1420,7 +1418,7 @@ static int desktop_half(bool readable)
     /* Far smaller: held to its least size. */
     p = place_of(&we);
     CHECK(point_at(p.left + p.bl + p.iw + p.br - 9, p.top + p.bt + p.ih + p.bb - 9));
-    KPrintF("window: send drag -250 -200 left");
+    HostAsk("drag -250 -200 left");
     CHECK(sized(&we, 80, 50) && info(m) == 0);
     CHECK(screen_is(readable, p.left + p.bl, p.top + p.bt, 80, 50));
     CHECK(screen_is(readable, p.left + 90, p.top, 240 + 8 - 90, 150 + 26 + 16));    /* where it was */
@@ -1507,13 +1505,12 @@ static int shell_half(bool readable)
     CHECK(inside_is(readable, sw_crc_ready, 5000, "the Shell's window with its prompt"));
 
     /* A command typed: a script, by a second Shell, on the same console. */
-    KPrintF("window: send text %s", sw_typed);
-    KPrintF("window: send keys ret");
+    HostAsk("text %s", sw_typed);
+    HostAsk("keys ret");
     CHECK(inside_is(readable, sw_crc_done, 10000, "the Shell's window after the script"));
-    KPrintF("window: send screendump shell");
-    nap(300);
-    KPrintF("window: send text EndShell");
-    KPrintF("window: send keys ret");
+    HostAsk("screendump shell");
+    HostAsk("text EndShell");
+    HostAsk("keys ret");
     CHECK(windows_are(0, 3000));
     CHECK(screen_is(readable, CONWIN_LEFT, CONWIN_TOP, outer_w, outer_h));
     KPrintF("window: Shell in a window: the system menu's, its prompt, a script run by a second Shell on "
@@ -1613,9 +1610,9 @@ static int ui_half(bool readable)
         if (s->action == UW_CLICK)
             click();
         else if (s->action == UW_DRAG)
-            KPrintF("window: send drag %ld 0 left", (int64_t)s->drag);
+            HostAsk("drag %ld 0 left", (int64_t)s->drag);
         else
-            KPrintF("window: send %s %s", s->action == UW_TEXT ? "text" : "keys", s->text);
+            HostAsk("%s %s", s->action == UW_TEXT ? "text" : "keys", s->text);
         CHECK(pump(&w, &ui, s, &last));
         if (last.uc_Gadget != s->want || last.uc_Value != s->value || last.uc_Flags != s->flags)
             KPrintF("window: ui.library's step %lu: gadget %lu changed to %ld (%lx), not %lu to %ld (%lx)",
@@ -1627,8 +1624,7 @@ static int ui_half(bool readable)
     while (next_event_within(&ev, true, 300))            /* the keys let go of, the pointer's moves */
         ;
     CHECK(drawn_as(readable, ox, oy, UW_WIDTH, UW_HEIGHT, uw_crc_done, 3000, "ui.library's window, clicked through"));
-    KPrintF("window: send screendump ui");
-    nap(300);
+    HostAsk("screendump ui");
     CHECK(IIntuition->CloseWindow(&w) == 0);
     IUI->FreeUI(&ui);
     IGfx->FreeBitMap(bm);
@@ -1884,7 +1880,7 @@ static int workbench_half(bool readable)
     CHECK(speed > 200 && input_is(was.ip_RepeatDelay, rate, speed, 2000));
     CHECK(info(m) == 0);
     px0 = ptr_x;
-    KPrintF("window: send move 10 0");
+    HostAsk("move 10 0");
     for (uint64_t until = CurrentTime() + 2000 * MS; info(m) == 0 && ptr_x == px0;)
         CHECK(CurrentTime() < until);
     nap(100);
@@ -1901,8 +1897,7 @@ static int workbench_half(bool readable)
     CHECK(prefs_click(&ui, PW_HUD, -20, 13, &c) && c.uc_Value == 1 && hud_is(1, 2000));
     CHECK(point_at(x0 - 20, y0 + 20));
     nap(1200);                          /* the HUD's first reading */
-    KPrintF("window: send screendump workbench");
-    nap(300);
+    HostAsk("screendump workbench");
     CHECK(prefs_click(&ui, PW_SAVE, 30, 13, &c));
     CHECK(windows_are(3, 5000));
     IUI->FreeUI(&ui);
@@ -2336,13 +2331,13 @@ static int drag_over(void)
         int32_t dx = i % 2 ? -100 : 100, left = w.w_Sync->is_LeftEdge;
         uint64_t until = CurrentTime() + 2000 * MS;
 
-        KPrintF("window: send drag %ld 0 left", (int64_t)dx);
+        HostAsk("drag %ld 0 left", (int64_t)dx);
         while (w.w_Sync->is_LeftEdge != left + dx)
             if (CurrentTime() > until)
                 return failed("the dragged window didn't move");
             else
                 nap(5);
-        nap(60);                        /* the drag's last frame, and the pace of the log */
+        nap(60);                        /* the drag's last frame */
     }
     CHECK(info(m) == 0 && m->im_Frames > frames);
     frames = m->im_Frames - frames;

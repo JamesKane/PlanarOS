@@ -21,18 +21,22 @@ two boots of one machine (make compare-hw). --hwdb-facts writes hwdb's
 ("[hwdb] hw: " lines, without the "[hwdb] "): what each driver bound,
 declined or failed, by its registers (servers/hwdb/server.c).
 
---qmp PATH is QEMU's QMP socket (-qmp unix:PATH,server=on,wait=off).
-A test that wants USB input asks for it on the console, and gets it
-through QMP's input-send-event: "inputtest: send keys shift-h i ret"
-types those keys (QEMU's qcodes, a "shift-" prefix held over the key),
-"inputtest: send mouse 10 -5 left" moves the mouse and clicks a button
-(conformance/inputtest.c), "... send move 10 -5" only moves it, and
-"... send drag 10 -5 left" moves it with the button held. The window
-test asks as "window: send ..." (conformance/window.c), and "window:
-send screendump menus" saves the screen as build/screens/menus.ppm
-(QMP's screendump), to be looked at. "window: send text Shell FROM S:x"
-types the rest of the line as it stands, a key (with Shift) a character,
-on a US keyboard.
+--qmp PATH is QEMU's QMP socket (-qmp unix:PATH,server=on,wait=off), and
+--host PATH the host channel's (the host-channel plan): a virtio-console
+in the guest, "host.0". A test that wants USB input or a screendump asks
+there, a line at a time, "ask N VERB WORDS" (conformance/hostask.h), and
+gets it through QMP: "keys shift-h i ret" types those keys (QEMU's
+qcodes, a "shift-" prefix held over the key), "mouse 10 -5 left" moves
+the mouse and clicks a button, "move 10 -5" only moves it, "drag 10 -5
+left" moves it with the button held, "text Shell FROM S:x" types the rest
+of the line as it stands, a key (with Shift) a character, on a US
+keyboard, and "screendump menus" saves the screen as
+build/screens/menus.ppm, to be looked at. Each is answered "done N ok"
+once QMP has done it, or "done N" and why not. An ask repeated (the
+test reconnected across its driver's restart) is answered again without
+being done again. Asks are said on this program's output as "[host]
+...", on a line of their own, but kept out of the transcript that's
+checked.
 """
 
 import argparse
@@ -45,7 +49,9 @@ import subprocess
 import sys
 import time
 
-SEND = re.compile(rb"(?:inputtest|window): send (keys|text|mouse|move|drag|screendump) ([^\r\n]*)")
+# Found anywhere in a line: edk2 writes its console's escapes to the
+# virtconsole before Planar starts, and they come before the first ask.
+ASK = re.compile(r"ask (\d+) (keys|text|mouse|move|drag|screendump) ?(.*)")
 
 
 class Qmp:
@@ -129,7 +135,7 @@ class Qmp:
         self._events([{"type": "btn", "data": {"down": down, "button": button}}])
 
     def send(self, verb, words):
-        """What a "send" line asks for: keys, or the mouse."""
+        """What an ask asks for: keys, the mouse, or a screendump."""
         if verb == "keys":
             return self.keys(words)
         if verb == "text":
@@ -153,6 +159,67 @@ class Qmp:
             self._button(w[2], False)
 
 
+class Host:
+    """The host channel's socket: asks read, done through QMP, answered."""
+
+    def __init__(self, path, qmp):
+        self.path = path
+        self.qmp = qmp
+        self.sock = None
+        self.buf = b""
+        self.last = None            # the last ask's number, and its answer
+
+    def connect(self, sel):
+        """Connected once QEMU has made the socket; False until then."""
+        if self.sock:
+            return True
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.connect(self.path)
+        except OSError:
+            s.close()
+            return False
+        self.sock = s
+        sel.register(s, selectors.EVENT_READ, self)
+        return True
+
+    def readable(self, sel):
+        chunk = self.sock.recv(4096)
+        if not chunk:
+            sel.unregister(self.sock)
+            self.sock.close()
+            self.sock = None
+            return
+        self.buf += chunk
+        while b"\n" in self.buf:
+            line, self.buf = self.buf.split(b"\n", 1)
+            self.ask(line.decode(errors="replace").strip())
+
+    def ask(self, line):
+        m = ASK.search(line)
+        if not m:
+            return                      # the firmware's, or a blank line
+        line = m.group(0)
+        sys.stdout.write(f"\n[host] {line}\n")
+        sys.stdout.flush()
+        n = m.group(1)
+        if self.last and self.last[0] == n:
+            return self.answer(self.last[1])
+        try:
+            self.qmp.send(m.group(2), m.group(3))
+            done = f"done {n} ok"
+        except (OSError, ValueError, IndexError) as e:
+            done = f"done {n} {e}"
+        self.last = (n, done)
+        self.answer(done)
+
+    def answer(self, line):
+        try:
+            self.sock.sendall(line.encode() + b"\n")
+        except OSError as e:
+            print(f"\nboot-check: host channel: {e}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--expect", required=True, help="text that marks a good boot")
@@ -164,6 +231,7 @@ def main() -> int:
     ap.add_argument("--facts", help="write the transcript's 'hw: ' lines here")
     ap.add_argument("--hwdb-facts", help="write hwdb's 'hw: ' lines here")
     ap.add_argument("--qmp", help="QEMU's QMP socket, for typing what a test asks for")
+    ap.add_argument("--host", help="the host channel's socket, where tests ask (needs --qmp)")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
@@ -178,15 +246,22 @@ def main() -> int:
     transcript = b""
     found = False
     qmp = Qmp(args.qmp) if args.qmp else None
-    asked = 0                       # of the transcript, looked at for requests
+    host = Host(args.host, qmp) if args.host and qmp else None
 
     try:
         while not found:
             left = deadline - time.monotonic()
             if left <= 0:
                 break
-            if not sel.select(timeout=left):
+            # The host channel's socket is QEMU's: looked for until it's there.
+            waiting = host and not host.connect(sel)
+            events = sel.select(timeout=min(left, 0.05) if waiting else left)
+            if not events:
                 continue
+            if host and any(key.data is host for key, _ in events):
+                host.readable(sel)
+                if not any(key.fileobj is proc.stdout for key, _ in events):
+                    continue
             chunk = os.read(proc.stdout.fileno(), 4096)
             if not chunk:
                 break
@@ -194,14 +269,6 @@ def main() -> int:
             sys.stdout.flush()
             transcript += chunk
             found = args.expect.encode() in transcript
-            if qmp:
-                done = transcript.rfind(b"\n") + 1
-                for m in SEND.finditer(transcript, asked, done):
-                    try:
-                        qmp.send(m.group(1).decode(), m.group(2).decode())
-                    except (OSError, ValueError, IndexError) as e:
-                        print(f"\nboot-check: QMP: {e}")
-                asked = max(asked, done)
             if re.search(rb" FAIL\b|Guru Meditation", transcript):
                 deadline = min(deadline, time.monotonic() + 1.0)     # the rest of the story
     finally:

@@ -104,13 +104,18 @@ QEMU_DISK = -drive if=none,id=disk,file=$(DISK),format=raw,snapshot=on \
 	-device sdhci-pci -device sd-card,drive=sd
 
 # USB (v5-plan step 4): an xHCI with a hub, a keyboard and a mouse behind
-# it, and QMP's socket, through which the boot check types what the
-# input test asks for (tools/boot-check.py).
+# it, and QMP's socket, through which the boot check types what a test
+# asks for (tools/boot-check.py). The tests ask on the host channel (the
+# host-channel plan): a virtio-console, "host.0", whose other end is a
+# socket the boot check serves.
 QMP_SOCK = $(BUILD)/qmp.sock
+HOST_SOCK = $(BUILD)/host.sock
 QEMU_USB = -device qemu-xhci,id=xhci -device usb-hub,bus=xhci.0,port=1 \
 	-device usb-kbd,bus=xhci.0,port=1.1 -device usb-mouse,bus=xhci.0,port=1.2 \
-	-qmp unix:$(QMP_SOCK),server=on,wait=off
-QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercised' \
+	-qmp unix:$(QMP_SOCK),server=on,wait=off \
+	-device virtio-serial-device -chardev socket,id=host,path=$(HOST_SOCK),server=on,wait=off \
+	-device virtconsole,chardev=host
+QEMU_INPUT_CHECK = --qmp $(QMP_SOCK) --host $(HOST_SOCK) --forbid '^\[hwdb\] V5.4 input: not exercised' \
 	--forbid 'typing not exercised'
 # A QEMU machine with a screen (RV64's ramfb, AArch64's through edk2)
 # must show it: display's and intuition's tests may not be skipped there.
