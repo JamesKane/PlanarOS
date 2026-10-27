@@ -58,7 +58,7 @@ Audio and the GPU's depth, which the old roadmap didn't place, come after the se
 
 | Step | When | Needs from planar-c |
 |---|---|---|
-| **1. Crash records** | Now, while V8's boards' half waits for the boards. The clang build's frame-pointer and build-id flags go in first | M6 (D1) |
+| **1. Crash records** ✅ 2026-10-27 (on QEMU; `QueryImage` moved to step 2) | Now, while V8's boards' half waits for the boards. The clang build's frame-pointer and build-id flags go in first | M6 (D1) |
 | **2. The debug port** | With V9 | M7 (all of user space built by planar-cc, VQ53), then M8 (D2) |
 | **3. Shared code and watchpoints** | After V10 | M9 (D3) |
 | **4. The host debugger over serial, and expressions** | After step 3 | M10 (D4, VQ50) |

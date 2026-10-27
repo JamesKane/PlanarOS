@@ -18,9 +18,14 @@
 #include "kprintf.h"
 #include "kstring.h"
 #include "pmm.h"
+#include "unwind.h"
 #include "userimg.h"
 
+constexpr unsigned MAX = 16;
+
 static struct area *region;
+static struct uimage lib_images[MAX];   /* each library's, for crash records */
+static const char *lib_names[MAX];
 static uint64_t iexec;
 static unsigned count;
 static bool vector;
@@ -46,9 +51,23 @@ static void *at(uint64_t va, uint64_t n, uint64_t lo, uint64_t hi)
     return (uint8_t *)phys_to_virt(area_pa(region, 0)) + (va - area_base(region));
 }
 
+struct span { uint64_t lo, hi; };
+
+static bool read_span(void *ctx, uint64_t off, void *dst, uint64_t n)
+{
+    const struct span *s = ctx;
+    const uint8_t *p = at(s->lo + off, n, s->lo, s->hi);
+
+    if (!p)
+        return false;
+    for (uint64_t i = 0; i < n; i++)
+        ((uint8_t *)dst)[i] = p[i];
+    return true;
+}
+
 /* Relocate the image at region offset 'off', and apply its LibraryImage:
- * its base, or 0 if it's malformed. */
-static uint64_t load(const struct user_image *img, uint64_t off, uint64_t has)
+ * its base, or 0 if it's malformed. Its uimage goes in *im. */
+static uint64_t load(const struct user_image *img, uint64_t off, uint64_t has, struct uimage *im)
 {
     uint64_t lo = area_base(region) + off, size = get_le64(img->start + 8);
     uint64_t rs = get_le64(img->start + 16), re = get_le64(img->start + 24);
@@ -83,6 +102,9 @@ static uint64_t load(const struct user_image *img, uint64_t off, uint64_t has)
             vector |= (a->la_Needs & LIBF_VECTOR) != 0;
         }
     }
+    struct span sp = { lo, hi };
+    uimage_init(im, lo, size, get_le64(img->start + 40), get_le64(img->start + 48),
+                get_le64(img->start + 56), get_le64(img->start + 64), read_span, &sp);
     return (uint64_t)li->li_Library;
 }
 
@@ -112,7 +134,6 @@ static bool fill_directory(const uint64_t *bases, const uint64_t *images, unsign
 
 bool library_init(void)
 {
-    constexpr unsigned MAX = 16;
     uint64_t pages = 0, off = 0, bases[MAX], images[MAX];
     const struct user_image *img;
     unsigned n = 0;
@@ -130,10 +151,11 @@ bool library_init(void)
         if (!is_library(img))
             continue;
         area_copy_in(region, off, img->start, (uint64_t)(img->end - img->start));
-        if (n == MAX || !(bases[n] = load(img, off, arch_has_vector() ? LIBF_VECTOR : 0))) {
+        if (n == MAX || !(bases[n] = load(img, off, arch_has_vector() ? LIBF_VECTOR : 0, &lib_images[n]))) {
             kprintf("library: %s is malformed\n", img->name);
             goto fail;
         }
+        lib_names[n] = img->name;
         images[n++] = area_base(region) + off;
         off += (get_le64(img->start + 8) + PAGE_SIZE - 1) / PAGE_SIZE * PAGE_SIZE;
     }
@@ -175,4 +197,14 @@ unsigned library_count(void)
 bool library_vector(void)
 {
     return vector;
+}
+
+const struct uimage *library_image_at(uint64_t pc, const char **name)
+{
+    for (unsigned i = 0; i < count; i++)
+        if (pc >= lib_images[i].base && pc - lib_images[i].base < lib_images[i].text) {
+            *name = lib_names[i];
+            return &lib_images[i];
+        }
+    return nullptr;
 }

@@ -19,10 +19,14 @@ USER_CPROGS  := $(basename $(notdir $(wildcard conformance/*.c)))
 USER_DIRS    := $(sort $(patsubst %/,%,$(dir $(wildcard servers/*/*.c drv/*/*.c))))
 USER_PROGS   := $(USER_CPROGS) $(notdir $(USER_DIRS))
 USER_CFLAGS  := -std=c23 -Wall -Wextra -O2 $(USER_FLAGS) -ffreestanding -fno-builtin \
-	-fno-stack-protector -fPIE -Iinclude -Iconformance
+	-fno-stack-protector -fPIE $(FRAME_CFLAGS) -Iinclude -Iconformance
+# Every image carries a 16-byte build-id, as planar-ld's do (docs §19.4).
 USER_LDFLAGS := $(USER_FLAGS) -nostdlib -static-pie --ld-path=$(LD_PATH) \
-	-Wl,-T,arch/$(ARCH)/user/user.ld -Wl,--no-dynamic-linker
+	-Wl,-T,arch/$(ARCH)/user/user.ld -Wl,--no-dynamic-linker -Wl,--build-id=md5
 USER_ARCH_C  := $(basename $(notdir $(wildcard arch/$(ARCH)/user/*.c)))
+# code.c's kernel-call test sets every callee-saved register, RV64's s0
+# (the frame pointer) among them: it can't keep a frame record.
+$(BUILD)/user/code.o: USER_CFLAGS += -fomit-frame-pointer
 USER_RT      := $(BUILD)/user/crt0.o $(BUILD)/user/syscalls.o $(BUILD)/user/string.o \
 	$(BUILD)/user/rt/string.o $(BUILD)/user/rt/reloc.o $(BUILD)/user/rt/tls.o \
 	$(BUILD)/user/exec/msg.o $(BUILD)/user/exec/task.o \

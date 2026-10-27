@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 struct process;
+struct uimage;
 
 /* Build the region, before the first process. False, logged, if a
  * library is malformed: then there's no region, and IExec is nullptr. */
@@ -28,5 +29,8 @@ uint64_t library_iexec(void);
 uint64_t library_pages(void);
 unsigned library_count(void);
 bool library_vector(void);          /* exec's CopyMem, by the vector unit */
+
+/* The library whose code holds 'pc', and its name; nullptr if none. */
+const struct uimage *library_image_at(uint64_t pc, const char **name);
 
 #endif /* KERNEL_LIBRARY_H */

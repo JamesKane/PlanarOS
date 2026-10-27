@@ -53,6 +53,13 @@ int64_t QueryImage(const void *pc, struct ImageInfo *info);
 - **The kernel itself** has an image too, built from its own link, so its panics unwind the same way (§19.9).
 - **Cost:** about 64 bytes per loaded image in the kernel. `QueryImage` is the lookup `QueryArea` already does, plus a field.
 
+*As built (step 1, 2026-10-27):*
+- **Programs carry it in crt0's header, not in `ProcessImage`.** Every program starts with crt0's `PLNR` header at offset 0, whether it is built in or loaded by `RunCommand`. The header gains four offsets after the image's end: the unwind table's start and end, and the build-id note's. `user.ld` keeps `.planar.unwind` and `.note.gnu.build-id` in the code, with symbols around each; planar-ld defines the same symbols. `create_from` reads the header for both paths, so `RunCommand` and `struct ProcessImage` are unchanged.
+- **Libraries:** `LibraryHeader` gains the same four offsets (`LIBIMAGE_FORMAT` 2, `lib/libhead.S`), and `kernel/library.c` records each library's image and name.
+- **The kernel** stores a `struct uimage` (`kernel/unwind.h`): base, code size, table, build-id. `struct ImageInfo` and `QueryImage` wait for step 2, whose debugger is their first user on the board.
+- **The kernel's own image** isn't recorded yet. With `-fno-omit-frame-pointer`, the kernel crashed in V1.3's stack-overflow test (a jump to 0), not yet investigated. So the kernel keeps its old flags, and its panics are unchanged (§19.9).
+- **Build flags** (`mk/toolchain.mk`, `mk/user.mk`): programs and libraries are built with `-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer`, and linked with `--build-id=md5`. `arch/<isa>/user/code.c` is the exception: its kernel-call test sets every callee-saved register, RV64's `s0` included.
+
 ## 19.5 Crash records
 
 `process_fault` keeps its line and adds the image and a backtrace:
@@ -73,6 +80,12 @@ planar: shell: #3 0x80200124 shell+0x124
 - **On the board,** the process's watcher (its supervisor, or the Shell for a command) can do the same with debug files from the `DEBUG:` assign (VQ49). `crash.library`, a thin wrapper over planar-c's `dbg`, is the proposed home for that code.
 
 This step needs nothing else from this document and gives most of its value, so it comes first (§19.11).
+
+*As built:*
+- **Where it's printed:** `process_fault` takes the faulting task's pc, sp, frame pointer and return-address register from the trap frame, and prints the record (`kernel/unwind.c`).
+- **The walk:** a frame in planar-c's code is stepped by its table entry, through every prologue and epilogue state (`arch/<isa>/unwind.c`, ported from planar-c's `dbg_unwind_step`). A frame with no entry, or an `UNKNOWN` one (clang's code), follows the frame-pointer chain, but only while each frame's sp keeps rising inside the task's stack. If the task stopped outside every image (a jump into nowhere), the caller is taken from the return-address register.
+- **The image lines** print `-` for an image with no build-id.
+- **On the host,** `planar-symbolize -d DIR…` finds each image by build-id: a planar-ld debug file gives function and source line, and a clang-built `.elf` gives function and offset from its symbols.
 
 ## 19.6 The debug port
 
@@ -140,7 +153,7 @@ The messages are the same structures on every transport, as planar-c's manifest 
 
 - **Under QEMU,** the host debugger uses QEMU's gdbstub as its transport. It reads the kernel's image from the build tree and its debug file by build-id, and uses the same `dbg` core for everything else.
 - **On a board, a kernel panic** prints the same crash record as §19.5, unwound through the kernel's own image. The panic path walks only the kernel stack, with the same 32-frame bound.
-- **Frames the unwinder can't describe.** The kernel is built by clang until planar-c has an assembler (VQ53), so its functions are `UNKNOWN`. Its panics fall back to the frame-pointer chain, and to symbols from the ELF symbol table.
+- **Frames the unwinder can't describe.** The kernel is built by clang until planar-c has an assembler (VQ53), so its functions are `UNKNOWN`. Its panics fall back to the frame-pointer chain, and to symbols from the ELF symbol table. *As of step 1:* not yet, since the kernel isn't built with frame pointers (§19.4).
 - **Live debugging of a kernel on a board** needs JTAG (OpenOCD) and is out of scope until a board needs it.
 
 ## 19.10 Not now: record and replay
@@ -164,6 +177,12 @@ Each step pairs with a planar-c milestone (D1–D4 in its §9, placed as M6 and 
    - `planar-symbolize`.
 
    *Tested by* a conformance program that faults three calls deep, through exec.library. Its serial transcript must show the right images and frames, and `planar-symbolize` must turn them into the expected source lines (the conformance-by-transcript method).
+
+   *Built (2026-10-27), but for `QueryImage` (moved to step 2) and the kernel's own image (§19.4).*
+   - `conformance/crashdeep.c` faults in `deepest`, called by `put`, called by exec.library's `RawDoFmt`, called by `outer`, called by `main`. Its record on QEMU, both ISAs: `deepest`, `put`, two exec.library frames (`number` and `RawDoFmt`), `outer`, `main`, then crt0.
+   - `V1.4 backtrace` (`kernel/selftest.c`) checks that each frame is in the right image, in order, and that both images carry build-ids.
+   - planar-c's `make planaros` rebuilds `crashdeep` with planar-cc (`-g`) and symbolizes the transcript. Each of its frames must name its function at the marked line of `crashdeep.c`, and exec.library's must name `RawDoFmt` from the library's symbols.
+   - Every other fault in the suite (`wild`, `wx`, `peek`, `kexec`, `overrun`, …) prints a record too. `overrun`'s runaway recursion stops at the 32-frame bound.
 2. **The debug port** (with D2, planar-c M8; after M7 builds all of user space):
    - `DebugProcess`, the events and requests, and hold-on-fault;
    - breakpoints in program images;

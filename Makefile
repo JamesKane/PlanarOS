@@ -63,6 +63,7 @@ PORTABLE_SRCS := \
 	kernel/selftest.c \
 	kernel/smp.c \
 	kernel/syscall.c \
+	kernel/unwind.c \
 	drivers/pl011.c \
 	drivers/plic.c \
 	drivers/uart8250.c

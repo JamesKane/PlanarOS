@@ -29,6 +29,8 @@
 
 #include <planar/exec.h>
 
+#include "unwind.h"
+
 #include "arch.h"
 #include "spinlock.h"
 
@@ -87,6 +89,9 @@ struct process {
     atomic_bool killed;             /* ended by process_kill */
     uint64_t stack_base;            /* the first task's stack, for the overrun test */
     uint64_t image_base;            /* where its image is, for QueryTasks */
+    struct uimage image;            /* its unwind table and build-id (§19.4) */
+    uint64_t fault_frames[8];       /* the crash record's first frames' pcs */
+    unsigned nfault_frames;         /* how many frames it had */
     atomic_uint_fast64_t calls_done;    /* kernel calls made by tasks that have left */
 };
 
@@ -133,7 +138,10 @@ unsigned process_count(void);
 
 /* From a task of the process: end it normally, or by a fault. */
 [[noreturn]] void process_exit(int64_t code);
-[[noreturn]] void process_fault(enum fault kind, uint64_t pc, uint64_t addr);
+/* A fault prints the process's crash record (docs §19.5): the line with
+ * the fault, then the images and the backtrace from 'regs', the task's
+ * pc, sp, frame pointer and return-address register. */
+[[noreturn]] void process_fault(enum fault kind, uint64_t addr, const struct uframe *regs);
 
 /* The kernel calls behind CreateTask and ExitTask. */
 int64_t process_create_task(uint64_t entry, uint64_t arg0, uint64_t arg1);

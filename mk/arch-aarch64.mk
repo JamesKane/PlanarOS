@@ -29,6 +29,7 @@ ARCH_SRCS := \
 	arch/aarch64/mmu.c \
 	arch/aarch64/switch.S \
 	arch/aarch64/trap.c \
+	arch/aarch64/unwind.c \
 	arch/aarch64/vectors.S
 
 # User programs get FP/SIMD (switched lazily, lazy.c); the compiler uses

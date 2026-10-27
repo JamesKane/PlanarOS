@@ -31,6 +31,10 @@ _start:
     .ascii  "PLNR"                  /* magic */
     .dword  _etext - _start         /* bytes of code and constants (RX) */
     .dword  _end - _start           /* whole image, .bss included */
+    .dword  __planar_unwind - _start    /* the unwind table (docs §19.4) */
+    .dword  __planar_unwind_end - _start
+    .dword  __build_id - _start         /* the build-id note */
+    .dword  __build_id_end - _start
 1:  mv      s0, a0
     mv      s1, a1
     mv      s2, a2

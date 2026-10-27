@@ -87,7 +87,8 @@ static void user_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)
     if (scause == 2 && riscv_lazy_first_use(&f->sstatus, user_insn(f->sepc, stval),
                                             &task_self()->ctx))
         return;             /* run it again, now allowed */
-    process_fault(fault_kind(scause), f->sepc, stval);
+    process_fault(fault_kind(scause), stval,
+                  &(struct uframe){ .pc = f->sepc, .sp = f->x[2], .fp = f->x[8], .ra = f->x[1] });
 }
 
 static void kernel_trap(struct trap_frame *f, uint64_t scause, uint64_t stval)

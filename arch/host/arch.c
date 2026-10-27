@@ -12,6 +12,7 @@
 
 #include "arch.h"
 #include "kprintf.h"
+#include "unwind.h"
 #include "userimg.h"
 
 const char arch_name[] = "host";
@@ -217,6 +218,11 @@ bool arch_copy_from_user(void *, uint64_t, size_t)
 bool arch_copy_to_user(uint64_t, const void *, size_t)
 {
     return false;
+}
+
+bool arch_unwind_step(const struct unwinder *, struct uframe *, bool, uint64_t, uint32_t)
+{
+    return false;                   /* no user code here */
 }
 
 void arch_sync_icache(const void *, size_t)

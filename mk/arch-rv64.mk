@@ -23,7 +23,8 @@ ARCH_SRCS := \
 	arch/rv64/sbi.c \
 	arch/rv64/switch.S \
 	arch/rv64/trap.S \
-	arch/rv64/trap.c
+	arch/rv64/trap.c \
+	arch/rv64/unwind.c
 
 # User programs get FP and vector (switched lazily, lazy.c); the compiler
 # may vectorize their loops.

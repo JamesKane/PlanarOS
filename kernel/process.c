@@ -122,6 +122,35 @@ static int64_t launch(struct process *p, struct task *t)
 static void reclaim(struct process *p);
 static void signal_task_handle(Handle h, uint64_t sig);
 
+/* Read 'n' bytes at offset 'off' of the Area 'ctx' (not yet mapped). */
+static bool read_area(void *ctx, uint64_t off, void *dst, uint64_t n)
+{
+    struct area *a = ctx;
+
+    if (off > area_size(a) || n > area_size(a) - off)
+        return false;
+    for (uint64_t i = 0; i < n; i++)
+        ((uint8_t *)dst)[i] = *((const uint8_t *)phys_to_virt(area_pa(a, (off + i) & ~(PAGE_SIZE - 1))) +
+                                ((off + i) & (PAGE_SIZE - 1)));
+    return true;
+}
+
+/* Its unwind table and build-id, from crt0's header (arch/<isa>/user/
+ * crt0.S): the magic at 4, then offsets of the code's end, the image's,
+ * the table's two ends and the note's. An image without the header (not
+ * crt0's) has neither. */
+static void note_image(struct uimage *im, struct area *image, uint64_t etext)
+{
+    uint8_t h[56];
+
+    if (!read_area(image, 0, h, sizeof h) || get_le32(h + 4) != IMAGE_MAGIC) {
+        *im = (struct uimage){ .base = area_base(image), .text = etext };
+        return;
+    }
+    uimage_init(im, area_base(image), etext, get_le64(h + 24), get_le64(h + 32), get_le64(h + 40),
+                get_le64(h + 48), read_area, image);
+}
+
 /* A new process running 'image' (its code the first 'etext' bytes, its
  * entry 'entry' bytes in), watched by 'watcher' or the task 'watch_task'
  * names. The image becomes the process's: if it can't be made, the image
@@ -161,6 +190,7 @@ static struct process *create_from(struct area *image, uint64_t etext, uint64_t 
      * and .bss read and write. */
     for (uint64_t off = 0; off < etext; off += PAGE_SIZE)
         arch_sync_icache(phys_to_virt(area_pa(image, off)), PAGE_SIZE);
+    note_image(&p->image, image, etext);
     if (!area_map(image, p, AREAR_READ | AREAR_WRITE, etext)) {
         area_destroy(image);
         image = nullptr;
@@ -340,12 +370,17 @@ static void set_result(struct process *p, int64_t code, enum fault kind, uint64_
     leave();
 }
 
-[[noreturn]] void process_fault(enum fault kind, uint64_t pc, uint64_t addr)
+[[noreturn]] void process_fault(enum fault kind, uint64_t addr, const struct uframe *regs)
 {
-    struct process *p = task_self()->process;
+    struct task *self = task_self();
+    struct process *p = self->process;
+    uint64_t pc = regs->pc;
 
     kprintf("planar: %s: %s %p (pc %p)\n", p->name, fault_names[kind], (void *)addr,
             (void *)pc);
+    p->nfault_frames = unwind_record(p, *regs, area_base(self->user_stack),
+                                     area_base(self->user_stack) + area_size(self->user_stack),
+                                     p->fault_frames, sizeof p->fault_frames / sizeof *p->fault_frames);
     set_result(p, -1, kind, pc, addr);
     kill_tasks(p, task_self());
     leave();

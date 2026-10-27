@@ -25,6 +25,13 @@ ifneq ($(HAVE_MAJOR),$(LLVM_MAJOR))
 $(error $(CROSS_CC) is LLVM $(HAVE_MAJOR), the tree is pinned to $(LLVM_MAJOR))
 endif
 
+# Frame records in every function of user code (mk/user.mk), leaves too,
+# so a crash record's backtrace can follow clang's code by the
+# frame-pointer chain (docs §19.11 step 1; planar-c's code has unwind
+# tables besides). Not the kernel's yet: with them it failed V1.3's
+# stack-overflow test (docs §19.4).
+FRAME_CFLAGS := -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+
 # Flags every freestanding (non-hosted) build shares.
 FREESTANDING_CFLAGS := -ffreestanding -fno-builtin -fno-stack-protector -fno-pic \
 	-nostdlib

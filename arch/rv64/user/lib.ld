@@ -32,6 +32,19 @@ SECTIONS
     .hash : { *(.hash) }
     .gnu.hash : { *(.gnu.hash) }
     .dynamic : { *(.dynamic) }
+    /* planar-c's unwind table and the build-id note, for crash records
+     * (docs §19.4), in the code; lib/libhead.S's header points at both. Empty
+     * from clang: its functions are found by the frame-pointer chain. */
+    .planar.unwind : ALIGN(4) {
+        __planar_unwind = .;
+        KEEP(*(.planar.unwind))
+        __planar_unwind_end = .;
+    }
+    .note.gnu.build-id : ALIGN(4) {
+        __build_id = .;
+        KEEP(*(.note.gnu.build-id))
+        __build_id_end = .;
+    }
     _etext = .;
     .data : {
         *(.data .data.* .sdata .sdata.* .tdata .tdata.* .tbss .tbss.*)

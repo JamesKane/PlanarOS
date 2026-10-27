@@ -34,6 +34,10 @@ _start:
     .ascii  "PLNR"                  /* magic */
     .quad   _etext - _start         /* bytes of code and constants (RX) */
     .quad   _end - _start           /* whole image, .bss included */
+    .quad   __planar_unwind - _start    /* the unwind table (docs §19.4) */
+    .quad   __planar_unwind_end - _start
+    .quad   __build_id - _start         /* the build-id note */
+    .quad   __build_id_end - _start
 1:  mov     x19, x0
     mov     x20, x1
     mov     x21, x2

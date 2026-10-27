@@ -4,7 +4,8 @@
  * V6 step 4. A library is linked at 0 as a position-independent image
  * of code and constants only (arch/<isa>/user/lib.ld refuses data). It
  * starts with a header of offsets from its start (lib/libhead.S): the
- * magic, its size, its relocations, and its LibraryImage. At boot the
+ * magic, its size, its relocations, its LibraryImage, its unwind table
+ * and its build-id note. At boot the
  * kernel copies each into the shared library region, applies the
  * relocations, and then reads the LibraryImage, whose pointers are by
  * then the region's addresses. Private to the kernel and the libraries.
@@ -17,7 +18,7 @@
 #include <planar/exec.h>
 
 constexpr uint32_t LIBIMAGE_MAGIC = 0x42494c50;     /* "PLIB" */
-constexpr uint32_t LIBIMAGE_FORMAT = 1;
+constexpr uint32_t LIBIMAGE_FORMAT = 2;
 
 /* The header, at offset 0. */
 struct LibraryHeader {
@@ -26,6 +27,10 @@ struct LibraryHeader {
     uint64_t lh_Size;               /* bytes: all code and constants */
     uint64_t lh_RelaStart, lh_RelaEnd;
     uint64_t lh_Image;              /* the LibraryImage */
+    /* Format 2: planar-c's unwind table and the build-id note, for crash
+     * records (docs §19.4); empty if the linker made none. */
+    uint64_t lh_Unwind, lh_UnwindEnd;
+    uint64_t lh_BuildID, lh_BuildIDEnd;
 };
 
 /* What the CPU must have for an alternative (arch_has_vector). */

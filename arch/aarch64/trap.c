@@ -91,6 +91,10 @@ void trap_irq(struct trap_frame *, uint64_t)
     irq_exit();             /* may switch tasks: this frame waits on its stack */
 }
 
+/* A fault from user code: the crash record's registers from its frame. */
+#define user_fault(kind, addr) \
+    process_fault((kind), (addr), &(struct uframe){ .pc = f->elr, .sp = f->sp, .fp = f->x[29], .ra = f->x[30] })
+
 void trap_el0_sync(struct trap_frame *f, uint64_t)
 {
     uint64_t esr = sysreg_read(esr_el1), far = sysreg_read(far_el1);
@@ -101,26 +105,26 @@ void trap_el0_sync(struct trap_frame *f, uint64_t)
     case EC_DABT_LOWER:
         if (area_fault_retry(far, esr & (1u << 6) ? MAP_WRITE : MAP_READ))
             break;
-        process_fault(esr & (1u << 6) ? FAULT_WRITE : FAULT_READ, f->elr, far);
+        user_fault(esr & (1u << 6) ? FAULT_WRITE : FAULT_READ, far);
     case EC_IABT_LOWER:
         if (area_fault_retry(far, MAP_EXEC))
             break;
-        process_fault(FAULT_EXEC, f->elr, far);
+        user_fault(FAULT_EXEC, far);
     case EC_PC_ALIGN:
     case EC_SP_ALIGN:
-        process_fault(FAULT_ALIGN, f->elr, far);
+        user_fault(FAULT_ALIGN, far);
     case EC_BRK:
-        process_fault(FAULT_BREAK, f->elr, f->elr);
+        user_fault(FAULT_BREAK, f->elr);
     case EC_FP:
         if (aarch64_lazy_first_use(&task_self()->ctx))
             break;          /* run it again, now allowed */
-        process_fault(FAULT_ILLEGAL, f->elr, f->elr);
+        user_fault(FAULT_ILLEGAL, f->elr);
     case EC_UNKNOWN:
     case EC_SYSREG:
     case EC_SVE:
-        process_fault(FAULT_ILLEGAL, f->elr, f->elr);
+        user_fault(FAULT_ILLEGAL, f->elr);
     default:
-        process_fault(FAULT_OTHER, f->elr, far);
+        user_fault(FAULT_OTHER, far);
     }
     user_return();          /* a killed task stops here */
     aarch64_lazy_return(&task_self()->ctx);

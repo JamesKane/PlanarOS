@@ -1604,6 +1604,42 @@ static void expect_fault(const char *name, uint64_t arg, enum fault kind, uint64
     process_free(p);
 }
 
+/* A crash record's backtrace (docs §19.11 step 1): crashdeep faults in
+ * deepest, called by put, called by exec.library's RawDoFmt (in one or
+ * more frames), called by outer, called by main. Each frame must be in
+ * the right image, in order, and both images must carry a build-id.
+ * (clang's code has no unwind table, so this walks the frame-pointer
+ * chain; planar-c's tests/planaros.sh checks the tables, with programs
+ * planar-cc built.) */
+static void test_backtrace(void)
+{
+    struct process *p = run("crashdeep", 0, 1000000);
+    const struct uimage *lib = nullptr;
+    const char *name = "";
+    unsigned n = p->nfault_frames < 8 ? p->nfault_frames : 8, i = 2, nlib = 0;
+
+    if (!atomic_load(&p->dead) || p->fault != FAULT_WRITE || p->fault_addr != 0x20)
+        fail("V1.4 backtrace", "crashdeep didn't fault writing 0x20");
+    /* Two of the program's frames, the library's, two of the program's. */
+    bool ok = n >= 5;
+    for (unsigned k = 0; k < 2 && ok; k++)
+        ok = p->fault_frames[k] - p->image.base < p->image.text;
+    while (ok && i < n && library_image_at(p->fault_frames[i], &name) && kstreq(name, "exec.library"))
+        lib = library_image_at(p->fault_frames[i++], &name), nlib++;
+    ok = ok && nlib && i + 2 <= n;
+    for (unsigned k = i; k < i + 2 && ok; k++)
+        ok = p->fault_frames[k] - p->image.base < p->image.text;
+    if (!ok) {
+        kprintf("crashdeep: %u frames, %u in exec.library\n", p->nfault_frames, nlib);
+        fail("V1.4 backtrace", "a frame was missing, or in the wrong image");
+    }
+    if (!p->image.has_id || !lib->has_id)
+        fail("V1.4 backtrace", "an image without a build-id");
+    kprintf("V1.4 backtrace ok: %u frames from a fault three calls deep, %u of them exec.library's; "
+            "both images with build-ids\n", p->nfault_frames, nlib);
+    process_free(p);
+}
+
 static void wait_test_dead(void)
 {
     struct ktimer t = { .fn = timeout_fire, .data = task_self() };
@@ -1752,6 +1788,7 @@ void selftest_user(void)
                  (uint64_t)(uintptr_t)kernel_forty_two);
     kprintf("V1.4 fault ok: wild write, write to code, read of the kernel, a call into "
             "the kernel, a write to the counters' controls each ended only their process\n");
+    test_backtrace();
 
     spin_us = expect_killed("spin");
     wait_us = expect_killed("waiter");

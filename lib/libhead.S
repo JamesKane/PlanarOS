@@ -10,8 +10,12 @@
     .globl  _start
 _start:
     .ascii  "PLIB"
-    .4byte  1                       /* LIBIMAGE_FORMAT */
+    .4byte  2                       /* LIBIMAGE_FORMAT */
     .8byte  _end - _start
     .8byte  __rela_start - _start
     .8byte  __rela_end - _start
     .8byte  _library_image - _start
+    .8byte  __planar_unwind - _start   /* the unwind table (docs §19.4) */
+    .8byte  __planar_unwind_end - _start
+    .8byte  __build_id - _start        /* the build-id note */
+    .8byte  __build_id_end - _start
