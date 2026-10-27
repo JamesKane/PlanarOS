@@ -347,7 +347,7 @@ static void serve(struct drv *d, unsigned pos)
         ExitProcess(-7);
 
     for (;;) {
-        uint64_t want = lines | 1ULL << SIG_ACCEPT | 1ULL << SIG_CLIENT | 1ULL << SIG_HWDB, got;
+        uint64_t want = lines | 1ULL << SIG_ACCEPT | 1ULL << SIG_CLIENT | 1ULL << SIG_HWDB | ops->signals, got;
 
         uint64_t until = ops->deadline ? ops->deadline(d) : 0;
 

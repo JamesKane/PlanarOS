@@ -1,6 +1,6 @@
 # Plan: a host channel for tests, and port watches
 
-**Status: in progress (2026-10-26); decisions 1 to 6 taken as they leaned; steps 1 to 4 (the channel) built.** Two items from the simplify pass's altitude review (after V8 step 8's QEMU half), each a change to a mechanism that several programs work around today. Neither needs a board, so both can be done while the boards are busy. The decisions at the end are taken.
+**Status: built (2026-10-26); decisions 1 to 6 taken as they leaned; steps 1 to 6 built on QEMU.** Two items from the simplify pass's altitude review (after V8 step 8's QEMU half), each a change to a mechanism that several programs work around today. Neither needs a board, so both can be done while the boards are busy. The decisions at the end are taken.
 
 ## Why
 
@@ -148,6 +148,21 @@ Each of these is a signal in the program's main wait, followed by a connect, ins
 - **window.c's `survive`:** its 10 s of retried moves after input's death become a single wait for intuition's `im_InputOpens`. Once the channel answers each ask, a lost move fails at once instead of being guessed at.
 
 **Measured by** `T_INPUT`: the time from input's restart to the first report xhci delivers on the new connection. It's under 20 ms on QEMU; today it's up to 500 ms. The boards' figure is recorded when they're next on the bench (the V8 step 8 runs).
+
+**Built (2026-10-26), steps 5 and 6, with what changed on the way:**
+- **`WatchPort`** is kernel call 60: `kernel/port.c`'s `struct name_waiter`, now with its own signal, a handle (`HANDLE_WATCH`), its process and a copy of the name. `CreatePort` posts each waiter's own signal. It takes `OpenPort`'s waiters off the list, and leaves a watch on it, fired, until it's closed. `CloseHandle` closes a watch (`port_watch_close`), and `ipc_task_gone` frees a leaving task's watches. Each process may hold 16 (`PROCESS_WATCHES`).
+  - **`conformance/portwatch.c`** runs in V6.7 beside `deadline.c`, and the selftest checks the system's handle count is back after both.
+  - **The mutation:** a `CreatePort` that doesn't post to watches fails `portwatch` at its first wait.
+- **drv.library's loop** wakes for a driver's own signals too (`drv_ops.signals`, new). xhci's are its connection to input, signalled when input goes, and its watch on input's port, for its coming back. The 500 ms `RETRY` is gone.
+  - **An old bug found on the way:** xhci's `poll` tried to connect before it looked whether input had gone, so the death was handled a poll late. With the old retry that hid in its 500 ms. On AArch64, where xhci's loop sleeps between interrupts, it cost about 200 ms until the order was swapped.
+  - **Measured by `T_INPUT`**, input's restart to its devices attached again (to the 5 ms of hwdb's loop): 23 ms on RV64 and 15 ms on AArch64 (EFI), against 495 ms with the retry; across `make test-all`'s eight boots with xhci, 13 to 30 ms, and 58 on one. That's not quite the exit's 20 ms everywhere: the figure includes hwdb's own polling.
+- **intuition's awaiter tasks** are watches on `display.0`, `input` and `dos`, made again by `await()` each time one's needed. The probe connections are gone, and so is the loader task: the saved settings are read in the main task when dos's watch fires (decision 5).
+- **input's loader task** is likewise a watch on `dos`. `SIG_PREFS` is the watch's signal, read from `WaitPorts`' result.
+- **conwin's 50/100 ms retry** is a watch on `intuition`, made again after each failed try. A window refused with intuition there is still tried again in 100 ms: that's not a port that's missing.
+- **Left as they are:**
+  - **The GPU drivers' 500 ms `RETRY`** (`drv/gpu-panthor`, `drv/gpu-rogue`) waits for the firmware file on dos, not only dos's port, and runs only on the boards.
+  - **The Shell's half-second retry for input** is in `cmd/`, outside this plan's `servers/` and `drv/`.
+  - **`window.c`'s retried moves after input's death** in `survive` stay as a deadline loop, now over moves that are answered.
 
 ## Size
 

@@ -177,7 +177,7 @@ It exits when hwdb's connection goes.
 
 **INPUTS**
 - `token` -- `main`'s argument, from hwdb.
-- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`, `stop`, and the flag `every_line`. Any but `name` and `bind` may be `nullptr`.
+- `ops` -- `name`, `bind`, `start`, `interrupt`, `request`, `message` with `message_size`, `poll`, `deadline`, `gone`, `stop`, the flag `every_line`, and `signals`: bits of the driver's own (20 to 31) that wake the loop too, so `poll` runs, such as a connection of its own to a server and a `WatchPort` for its coming back (xhci's, for input). Any but `name` and `bind` may be `nullptr` or 0.
 
 **EXAMPLE**
 virtio-mmio's `stop` (`drv/virtio-mmio/main.c`): a reset, after which the device touches no memory, then its queue's Area:

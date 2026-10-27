@@ -52,6 +52,7 @@ struct mapping;
 constexpr unsigned PROCESS_HANDLES = 256;
 constexpr unsigned PROCESS_TASKS = 64;
 constexpr unsigned PROCESS_CONNS = 32;  /* connection ends, open or waiting */
+constexpr unsigned PROCESS_WATCHES = 16;    /* WatchPort's */
 
 struct process {
     struct arch_domain domain;
@@ -64,6 +65,7 @@ struct process {
     unsigned ntasks;                /* on 'tasks' (lock) */
     unsigned handles;               /* held (kernel/handle.c's lock) */
     unsigned conns;                 /* connection ends (kernel/port.c's lock) */
+    unsigned watches;               /* WatchPort's (kernel/port.c's lock) */
     unsigned klog_tokens;           /* KLog lines it may print now (lock) */
     uint64_t klog_at, klog_dropped;
     atomic_uint unfinished;         /* tasks not yet switched away for good */

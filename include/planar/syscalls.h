@@ -67,6 +67,7 @@
 #define SYS_READ_LOG        57
 #define SYS_QUERY_TASKS     58
 #define SYS_KILL_PEER       59
+#define SYS_WATCH_PORT      60
 
 #define ERR_NOSYS           (-1)
 #define ERR_BADADDR         (-2)

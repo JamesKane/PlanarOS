@@ -205,11 +205,15 @@ static int64_t sys_arm_timer(struct task *self, uint64_t deadline, int64_t sigbi
 static int64_t sys_close_handle(struct task *self, Handle h)
 {
     struct process *p = handle_take(h, HANDLE_PROCESS, self->process);
+    int64_t e;
 
-    if (!p)
-        return lease_close_call(h);
-    process_release(p);
-    return 0;
+    if (p) {
+        process_release(p);
+        return 0;
+    }
+    if ((e = port_watch_close(h)) != ERR_BADHANDLE)
+        return e;
+    return lease_close_call(h);
 }
 
 static int64_t dispatch(uint64_t nr, const uint64_t a[6])
@@ -354,6 +358,8 @@ static int64_t dispatch(uint64_t nr, const uint64_t a[6])
         return lease_cold_reboot_call((uint32_t)a[0]);
     case SYS_READ_LOG:
         return lease_read_log_call((uint32_t)a[0], a[1], (uint32_t)a[2]);
+    case SYS_WATCH_PORT:
+        return port_watch_call(a[0], (int64_t)a[1]);
     case SYS_KILL_PEER:
         return lease_kill_peer_call((uint32_t)a[0], (uint32_t)a[1], (uint32_t)a[2]);
     default:

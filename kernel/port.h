@@ -26,8 +26,11 @@ int64_t port_accept_call(uint32_t port, int64_t sigbit, uint64_t arena_out);
 int64_t conn_signal_call(uint32_t conn);
 uint64_t conn_signal_wait_call(uint32_t conn, uint64_t mask, uint64_t deadline);
 int64_t conn_close_call(uint32_t conn);
+int64_t port_watch_call(uint64_t name, int64_t sigbit);
+/* CloseHandle on a watch; ERR_BADHANDLE if 'h' isn't one of the caller's. */
+int64_t port_watch_close(uint32_t h);
 
-/* 't' is leaving its process: close its ports and connection ends. */
+/* 't' is leaving its process: close its ports, connection ends and watches. */
 void ipc_task_gone(struct task *t);
 
 /* The process at the other end of the connection 'holder' holds as 'h',

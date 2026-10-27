@@ -50,8 +50,8 @@
  * size, its own (two sprites, either shown), and the HUD and the
  * backdrop's colours, the Workbench's, which each window asking for
  * IDCMP_NEWPREFS is told have changed. The saved ones are read at start
- * (intuition.prefs, planar/prefs.h): at once if dos is there, else by a
- * task of its own once it is. A WFLG_BACKDROP window is kept behind the
+ * (intuition.prefs, planar/prefs.h): at once if dos is there, else
+ * once a watch on its port (WatchPort) says it's made. A WFLG_BACKDROP window is kept behind the
  * others, and a click doesn't raise it.
  *
  * When a client goes, closed or dead, its windows go and intuition lets
@@ -60,9 +60,8 @@
  * as it keeps input.
  *
  * display or input may die under intuition, and hwdb starts them again.
- * intuition lets go of what it had of the dead one, and a task waits for
- * its port to be made again (OpenPort's wait), so the clients are served
- * meanwhile. Back, display gets the whole screen composed into two new
+ * intuition lets go of what it had of the dead one, and watches for its
+ * port to be made again (WatchPort), serving the clients meanwhile. Back, display gets the whole screen composed into two new
  * buffers; while it's away a window of two buffers has its frames taken
  * at once, as nothing is reading the other. input's ring is opened
  * again, the pointer where it was.
@@ -86,7 +85,6 @@
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_LATCH = 18, SIG_DISPLAY = 19;
 constexpr int64_t SIG_INPUT = 20, SIG_INPUT_PORT = 21, SIG_TIMER = 22;
 constexpr int64_t SIG_DISPLAY_BACK = 23, SIG_INPUT_BACK = 24, SIG_CALL = 25, SIG_PREFS = 26;
-constexpr int64_t SIG_AWAIT = 16;               /* an awaiting task's own, for its connection */
 constexpr unsigned CONNS = 16;
 constexpr uint64_t MS = 1000000;
 constexpr uint64_t CALL_DEADLINE = 1000 * MS;   /* for display's and input's answers (V6 step 7) */
@@ -291,41 +289,26 @@ static void watch_set(struct watch *w, const volatile uint64_t *word)
 }
 
 /*
- * A server's port, waited for by a task of its own once asked, which
- * signals the first task when it's there. It has to connect to find it;
- * that connection is closed at once, and the first task makes its own,
- * whose signals are its own.
+ * A server's port, watched for (WatchPort, the host-channel plan step 6):
+ * its signal wakes the main loop when it's made, and the main loop
+ * connects. A watch fires once: one made again each time it's needed.
  */
 struct await {
     const char *name;
     int64_t sig;
-    uint64_t asked;
+    Handle watch;
 };
 
-static struct await display_a = { "display.0", SIG_DISPLAY_BACK, 0 }, input_a = { "input", SIG_INPUT_BACK, 0 };
-
-static void awaiter(uint64_t arg)
-{
-    struct await *a = (struct await *)arg;
-    uint64_t done = 0;
-
-    for (;;) {
-        struct MsgPort mp;
-        uint64_t asked;
-
-        while ((asked = __atomic_load_n(&a->asked, __ATOMIC_ACQUIRE)) == done)
-            WaitAddr(&a->asked, done, 0);
-        done = asked;
-        if (ConnectPortUntil(&mp, a->name, SIG_AWAIT, 2, 256, DEADLINE_NONE) == 0)
-            ClosePort(&mp);
-        Signal(it.task, 1ULL << a->sig);
-    }
-}
+static struct await display_a = { "display.0", SIG_DISPLAY_BACK, 0 }, input_a = { "input", SIG_INPUT_BACK, 0 },
+                    dos_a = { "dos", SIG_PREFS, 0 };
 
 static void await(struct await *a)
 {
-    __atomic_fetch_add(&a->asked, 1, __ATOMIC_RELEASE);
-    WakeAddr(&a->asked, 1);
+    int64_t w;
+
+    if (a->watch)
+        CloseHandle(a->watch);
+    a->watch = (w = WatchPort(a->name, a->sig)) > 0 ? (Handle)w : 0;
 }
 
 /* --- display. --- */
@@ -1762,27 +1745,8 @@ static bool prefs_read(struct Dos *dos, struct IntuiPrefs *p)
     return n > 0;
 }
 
-static struct {
-    struct IntuiPrefs prefs;
-    volatile uint64_t done;             /* 2: read, to be taken */
-} saved;
-
-/* dos wasn't there at start: waited for by a task of its own. */
-static void loader(uint64_t)
-{
-    struct Dos dos;
-    struct IntuiPrefs p = it.prefs;
-    bool any = false;
-
-    if (OpenDosUntil(&dos, SIG_AWAIT, DEADLINE_NONE) == 0) {
-        any = prefs_read(&dos, &p);
-        CloseDos(&dos);
-    }
-    saved.prefs = p;
-    __atomic_store_n(&saved.done, any ? 2 : 1, __ATOMIC_RELEASE);
-    Signal(it.task, 1ULL << SIG_PREFS);
-}
-
+/* dos wasn't there at start: its port watched for, and the settings read
+ * when it's made, unless a client has set some meanwhile. */
 static void prefs_up(void)
 {
     struct Dos dos;
@@ -1791,19 +1755,30 @@ static void prefs_up(void)
         if (prefs_read(&dos, &it.prefs))
             KLog("intuition: the saved settings taken");
         CloseDos(&dos);
-    } else if (CreateTask(loader, 0) < 0) {
-        KLog("intuition: no task to read the saved settings: the defaults kept");
+    } else {
+        await(&dos_a);
     }
 }
 
 static void prefs_loaded(void)
 {
-    if (__atomic_load_n(&saved.done, __ATOMIC_ACQUIRE) != 2)
+    struct IntuiPrefs p = it.prefs;
+    struct Dos dos;
+    bool any;
+
+    if (!dos_a.watch)
         return;
-    saved.done = 1;
-    if (it.prefs_set)
+    if (OpenDosUntil(&dos, SIG_CALL, 0) != 0) {
+        await(&dos_a);              /* made and gone again */
         return;
-    prefs_take(&saved.prefs);
+    }
+    CloseHandle(dos_a.watch);
+    dos_a.watch = 0;
+    any = prefs_read(&dos, &p);
+    CloseDos(&dos);
+    if (!any || it.prefs_set)
+        return;
+    prefs_take(&p);
     KLog("intuition: the saved settings taken");
 }
 
@@ -2415,8 +2390,7 @@ int main(uint64_t arg)
         KLog("intuition: no gfx.library");
         return 1;
     }
-    if (CreateTask(watcher, (uint64_t)&latch_w) < 0 || CreateTask(watcher, (uint64_t)&input_w) < 0 ||
-        CreateTask(awaiter, (uint64_t)&display_a) < 0 || CreateTask(awaiter, (uint64_t)&input_a) < 0) {
+    if (CreateTask(watcher, (uint64_t)&latch_w) < 0 || CreateTask(watcher, (uint64_t)&input_w) < 0) {
         KLog("intuition: no tasks");
         return 1;
     }

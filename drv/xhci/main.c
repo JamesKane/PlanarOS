@@ -29,8 +29,8 @@
 #include "xhci.h"
 
 constexpr int64_t SIG_INPUT = 25;
+constexpr int64_t SIG_INPUT_PORT = 26;  /* the watch's, for input's port (drv_ops.signals) */
 constexpr unsigned MSGS = 32;
-constexpr uint64_t RETRY = 500 * MS;
 constexpr uint64_t POLL = 4 * MS;
 
 bool dwc3_host(struct drv *d, struct xhc *c);
@@ -44,7 +44,7 @@ static struct {
     struct MsgPort mp;
     struct InputMsg *m[MSGS];
     bool busy[MSGS];
-    uint64_t retry;                 /* when to connect again */
+    Handle watch;                   /* for input's port, while there's no connection */
     unsigned lost;
 } inp;
 
@@ -98,21 +98,31 @@ static void input_down(void)
 {
     ClosePort(&inp.mp);
     inp.up = false;
-    inp.retry = CurrentTime() + RETRY;
     for (unsigned i = 0; i < nctrls; i++)
         for (unsigned k = 0; k < XHC_DEVICES; k++)
             for (unsigned h = 0; h < XHC_HIDS; h++)
                 ctrls[i].dev[k].hid[h].attached = false;
 }
 
+/* Connected to input if it's there; else watched for, the watch's signal
+ * waking the loop when it's made (the host-channel plan, step 6). A watch
+ * fires once: one made again after each try, firing at once if the port
+ * came between. */
 static void input_up(void)
 {
-    if (inp.up || CurrentTime() < inp.retry)
+    int64_t w;
+
+    if (inp.up)
         return;
     if (ConnectPort(&inp.mp, "input", SIG_INPUT, MSGS, MSGS * sizeof *inp.m[0] + 4096) != 0) {
-        inp.retry = CurrentTime() + RETRY;
+        if (inp.watch)
+            CloseHandle(inp.watch);
+        inp.watch = (w = WatchPort("input", SIG_INPUT_PORT)) > 0 ? (Handle)w : 0;
         return;
     }
+    if (inp.watch)
+        CloseHandle(inp.watch);
+    inp.watch = 0;
     for (unsigned k = 0; k < MSGS; k++) {
         inp.m[k] = AllocMsg(&inp.mp, sizeof *inp.m[k]);
         inp.busy[k] = false;
@@ -202,9 +212,9 @@ static void interrupt(struct drv *d, struct drv_dev *dev)
 
 static bool poll(struct drv *d)
 {
-    input_up();
     if (inp.up && PortGone(&inp.mp))
         input_down();
+    input_up();                     /* at once, or its port watched for */
     for (unsigned i = 0; i < nctrls; i++)
         if (ctrls[i].cap)
             work(d, &ctrls[i]);
@@ -213,7 +223,7 @@ static bool poll(struct drv *d)
 
 static uint64_t deadline(struct drv *)
 {
-    uint64_t next = inp.up ? 0 : inp.retry;
+    uint64_t next = 0;
 
     for (unsigned i = 0; i < nctrls; i++) {
         uint64_t t;
@@ -301,6 +311,7 @@ static int bind(struct drv *d, struct drv_dev *dev)
 
 static const struct drv_ops ops = {
     .name = "xhci", .bind = bind, .interrupt = interrupt, .poll = poll, .deadline = deadline,
+    .signals = 1ULL << SIG_INPUT | 1ULL << SIG_INPUT_PORT,     /* input's going, and its coming back */
 };
 
 int main(uint64_t token)

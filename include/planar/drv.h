@@ -203,6 +203,11 @@ struct drv_ops {
      * deadline, in case its interrupt doesn't), as CurrentTime() goes; 0
      * if never. The loop sleeps until then at most. */
     uint64_t (*deadline)(struct drv *d);
+    /* Signals of the driver's own that wake the loop (and so poll): a
+     * connection of its own to a server, which is signalled when the
+     * server goes, and a watch's (WatchPort), for its coming back. Bits
+     * 20 to 31. */
+    uint64_t signals;
     /* Client 'c' went (its connection closed, or it died): what it held
      * of the driver's is to be let go (§11.5, per-connection state). It
      * may still have messages unanswered; drv_reply them as before. */

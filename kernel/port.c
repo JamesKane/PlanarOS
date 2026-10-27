@@ -11,6 +11,12 @@
  * under the lock while the name is missing, and CreatePort, under the
  * same lock, takes off and signals everyone waiting for the name it
  * makes, so a port made between the look and the sleep isn't missed.
+ *
+ * WatchPort (the host-channel plan, step 5) is the same waiter, made by
+ * kmalloc and named by a handle, signalling the task's own bit instead
+ * of SIGF_PORT and staying listed once fired until it's closed
+ * (CloseHandle) or its task leaves: a server watches for a port and
+ * goes on serving.
  */
 #include <planar/ipc.h>
 #include <planar/syscalls.h>
@@ -61,11 +67,16 @@ struct port {
     struct port *next;
 };
 
-/* A task in OpenPort, waiting for a port of this name: on its stack. */
+/* A task in OpenPort, waiting for a port of this name, on its stack;
+ * or a watch (WatchPort), kmalloc'd and named by 'handle'. */
 struct name_waiter {
     const char *name;
     struct task *task;
-    bool woken;                     /* by CreatePort, not the deadline */
+    uint64_t sig;                   /* SIGF_PORT, or the watcher's own */
+    bool woken;                     /* by CreatePort (or, a watch, at once), not the deadline */
+    Handle handle;                  /* a watch's; 0 for OpenPort's */
+    struct process *proc;           /* a watch's, which counts it */
+    char buf[PORT_NAME];            /* a watch's name */
     struct name_waiter *next;
 };
 
@@ -212,6 +223,18 @@ void ipc_task_gone(struct task *t)
         if (pt->task == t)
             drop_port(pt, &kicks);
     }
+    for (struct name_waiter **pp = &name_waiters; *pp;) {
+        struct name_waiter *w = *pp;
+
+        if (!w->handle || w->task != t) {
+            pp = &w->next;
+            continue;
+        }
+        *pp = w->next;              /* a watch: nobody left to signal */
+        handle_free(w->handle);
+        w->proc->watches--;
+        kfree(w);
+    }
     spin_unlock_irqrestore(&lock, was);
     kick_all(kicks);
 }
@@ -270,13 +293,16 @@ int64_t port_create_call(uint64_t user_name, int64_t sigbit)
     for (struct name_waiter **pp = &name_waiters; *pp;) {
         struct name_waiter *w = *pp;
 
-        if (!kstreq(w->name, pt->name)) {
+        if (w->woken || !kstreq(w->name, pt->name)) {
             pp = &w->next;
             continue;
         }
-        *pp = w->next;
+        if (!w->handle)
+            *pp = w->next;          /* OpenPort's: off the list; a watch stays until closed */
+        else
+            pp = &w->next;
         w->woken = true;
-        post(w->task, SIGF_PORT, &kicks);
+        post(w->task, w->sig, &kicks);
     }
     spin_unlock_irqrestore(&lock, was);
     kick_all(kicks);
@@ -296,12 +322,73 @@ int64_t port_delete_call(uint32_t h)
     return pt ? 0 : ERR_BADHANDLE;
 }
 
+int64_t port_watch_call(uint64_t user_name, int64_t sigbit)
+{
+    struct task *self = task_self();
+    struct process *p = self->process;
+    struct name_waiter *w;
+    uint64_t kicks = 0;
+    int64_t err = 0;
+    unsigned long was;
+
+    if (!syscall_sigbit(sigbit))
+        return ERR_BADARG;
+    if (!(w = kmalloc(sizeof *w)))
+        return ERR_NOMEM;
+    *w = (struct name_waiter){ .task = self, .sig = 1ULL << sigbit, .proc = p };
+    if (!syscall_copy_string(w->buf, user_name, sizeof w->buf)) {
+        kfree(w);
+        return ERR_BADADDR;
+    }
+    w->name = w->buf;
+    was = spin_lock_irqsave(&lock);
+    if (p->watches >= PROCESS_WATCHES)
+        err = ERR_LIMIT;
+    else if (!(w->handle = handle_new(HANDLE_WATCH, w, p)))
+        err = handle_error(p);
+    if (err) {
+        spin_unlock_irqrestore(&lock, was);
+        kfree(w);
+        return err;
+    }
+    p->watches++;
+    w->next = name_waiters;
+    name_waiters = w;
+    if (find_port(w->name)) {       /* there already: fired at once */
+        w->woken = true;
+        post(self, w->sig, &kicks);
+    }
+    spin_unlock_irqrestore(&lock, was);
+    kick_all(kicks);
+    return w->handle;
+}
+
+int64_t port_watch_close(uint32_t h)
+{
+    unsigned long was = spin_lock_irqsave(&lock);
+    struct name_waiter *w = handle_take(h, HANDLE_WATCH, task_self()->process);
+
+    if (w) {
+        for (struct name_waiter **pp = &name_waiters; *pp; pp = &(*pp)->next)
+            if (*pp == w) {
+                *pp = w->next;
+                break;
+            }
+        w->proc->watches--;
+    }
+    spin_unlock_irqrestore(&lock, was);
+    if (!w)
+        return ERR_BADHANDLE;
+    kfree(w);
+    return 0;
+}
+
 /* Wait for a port named 'name' until 'deadline' (ns): 0 once there is
  * one, ERR_TIMEOUT, or ERR_NOTFOUND if the task was killed meanwhile. */
 static int64_t wait_name(const char *name, uint64_t deadline)
 {
     struct task *self = task_self();
-    struct name_waiter w = { .name = name, .task = self };
+    struct name_waiter w = { .name = name, .task = self, .sig = SIGF_PORT };
     unsigned long was = spin_lock_irqsave(&lock);
 
     if (find_port(name)) {

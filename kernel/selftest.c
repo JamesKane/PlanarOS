@@ -3225,22 +3225,27 @@ void selftest_type(void)
 
 /*
  * V6 step 7: supervision. OpenPort's wait, WaitUntil and DoMsgUntil
- * (conformance/deadline.c); then init catching hwdb's death: started with
+ * (conformance/deadline.c), and WatchPort (conformance/portwatch.c, the
+ * host-channel plan), every watch's handle back once its programs have
+ * gone; then init catching hwdb's death: started with
  * INIT_DEATH, init starts hwdb to fault at once, logs the meditation and,
  * in test mode, exits 0 rather than reset. STOP and a client's report of
  * an unresponsive server are hwdb's kill test's (V6.7 stop, report).
  */
 void selftest_supervision(void)
 {
-    static const char *const tests[] = { "deadline" };
+    static const char *const tests[] = { "deadline", "portwatch" };
     constexpr uint64_t INIT_DEATH = 1u << 8;     /* servers/init/main.c */
+    unsigned handles = handle_count();
     struct process *p;
 
     if (!user_images[0].name) {
         kprintf("V6.7 supervision skipped: no user programs\n");
         return;
     }
-    run_each("V6.7 supervision", tests, 1);
+    run_each("V6.7 supervision", tests, 2);
+    if (handle_count() != handles)
+        fail("V6.7 supervision", "a watch outlived its program");
     task_set_signal(0, SIGF_DEAD);
     if (!(p = process_create_root("init", 5, INIT_DEATH, task_self(), SIGF_DEAD)))
         fail("V6.7 supervision", "init couldn't be started");
@@ -3254,6 +3259,7 @@ void selftest_supervision(void)
     if (!processes_down_to(0, 1000000) || lease_count() || lease_quarantined())
         fail("V6.7 supervision", "a process or lease outlived init");
     kprintf("V6.7 supervision ok: OpenPort waits for a name and wakes when it's made, "
+            "WatchPort's watches fire when it's made and go with their tasks, "
             "WaitUntil and DoMsgUntil keep their deadlines, a late answer is dropped; init "
             "saw hwdb die and logged its meditation\n");
 }

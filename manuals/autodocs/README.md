@@ -204,6 +204,7 @@
 | WaitPorts | [msg](msg.md#execwaitports) | library |
 | WaitSafe | [intuition](intuition.md#intuitionwaitsafe) | library, through `IIntuition` |
 | WaitUntil | [exec](exec.md#execwaituntil) | kernel |
+| WatchPort | [exec](exec.md#execwatchport) | kernel |
 
 ## Known problems found while writing these
 

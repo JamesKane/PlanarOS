@@ -117,6 +117,19 @@ err = ConnectPortUntil(&mp, "echo", sig, SLOTS, 8192, CurrentTime() + 1000000000
 
 The kernel wakes the waiter when `CreatePort` makes the name, so there's no polling and no delay (`OpenPort`'s `deadline`). `ConnectPort` is the same with no wait: `ERR_NOTFOUND` at once.
 
+A server can't block waiting for another's port, since it has clients to serve meanwhile. It watches for it instead: `WatchPort` signals a bit of its own when the port is made, and it connects then, from its main loop. A watch fires once; a server makes it again if it connects and finds the port gone again. From `drv/xhci/main.c`, after input's death:
+
+```c
+if (ConnectPort(&inp.mp, "input", SIG_INPUT, MSGS, MSGS * sizeof *inp.m[0] + 4096) != 0) {
+    if (inp.watch)
+        CloseHandle(inp.watch);
+    inp.watch = (w = WatchPort("input", SIG_INPUT_PORT)) > 0 ? (Handle)w : 0;
+    return;
+}
+```
+
+input, intuition, conwin and xhci all wait for a server this way (the host-channel plan, step 6).
+
 **A server that doesn't answer.** `DoMsgUntil` is `DoMsg` that gives up at a deadline with `ERR_TIMEOUT`. The message is still the server's then, which may be writing to it: it's held in `mp->mp_Lost` until the reply comes, and that reply is dropped when it does. Until then the port is `ERR_BUSY`: a server that missed one deadline gets no more work from this client. A client that times out a server tells hwdb (`ReportUnresponsive`), which restarts it; its next call then sees `ERR_PORT_DIED` and reconnects.
 
 ```c

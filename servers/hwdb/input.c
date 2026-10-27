@@ -156,6 +156,7 @@ static struct {
     Handle client;
     unsigned keyboards, mice, xhci_deaths, input_starts;
     uint64_t events;
+    uint64_t back;                  /* input's restart to its devices attached again; 0 till then */
     bool typed;                     /* inputtest's rounds had keys come */
 } it;
 
@@ -232,7 +233,17 @@ static void lines(void)
                           "xhci was killed and after input was"
                         : "typing not exercised (nobody typed), xhci and input killed and back");
     say(l.text);
+    if (it.back) {
+        struct hw_line b = { 0 };
+
+        hw_put(&b, "hwdb: input test: input restarted, and its devices attached again by xhci, in ");
+        hw_put_dec(&b, it.back / MS);
+        hw_put(&b, " ms (xhci watches for its port)");
+        say(b.text);
+    }
 }
+
+static bool found_again(void);
 
 /* After a kill: back, with its keyboard. */
 static bool found_again(void)
@@ -349,6 +360,9 @@ bool input_test(void)
         it.step = I_INPUT_BACK;
         return false;
     case I_INPUT_BACK:
+        /* Measured: xhci's devices back on the new input (to the 5 ms of this loop). */
+        if (!it.back && ip.starts != it.input_starts && found_again())
+            it.back = hwdb.now - ip.started;
         if ((s = client_state()) == 0) {
             if (late(20000))
                 test_fail("inputtest didn't see input come back");

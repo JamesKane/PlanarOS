@@ -21,6 +21,7 @@ enum handle_type : uint8_t {
     HANDLE_PROCESS,                 /* a process its owner created */
     HANDLE_DEVROOT,                 /* may create leases (kernel/lease.c) */
     HANDLE_LEASE,
+    HANDLE_WATCH,                   /* WatchPort's (kernel/port.c) */
 };
 
 struct process;

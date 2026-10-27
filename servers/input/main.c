@@ -17,10 +17,10 @@
  * Caps Lock is input's own: the keyboard's light isn't set.
  *
  * Its settings (V8 step 7): the repeat's delay and rate, and the
- * pointer's speed and acceleration, by INPUT_GET and INPUT_SET. A task
- * of its own waits for dos and reads the saved ones, input.prefs
- * (planar/prefs.h), once; they're taken unless a client has set them
- * meanwhile.
+ * pointer's speed and acceleration, by INPUT_GET and INPUT_SET. It
+ * watches for dos's port (WatchPort) and reads the saved ones once it's
+ * made, input.prefs (planar/prefs.h), once; they're taken unless a client
+ * has set them meanwhile.
  */
 #include <stddef.h>
 
@@ -31,8 +31,8 @@
 constexpr int64_t SIG_ACCEPT = 16;
 constexpr int64_t SIG_CONN = 17;
 constexpr int64_t SIG_TIMER = 18;
-constexpr int64_t SIG_PREFS = 19;       /* the loader's: the saved settings read */
-constexpr int64_t SIG_DOS = 16;         /* the loader's own, for its connection */
+constexpr int64_t SIG_PREFS = 19;       /* the watch's, for dos's port */
+constexpr int64_t SIG_DOS = 23;         /* the connection's to dos, while the settings are read */
 constexpr unsigned CONNS = 16;
 constexpr unsigned DEVICES = 16;         /* attached, every driver's */
 constexpr uint64_t MS = 1000000;
@@ -60,11 +60,7 @@ static struct {
 } in = { .holder = -1, .rep = { .dev = -1 },
          .prefs = { INPUT_DELAY_DEFAULT, INPUT_RATE_DEFAULT, INPUT_SPEED_DEFAULT, INPUT_ACCEL_DEFAULT } };
 
-/* The loader's: the saved settings, and whether they've been read. */
-static struct {
-    struct InputPrefs prefs;
-    volatile uint64_t done;
-} saved;
+static Handle dos_watch;                /* until the saved settings are read */
 
 static struct device {
     bool used;
@@ -258,20 +254,29 @@ static void prefs_take(const struct InputPrefs *p)
     in.rest_x = in.rest_y = 0;
 }
 
-/* The saved settings, read once dos is there: on a task of its own, so
- * input serves meanwhile. Each tag held to its range; one out of it is
- * left at its default. */
-static void loader(uint64_t)
+/* The saved settings, read once dos is there: watched for, so input
+ * serves meanwhile, and read in its own task when the watch fires (one
+ * small file). Each tag held to its range; one out of it is left at its
+ * default. Taken unless a client has set some. */
+static void prefs_load(void)
 {
     struct TagItem t[PREFS_TAGS + 1];
     struct InputPrefs p = { INPUT_DELAY_DEFAULT, INPUT_RATE_DEFAULT, INPUT_SPEED_DEFAULT, INPUT_ACCEL_DEFAULT };
     struct Dos dos;
-    int64_t n = 0;
+    int64_t n, w;
 
-    if (OpenDosUntil(&dos, SIG_DOS, DEADLINE_NONE) == 0) {
-        n = ReadPrefs(&dos, "input", t, PREFS_TAGS + 1);
-        CloseDos(&dos);
+    if (dos_watch)
+        CloseHandle(dos_watch);
+    dos_watch = 0;
+    if (OpenDosUntil(&dos, SIG_DOS, 0) != 0) {
+        /* Not there yet (or made and gone again): watched for. */
+        dos_watch = (w = WatchPort("dos", SIG_PREFS)) > 0 ? (Handle)w : 0;
+        if (!dos_watch)
+            KLog("input: dos couldn't be watched for: the saved settings not read");
+        return;
     }
+    n = ReadPrefs(&dos, "input", t, PREFS_TAGS + 1);
+    CloseDos(&dos);
     for (int64_t i = 0; i < n; i++) {
         struct InputPrefs q = p;
         uint32_t v = (uint32_t)t[i].ti_Data;
@@ -287,9 +292,10 @@ static void loader(uint64_t)
         if (prefs_ok(&q))
             p = q;
     }
-    saved.prefs = p;
-    __atomic_store_n(&saved.done, n > 0 ? 2 : 1, __ATOMIC_RELEASE);
-    Signal(in.task, 1ULL << SIG_PREFS);
+    if (n > 0 && !in.set) {
+        prefs_take(&p);
+        KLog("input: the saved settings taken");
+    }
 }
 
 static void message(unsigned c, struct InputMsg *m)
@@ -402,26 +408,20 @@ int main(uint64_t)
     }
     in.port = (Handle)h;
     in.task = FindTask(nullptr);
-    if (CreateTask(loader, 0) < 0)
-        KLog("input: no task to read the saved settings: the defaults kept");
+    prefs_load();
     for (;;) {
         uint64_t before = in.events;
-        uint64_t now, mask = 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_PREFS;
+        uint64_t now, got, mask = 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_PREFS;
 
         if (in.rep.at) {
             ArmTimer(in.rep.at, SIG_TIMER);
-            WaitPorts(in.conn, in.nconns, mask | 1ULL << SIG_TIMER);
+            got = WaitPorts(in.conn, in.nconns, mask | 1ULL << SIG_TIMER);
             ArmTimer(0, 0);
         } else {
-            WaitPorts(in.conn, in.nconns, mask);
+            got = WaitPorts(in.conn, in.nconns, mask);
         }
-        if (__atomic_load_n(&saved.done, __ATOMIC_ACQUIRE) == 2) {
-            if (!in.set) {
-                prefs_take(&saved.prefs);
-                KLog("input: the saved settings taken");
-            }
-            saved.done = 1;
-        }
+        if (dos_watch && got & 1ULL << SIG_PREFS)
+            prefs_load();
         for (struct MsgPort extra; ;) {
             struct MsgPort *mp = in.nconns < CONNS ? &in.conn[in.nconns] : &extra;
 

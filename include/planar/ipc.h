@@ -92,5 +92,10 @@ int64_t AcceptConn(Handle port, int64_t sigbit, struct ConnArena **arena);
 int64_t SignalConn(Handle conn);
 uint64_t SignalWaitConn(Handle conn, uint64_t mask, uint64_t deadline);  /* 0 at the deadline */
 int64_t CloseConn(Handle conn);
+/* Signal the calling task's 'sigbit' once a port named 'name' exists: at
+ * once if it does, else when CreatePort makes it; once (host-channel plan
+ * step 5). A handle, closed by CloseHandle, which cancels it if it hasn't
+ * fired; it goes with the task. ERR_LIMIT past PROCESS_WATCHES (16). */
+int64_t WatchPort(const char *name, int64_t sigbit);
 
 #endif /* PLANAR_IPC_H */

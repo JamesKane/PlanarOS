@@ -320,7 +320,7 @@ None known.
 ## exec/CloseHandle
 
 **NAME**
-CloseHandle -- give up a process or lease handle
+CloseHandle -- give up a process, lease or watch handle
 
 **SYNOPSIS**
 ```c
@@ -332,17 +332,18 @@ int64_t CloseHandle(Handle handle);
 Frees a handle of a kind that has no call of its own to free it:
 - **A process handle** from `CreateProcess`. If the process is running or held, it is killed, as by `KillProcess`. Its record goes once it is dead.
 - **A lease handle** from `CreateLease`, if the lease is idle. The owner's mapping of the registers is removed. The lease goes once none of its DMA Areas is left.
+- **A watch** from `WatchPort`, fired or not. One not yet fired never fires.
 
 Tasks, Areas, ports and connections are let go by `ExitTask`, `FreeArea`, `DeletePort` and `CloseConn`. `CloseHandle` refuses them.
 
 A kernel call.
 
 **INPUTS**
-- `handle` -- a process or lease handle owned by the calling process.
+- `handle` -- a process, lease or watch handle owned by the calling process.
 
 **RESULT**
 0, or:
-- `ERR_BADHANDLE` -- `handle` isn't a process or lease handle the calling process owns, or another task of the process closed it first.
+- `ERR_BADHANDLE` -- `handle` isn't a process, lease or watch handle the calling process owns, or another task of the process closed it first. A watch also goes when the task that made it leaves, and its handle with it.
 - `ERR_BUSY` -- a lease that is granted or stopping. End the grantee and call `RevokeLease` first.
 
 **NOTES**
@@ -2015,6 +2016,58 @@ None known.
 
 **SEE ALSO**
 [Wait](#execwait), [ArmTimer](#execarmtimer), [DoMsgUntil](msg.md#execdomsguntil)
+
+---
+
+## exec/WatchPort
+
+**NAME**
+WatchPort -- be told when a port is made
+
+**SYNOPSIS**
+```c
+#include <planar/ipc.h>
+int64_t WatchPort(const char *name, int64_t sigbit);
+```
+
+**FUNCTION**
+Signals the calling task's `sigbit` once a port called `name` exists: at once if it does now, or else when a task calls `CreatePort` with that name (the host-channel plan, step 5). It fires once. The caller goes on meanwhile, and connects when the signal comes, without waiting (`ConnectPort`). The watch is a handle: `CloseHandle` ends it, fired or not, and it goes with the task that made it.
+
+It's `OpenPort`'s wait for a name, without the waiting: the same list, under the same lock `CreatePort` takes, so a port made between the call and the signal isn't missed.
+
+A kernel call.
+
+**INPUTS**
+- `name` -- the port's name.
+- `sigbit` -- 16–63.
+
+**RESULT**
+The watch's handle, or:
+- `ERR_BADARG` -- `sigbit` out of range.
+- `ERR_BADADDR` -- `name` isn't accessible, or is longer than 31 characters.
+- `ERR_LIMIT` -- the process already holds 16 watches (`PROCESS_WATCHES`), or 256 handles.
+- `ERR_NOMEM` -- out of memory, or the system's handle table is full.
+
+**EXAMPLE**
+From `drv/xhci/main.c`, after input's death:
+```c
+if (!inp.watch)
+    inp.watch = WatchPort("input", SIG_INPUT_PORT);
+...
+if (got & 1ULL << SIG_INPUT_PORT)
+    connect_input();            /* ConnectPort, then CloseHandle(inp.watch) */
+```
+
+**NOTES**
+- A port made and deleted again before the caller connects gives `ERR_NOTFOUND`: watch again.
+- A port's going isn't watched: a connection says that already (`PortGone`).
+- Tested by `conformance/portwatch.c` (V6.7): a watch fired by another process's `CreatePort` and not before, at once on a port that's there, never once closed, three tasks on one name each fired, the 17th refused, and a watcher killed with ten watches out leaving no handle behind; mutation-tested.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[OpenPort](#execopenport), [CreatePort](#execcreateport), [CloseHandle](#execclosehandle)
 
 ---
 

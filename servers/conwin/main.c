@@ -48,6 +48,7 @@
 #include "term.h"
 
 constexpr int64_t SIG_ACCEPT = 16, SIG_CONN = 17, SIG_EVENT = 18, SIG_CHILD = 19, SIG_TIMER = 20, SIG_DOS = 21;
+constexpr int64_t SIG_BACK = 23;        /* the watch's, for intuition's port; 22 is intuition.library's */
 /* 22 is intuition.library's */
 constexpr uint64_t MS = 1000000;
 constexpr unsigned CONNS = 8;
@@ -63,7 +64,8 @@ static struct {
     struct Intuition in;
     struct Window win;
     bool up, open;                      /* connected to intuition; the window open */
-    uint64_t retry;                     /* when to connect again, intuition gone */
+    Handle back;                        /* a watch for intuition's port, while it's gone */
+    uint64_t retry;                     /* when to try the window again, intuition there */
     struct BitMap *bm;
     uint32_t width, height;             /* the window's inside */
     int32_t left, top;
@@ -185,7 +187,31 @@ static void intuition_gone(void)
     }
     cw.intuition->CloseIntuition(&cw.in);
     cw.up = cw.open = false;
-    cw.retry = CurrentTime() + 50 * MS;
+}
+
+/* The window opened again once intuition's back: tried when the watch on
+ * its port fires (the host-channel plan, step 6), and watched for again
+ * if it isn't there yet; with intuition there and the window refused,
+ * tried again in 100 ms. */
+static void reopen(void)
+{
+    int64_t w;
+
+    if (cw.open || (cw.up && CurrentTime() < cw.retry))
+        return;
+    if (open_window(CurrentTime() + 10 * MS) == 0) {
+        if (cw.back)
+            CloseHandle(cw.back);
+        cw.back = 0;
+        return;
+    }
+    if (cw.up) {
+        cw.retry = CurrentTime() + 100 * MS;
+        return;
+    }
+    if (cw.back)
+        CloseHandle(cw.back);
+    cw.back = (w = WatchPort("intuition", SIG_BACK)) > 0 ? (Handle)w : 0;
 }
 
 static void resize(uint32_t w, uint32_t h)
@@ -469,8 +495,9 @@ int main(uint64_t)
         end(1);
     }
     for (;;) {
-        uint64_t mask = 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_EVENT | 1ULL << SIG_CHILD;
-        uint64_t at = cw.timer ? CurrentTime() + 4 * MS : !cw.up ? cw.retry : 0;
+        uint64_t mask = 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_EVENT | 1ULL << SIG_CHILD |
+                        1ULL << SIG_BACK;
+        uint64_t at = cw.timer ? CurrentTime() + 4 * MS : cw.up && !cw.open ? cw.retry : 0;
 
         if (at) {
             ArmTimer(at, SIG_TIMER);
@@ -482,8 +509,7 @@ int main(uint64_t)
         cw.timer = false;
         if (shell_ended())
             end(0);
-        if (!cw.up && CurrentTime() >= cw.retry && open_window(CurrentTime() + 10 * MS) != 0)
-            cw.retry = CurrentTime() + 100 * MS;
+        reopen();
         serve();
         events();
         reads();
