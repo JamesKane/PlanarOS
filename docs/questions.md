@@ -339,6 +339,12 @@ Should `.S` functions follow the frame-record convention through `FUNC_FRAME` an
 
 Raised in [§19.7](19-debugging.md#197-breakpoints-stepping-and-watchpoints).
 
+**VQ53 When does planar-cc build PlanarOS?**
+
+The tree is pinned to clang (LLVM 22, VQ12). planar-c already builds nine conformance programs that pass the boot test, and its M7 widens that to all of user space. Should the user-space build then switch to planar-cc by default, keeping clang as the oracle build? *Leaning:* yes, once M7's boot tests pass on QEMU and the boards. The debugger sees typed frames only in code planar-cc built (§19.11 step 2). The kernel, the `.S` files and inline `asm` stay clang's until planar-c has an assembler.
+
+Raised in [§19.9](19-debugging.md#199-kernel-debugging) and [§8](08-roadmap.md#debugging).
+
 ## Plan
 
 *(VQ19 decided; see the table above.)*

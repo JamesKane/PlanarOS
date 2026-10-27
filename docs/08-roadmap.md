@@ -50,4 +50,17 @@ Audio and the GPU's depth, which the old roadmap didn't place, come after the se
 - **V8, §14.7: from scratch or on a base.** Principle 1 says clean-room (about 4–6k lines); a hardened `stb_truetype` or `libschrift` base is 2–2.5k. *Leaning:* clean-room, TrueType outlines only (VQ34's `.ttf`), with CFF after V8. *Taken* ([v8-plan](v8-plan.md) decision 1).
 - **V10 before V11?** Audio is medium and needs no new tooling; GPU compute needs a shader pipeline. *Leaning:* as ordered.
 
-**Not in a phase yet:** the native filesystem (VQ14a), networking (VQ15), the SMMUs and VQ26's lent buffers (the lease doesn't yet record VQ9's "unconfined"), per-queue driver tasks and MSI-X affinity, a USB hub as a node source, `rest_for_one` restarts of a bus's subtree, the K3 (VQ21), and the K1's AI instructions.
+**Not in a phase yet:** the native filesystem (VQ14a), networking (VQ15), the SMMUs and VQ26's lent buffers (the lease doesn't yet record VQ9's "unconfined"), per-queue driver tasks and MSI-X affinity, a USB hub as a node source, `rest_for_one` restarts of a bus's subtree, the K3 (VQ21), the K1's AI instructions, and planar-cc as the default user-space compiler (VQ53; the debugging track below needs it by its step 2).
+
+## Debugging
+
+**Proposed (2026-10-26).** [§19](19-debugging.md)'s four steps run as a track beside the phases, not as a phase of their own. Each needs a planar-c milestone more than it needs a board, and each is tested on QEMU first, then on whichever boards the current phase has. Each step's exit is its §19.11 transcript.
+
+| Step | When | Needs from planar-c |
+|---|---|---|
+| **1. Crash records** | Now, while V8's boards' half waits for the boards. The clang build's frame-pointer and build-id flags go in first | M6 (D1) |
+| **2. The debug port** | With V9 | M7 (all of user space built by planar-cc, VQ53), then M8 (D2) |
+| **3. Shared code and watchpoints** | After V10 | M9 (D3) |
+| **4. The host debugger over serial, and expressions** | After step 3 | M10 (D4, VQ50) |
+
+Step 1 turns a fault's one log line (`kernel/process.c`) into a record of several lines. The tests that provoke faults are rechecked against the longer record.

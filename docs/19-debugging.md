@@ -140,7 +140,7 @@ The messages are the same structures on every transport, as planar-c's manifest 
 
 - **Under QEMU,** the host debugger uses QEMU's gdbstub as its transport. It reads the kernel's image from the build tree and its debug file by build-id, and uses the same `dbg` core for everything else.
 - **On a board, a kernel panic** prints the same crash record as §19.5, unwound through the kernel's own image. The panic path walks only the kernel stack, with the same 32-frame bound.
-- **Frames the unwinder can't describe.** This assumes the kernel's C is built by planar-cc, as planar-c's `make planaros` already does. With the clang build, the kernel's functions are `UNKNOWN`, so its panics fall back to the frame-pointer chain and symbols from the ELF symbol table.
+- **Frames the unwinder can't describe.** The kernel is built by clang until planar-c has an assembler (VQ53), so its functions are `UNKNOWN`. Its panics fall back to the frame-pointer chain, and to symbols from the ELF symbol table.
 - **Live debugging of a kernel on a board** needs JTAG (OpenOCD) and is out of scope until a board needs it.
 
 ## 19.10 Not now: record and replay
@@ -155,26 +155,27 @@ Shared memory is what makes rr hard on Linux too. Replaying one process would me
 
 ## 19.11 Steps and tests
 
-Each step pairs with a planar-c milestone (D1–D4 in its §9):
+Each step pairs with a planar-c milestone (D1–D4 in its §9, placed as M6 and M8–M10 in its ilr-design §11). The roadmap places the steps ([§8](08-roadmap.md#debugging)).
 
-1. **Crash records** (with D1):
+1. **Crash records** (with D1, planar-c M6):
+   - first, in the clang build: `-fno-omit-frame-pointer` everywhere, plus `-mno-omit-leaf-frame-pointer` on AArch64. clang drops the frame pointer on RV64 by default, which breaks the chain this step falls back to. Also ld.lld's `--build-id=md5`, so every image has the 16-byte id planar-ld writes;
    - `struct ImageInfo`, `QueryImage`, and the image fields in `ProcessImage` and `LibraryHeader`;
    - the unwinder in the kernel and §19.5's log;
    - `planar-symbolize`.
 
    *Tested by* a conformance program that faults three calls deep, through exec.library. Its serial transcript must show the right images and frames, and `planar-symbolize` must turn them into the expected source lines (the conformance-by-transcript method).
-2. **The debug port** (with D2):
+2. **The debug port** (with D2, planar-c M8; after M7 builds all of user space):
    - `DebugProcess`, the events and requests, and hold-on-fault;
    - breakpoints in program images;
    - AArch64 hardware step, and RV64 software step;
    - the on-board `Debug` command printing variables at `-O0`.
 
    *Tested by* a scripted `Debug` session as a transcript: break, step, print locals, continue, exit, on both ISAs. Also checked: a held process's clients time out per §12.7, and detaching kills and restarts it.
-3. **Shared code and watchpoints** (with D3): out-of-line breakpoints in the library region, and hardware watchpoints.
+3. **Shared code and watchpoints** (with D3, planar-c M9): out-of-line breakpoints in the library region, and hardware watchpoints.
 
    *Tested by* a breakpoint in exec.library's `AllocVec` while another process calls it 10,000 times: it must never stop, and its results must be unchanged. A watchpoint on a shared ring word must catch the other process's write.
-4. **The host debugger over serial, and expressions** (with D4): `debugd`; the planar-c core running on Planar (VQ50).
+4. **The host debugger over serial, and expressions** (with D4, planar-c M10): `debugd`; the planar-c core running on Planar (VQ50).
 
 ## 19.12 Open questions
 
-VQ46 to VQ52, in [questions.md](questions.md#debugging).
+VQ46 to VQ53, in [questions.md](questions.md#debugging).
