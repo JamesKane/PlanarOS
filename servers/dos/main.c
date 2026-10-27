@@ -51,11 +51,6 @@ static unsigned client_id[CLIENTS], next_id = 1;
 static unsigned nclients;
 static struct file files[FILES];
 
-static void say(const char *s)
-{
-    KLog(s);
-}
-
 static unsigned len(const char *s)
 {
     unsigned n = 0;
@@ -118,7 +113,7 @@ static int64_t watched(struct volume *vol, const char *what, uint64_t t0, int64_
     cat(line, sizeof line, e ? " ms, and failed: error -" : " ms");
     if (e)
         cat_dec(line, sizeof line, (uint64_t)-e);
-    say(line);
+    KLog(line);
     return e;
 }
 
@@ -201,7 +196,7 @@ static void mount_all(void)
                 cat(line, sizeof line, vol->v.read_only ? ", read only" : ", writable");
                 if (sys_vol == (int)(vol - vols))
                     cat(line, sizeof line, "; SYS:");
-                say(line);
+                KLog(line);
             }
         }
 }
@@ -349,11 +344,10 @@ static int64_t serve_one(unsigned c, struct DosMsg *m)
             return ERR_NOTFOUND;
         if (vol->v.read_only)
             return ERR_RIGHTS;
-        if (q.dm_Op == DOS_REMOVE)
+        if (q.dm_Op == DOS_REMOVE && fat_lookup(&vol->v, path, &n) == 0)
             for (unsigned i = 0; i < FILES; i++)
-                if (files[i].used && files[i].vol == vol &&
-                    fat_lookup(&vol->v, path, &n) == 0 &&
-                    files[i].node.entry_dir == n.entry_dir && files[i].node.entry_pos == n.entry_pos)
+                if (files[i].used && files[i].vol == vol && files[i].node.entry_dir == n.entry_dir &&
+                    files[i].node.entry_pos == n.entry_pos)
                     return ERR_BUSY;    /* open */
         return q.dm_Op == DOS_REMOVE ? fat_remove(&vol->v, path) : fat_create(&vol->v, path, true, &n);
     }
@@ -387,9 +381,9 @@ int main(void)
 
     mount_all();
     if (nvols == 0)
-        say("dos: no FAT32 volume on any block device");
+        KLog("dos: no FAT32 volume on any block device");
     if ((port = CreatePort("dos", SIG_PORT)) < 0) {
-        say("dos: no port");
+        KLog("dos: no port");
         return 1;
     }
     for (;;) {

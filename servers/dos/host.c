@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <planar/endian.h>
 #include <planar/syscalls.h>
 
 #include "fat.h"
@@ -34,15 +35,6 @@ static int64_t wr(void *, uint64_t s, uint32_t n, const void *buf)
                    fwrite(buf, 512, n, img) == n
                ? 0
                : ERR_BADARG;
-}
-
-static uint64_t le(const uint8_t *p, unsigned n)
-{
-    uint64_t v = 0;
-
-    for (unsigned i = 0; i < n; i++)
-        v |= (uint64_t)p[i] << 8 * i;
-    return v;
 }
 
 static int failures;
@@ -150,12 +142,12 @@ int main(int argc, char **argv)
     }
     /* The first GPT partition. */
     if (fseek(img, 512, SEEK_SET) || fread(sec, 1, 512, img) != 512 || memcmp(sec, "EFI PART", 8) ||
-        fseek(img, (long)(le(sec + 72, 8) * 512), SEEK_SET) || fread(ents, 1, sizeof ents, img) != sizeof ents) {
+        fseek(img, (long)(get_le64(sec + 72) * 512), SEEK_SET) || fread(ents, 1, sizeof ents, img) != sizeof ents) {
         fprintf(stderr, "fat-host: no GPT\n");
         return 2;
     }
-    part_start = le(ents + 32, 8);
-    if ((e = fat_mount(&v, &io, le(ents + 40, 8) - part_start + 1, cache))) {
+    part_start = get_le64(ents + 32);
+    if ((e = fat_mount(&v, &io, get_le64(ents + 40) - part_start + 1, cache))) {
         fprintf(stderr, "fat-host: not FAT32 (%lld)\n", (long long)e);
         return 1;
     }

@@ -1,6 +1,7 @@
 /*
  * servers/dos/fat.c -- FAT32 volumes (fat.h)
  */
+#include <planar/endian.h>
 #include <planar/syscalls.h>
 
 #include "fat.h"
@@ -11,9 +12,6 @@ constexpr uint8_t ATTR_VOLUME = 0x08, ATTR_DIR = 0x10, ATTR_ARCHIVE = 0x20;
 constexpr uint8_t ATTR_LFN = 0x0f;
 constexpr uint8_t NT_LOWER_BASE = 0x08, NT_LOWER_EXT = 0x10;
 constexpr uint16_t DATE_2026 = (2026 - 1980) << 9 | 1 << 5 | 1;   /* no clock here yet */
-
-static uint32_t le16(const uint8_t *p) { return p[0] | (uint32_t)p[1] << 8; }
-static uint32_t le32(const uint8_t *p) { return le16(p) | le16(p + 2) << 16; }
 
 static void put16(uint8_t *p, uint32_t v)
 {
@@ -121,7 +119,7 @@ static int64_t fat_get(struct fat_vol *v, uint32_t c, uint32_t *out)
 
     if (e)
         return e;
-    *out = le32(p + off % v->bps) & 0x0fffffff;
+    *out = get_le32(p + off % v->bps) & 0x0fffffff;
     return 0;
 }
 
@@ -134,7 +132,7 @@ static int64_t mark_fsinfo_stale(struct fat_vol *v)
         return 0;
     if ((e = sector(v, v->fsinfo, &p)))
         return e;
-    if (le32(p) == 0x41615252 && le32(p + 484) == 0x61417272) {
+    if (get_le32(p) == 0x41615252 && get_le32(p + 484) == 0x61417272) {
         put32(p + 488, 0xffffffff);     /* free count unknown: whoever mounts next counts */
         if ((e = store(v, v->fsinfo)))
             return e;
@@ -153,13 +151,14 @@ static int64_t fat_set(struct fat_vol *v, uint32_t c, uint32_t val)
         return ERR_RIGHTS;
     if ((e = mark_fsinfo_stale(v)))
         return e;
+    v->walked.first = 0;            /* a chain may have changed */
     for (uint32_t f = 0; f < v->nfats; f++) {
         uint64_t s = v->fat_start + (uint64_t)f * v->fat_size + off / v->bps;
         uint8_t *p;
 
         if ((e = sector(v, s, &p)))
             return e;
-        put32(p + off % v->bps, (le32(p + off % v->bps) & 0xf0000000) | (val & 0x0fffffff));
+        put32(p + off % v->bps, (get_le32(p + off % v->bps) & 0xf0000000) | (val & 0x0fffffff));
         if ((e = store(v, s)))
             return e;
     }
@@ -190,10 +189,15 @@ static int64_t next_cluster(struct fat_vol *v, uint32_t c, uint32_t *out)
 static int64_t nth_cluster(struct fat_vol *v, uint32_t first, uint64_t k, uint32_t *out)
 {
     uint32_t c = first;
+    uint64_t i = 0;
 
     if (!valid(v, first))
         return ERR_BADARG;
-    for (uint64_t i = 0; i < k; i++) {
+    if (v->walked.first == first && v->walked.k <= k) {
+        i = v->walked.k;
+        c = v->walked.c;
+    }
+    for (; i < k; i++) {
         int64_t e;
 
         if (i > v->clusters)
@@ -203,6 +207,8 @@ static int64_t nth_cluster(struct fat_vol *v, uint32_t first, uint64_t k, uint32
         if (!c)
             break;
     }
+    if (c)
+        v->walked = (typeof(v->walked)){ first, (uint32_t)k, c };
     *out = c;
     return 0;
 }
@@ -238,6 +244,8 @@ static int64_t alloc_cluster(struct fat_vol *v, uint32_t prev, uint32_t *out)
             return e;
         if (prev && (e = fat_set(v, prev, c)))
             return e;
+        if (v->free != UINT32_MAX)
+            v->free--;
         v->next_free = c + 1 < v->clusters + 2 ? c + 1 : 2;
         *out = c;
         return 0;
@@ -256,6 +264,8 @@ static int64_t free_chain(struct fat_vol *v, uint32_t c)
             return ERR_BADARG;
         if ((e = next_cluster(v, c, &n)) || (e = fat_set(v, c, 0)))
             return e;
+        if (v->free != UINT32_MAX)
+            v->free++;
         c = n;
     }
     return 0;
@@ -272,15 +282,15 @@ int64_t fat_mount(struct fat_vol *v, const struct fat_io *io, uint64_t sectors, 
     *v = (struct fat_vol){ .io = *io, .sectors = sectors, .cache_mem = cache };
     if (sectors < 64 || (e = io->read(io->ctx, 0, 1, b)))
         return sectors < 64 ? ERR_NOTFOUND : e;
-    bps = le16(b + 11);
+    bps = get_le16(b + 11);
     spc = b[13];
-    reserved = le16(b + 14);
+    reserved = get_le16(b + 14);
     nfats = b[16];
-    total = le16(b + 19) ? le16(b + 19) : le32(b + 32);
-    fat_size = le16(b + 22) ? le16(b + 22) : le32(b + 36);
+    total = get_le16(b + 19) ? get_le16(b + 19) : get_le32(b + 32);
+    fat_size = get_le16(b + 22) ? get_le16(b + 22) : get_le32(b + 36);
     if (b[510] != 0x55 || b[511] != 0xaa || bps < 512 || bps > 4096 || (bps & (bps - 1)) ||
         spc == 0 || (spc & (spc - 1)) || reserved == 0 || nfats == 0 || nfats > 4 ||
-        le16(b + 17) != 0 || le16(b + 22) != 0 || fat_size == 0)
+        get_le16(b + 17) != 0 || get_le16(b + 22) != 0 || fat_size == 0)
         return ERR_NOTFOUND;            /* not FAT32: FAT12 and 16 have root entries */
     if (total > sectors || (uint64_t)reserved + (uint64_t)nfats * fat_size >= total)
         return ERR_BADARG;
@@ -295,13 +305,18 @@ int64_t fat_mount(struct fat_vol *v, const struct fat_io *io, uint64_t sectors, 
     v->clusters = (total - data) / spc;
     if (v->clusters < 65525 || (uint64_t)(v->clusters + 2) * 4 > (uint64_t)fat_size * bps)
         return ERR_NOTFOUND;            /* too few clusters for FAT32, or a FAT too small */
-    v->root = le32(b + 44);
+    v->root = get_le32(b + 44);
     if (!valid(v, v->root))
         return ERR_BADARG;
-    v->fsinfo = le16(b + 48);
+    v->fsinfo = get_le16(b + 48);
     if (v->fsinfo == 0 || v->fsinfo == 0xffff || v->fsinfo >= reserved)
         v->fsinfo = 0;
     v->next_free = 2;
+    v->free = UINT32_MAX;
+    /* FSInfo's free count, if it's there and plausible: else counted when asked. */
+    if (v->fsinfo && io->read(io->ctx, v->fsinfo, 1, b) == 0 && get_le32(b) == 0x41615252 &&
+        get_le32(b + 484) == 0x61417272 && get_le32(b + 488) <= v->clusters)
+        v->free = get_le32(b + 488);
     v->scratch = v->cache_mem + (uint64_t)FAT_CACHE * bps;
     for (unsigned i = 0; i < 11; i++)
         v->label[i] = (char)(b[71 + i] >= 32 && b[71 + i] < 127 ? b[71 + i] : '_');
@@ -427,7 +442,7 @@ int64_t fat_next(struct fat_vol *v, const struct fat_node *dir, uint32_t *cursor
                 lfn_seq = seq;
             }
             for (unsigned i = 0; i < 13; i++)
-                lname[(seq - 1) * 13 + i] = (uint16_t)le16(d + at[i]);
+                lname[(seq - 1) * 13 + i] = (uint16_t)get_le16(d + at[i]);
             continue;
         }
         if (d[11] & ATTR_VOLUME) {
@@ -435,9 +450,9 @@ int64_t fat_next(struct fat_vol *v, const struct fat_node *dir, uint32_t *cursor
             continue;
         }
         *out = (struct fat_node){
-            .first = le16(d + 20) << 16 | le16(d + 26), .size = le32(d + 28),
-            .dir = d[11] & ATTR_DIR, .time = (uint16_t)le16(d + 22),
-            .date = (uint16_t)le16(d + 24), .entry_dir = dc, .entry_pos = pos,
+            .first = get_le16(d + 20) << 16 | get_le16(d + 26), .size = get_le32(d + 28),
+            .dir = d[11] & ATTR_DIR, .time = (uint16_t)get_le16(d + 22),
+            .date = (uint16_t)get_le16(d + 24), .entry_dir = dc, .entry_pos = pos,
         };
         if (lfn_ok && lfn_seq == 1 && checksum(d) == lfn_sum) {
             unsigned n = 0;
@@ -546,10 +561,17 @@ int64_t fat_read(struct fat_vol *v, const struct fat_node *f, uint64_t off, void
         if (n > len - done)
             n = len - done;
         s = first_sector(v, c) + in / v->bps;
-        /* Whole sectors straight to the buffer; a piece of one by the cache. */
+        /* Whole sectors straight to the buffer, and the whole clusters
+         * after this one that follow it on the disk in the same read; a
+         * piece of a sector by the cache. */
         if (in % v->bps == 0 && n >= v->bps) {
-            uint32_t k = n / v->bps;
+            uint32_t k = n / v->bps, next;
 
+            while (in + n == cb && len - done - n >= cb && next_cluster(v, c, &next) == 0 && next == c + 1) {
+                c = next;
+                n += cb;
+                k += v->spc;
+            }
             if ((e = v->io.read(v->io.ctx, s, k, (uint8_t *)buf + done)))
                 return e;
             n = k * v->bps;
@@ -567,6 +589,7 @@ int64_t fat_read(struct fat_vol *v, const struct fat_node *f, uint64_t off, void
         if ((off + done) % cb == 0 && done < len && (e = next_cluster(v, c, &c)))
             return e;
     }
+    v->walked = (typeof(v->walked)){ f->first, (uint32_t)((off + done - 1) / cb), c };
     return done;
 }
 
@@ -1009,8 +1032,12 @@ uint32_t fat_free(struct fat_vol *v)
 {
     uint32_t n = 0, val;
 
-    for (uint32_t c = 2; c < v->clusters + 2; c++)
-        if (fat_get(v, c, &val) == 0 && val == 0)
-            n++;
-    return n;
+    if (v->free != UINT32_MAX)
+        return v->free;
+    for (uint32_t c = 2; c < v->clusters + 2; c++) {
+        if (fat_get(v, c, &val) != 0)
+            return n;               /* not kept: counted again next time */
+        n += val == 0;
+    }
+    return v->free = n;
 }

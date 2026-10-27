@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include <planar/blk.h>
+#include <planar/endian.h>
 #include <planar/syscalls.h>
 
 constexpr uint64_t PAGE = 4096;
@@ -299,15 +300,6 @@ static uint32_t crc32(const uint8_t *p, uint64_t n, uint32_t crc)
     return ~crc;
 }
 
-static uint64_t le(const uint8_t *p, unsigned n)
-{
-    uint64_t v = 0;
-
-    for (unsigned i = 0; i < n; i++)
-        v |= (uint64_t)p[i] << 8 * i;
-    return v;
-}
-
 int64_t blk_partition(struct blk *b, unsigned index)
 {
     uint64_t first, count;
@@ -335,10 +327,10 @@ static int64_t mbr_range(struct blk *b, uint8_t *blk, unsigned index, uint64_t *
     if (blk[510] != 0x55 || blk[511] != 0xaa)
         return ERR_NOTFOUND;
     e = blk + 446 + 16 * (index - 1);
-    if (e[4] == 0 || e[4] == 0xee || le(e + 12, 4) == 0)
+    if (e[4] == 0 || e[4] == 0xee || get_le32(e + 12) == 0)
         return ERR_NOTFOUND;
-    *first = le(e + 8, 4);
-    *count = le(e + 12, 4);
+    *first = get_le32(e + 8);
+    *count = get_le32(e + 12);
     if (*first == 0 || *first >= b->dev_blocks || *count > b->dev_blocks - *first)
         return ERR_BADARG;
     return 0;
@@ -361,20 +353,20 @@ int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first_out, 
     if ((e = blk_read(b, 1, 1, blk)) != 0)
         goto out;
     e = ERR_NOTFOUND;
-    hsize = (uint32_t)le(blk + 12, 4);
-    if (le(blk, 8) != 0x5452415020494645ULL || hsize < 92 || hsize > bs) {
+    hsize = (uint32_t)get_le32(blk + 12);
+    if (get_le64(blk) != 0x5452415020494645ULL || hsize < 92 || hsize > bs) {
         e = mbr_range(b, blk, index, first_out, count);     /* not "EFI PART" */
         goto out;
     }
     e = ERR_BADARG;
-    crc = (uint32_t)le(blk + 16, 4);
+    crc = (uint32_t)get_le32(blk + 16);
     blk[16] = blk[17] = blk[18] = blk[19] = 0;
     if (crc32(blk, hsize, 0) != crc)
         goto out;
-    entries = le(blk + 72, 8);
-    n = (uint32_t)le(blk + 80, 4);
-    size = (uint32_t)le(blk + 84, 4);
-    crc = (uint32_t)le(blk + 88, 4);
+    entries = get_le64(blk + 72);
+    n = (uint32_t)get_le32(blk + 80);
+    size = (uint32_t)get_le32(blk + 84);
+    crc = (uint32_t)get_le32(blk + 88);
     if (size < GPT_ENTRY_MIN || size > bs || (size & (size - 1)) || n == 0 || n > 1024 ||
         entries >= b->dev_blocks)
         goto out;
@@ -392,9 +384,9 @@ int64_t blk_partition_range(struct blk *b, unsigned index, uint64_t *first_out, 
 
             if ((k * bs + at) / size + 1 != index)
                 continue;
-            found = !(le(t, 8) == 0 && le(t + 8, 8) == 0);
-            first = le(t + 32, 8);
-            last = le(t + 40, 8);
+            found = !(get_le64(t) == 0 && get_le64(t + 8) == 0);
+            first = get_le64(t + 32);
+            last = get_le64(t + 40);
         }
     }
     e = ERR_BADARG;

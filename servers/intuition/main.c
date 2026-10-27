@@ -231,11 +231,6 @@ static struct {
     bool prefs_set;                     /* by a client: the saved ones aren't taken */
 } it = { .prefs = { 0, INTUI_POINTER_AUTO, INTUI_BACKDROP_TOP, INTUI_BACKDROP_BOTTOM } };
 
-static void say(const char *s)
-{
-    KLog(s);
-}
-
 static void nap(uint64_t ms)
 {
     static uint64_t never;              /* a word nobody wakes */
@@ -441,7 +436,7 @@ static int64_t screen_up(uint64_t deadline)
 /* display went: what's shown again when it's back. */
 static void display_lost(void)
 {
-    say("intuition: display went: the screen composed again when it's back");
+    KLog("intuition: display went: the screen composed again when it's back");
     screen_down();
     await(&display_a);
 }
@@ -451,12 +446,12 @@ static void display_back(void)
     int64_t e = screen_up(0);
 
     if (e == 0) {
-        say("intuition: display is back: the screen composed again");
+        KLog("intuition: display is back: the screen composed again");
         return;
     }
     screen_down();
     if (e == ERR_BADARG || e == ERR_NOSYS) {
-        say("intuition: display came back with another screen");
+        KLog("intuition: display came back with another screen");
         ExitProcess(5);
     }
     await(&display_a);              /* gone again, or not yet there */
@@ -534,11 +529,16 @@ static void clean(const struct ic_damage d[2], const struct BitMap *to)
     for (unsigned k = 0; k < 2; k++)
         for (unsigned i = 0; i < d[k].n; i++) {
             struct GfxRect r = d[k].r[i];
+            uint64_t w = (uint64_t)(r.MaxX - r.MinX + 1) * 4;
 
+            /* Rows the rectangle spans whole are one range: one clean, its barriers once. */
+            if (w == to->bm_BytesPerRow) {
+                drv_dma_clean((uint8_t *)to->bm_BaseAddr + (uint64_t)r.MinY * w, (uint64_t)(r.MaxY - r.MinY + 1) * w);
+                continue;
+            }
             for (int32_t y = r.MinY; y <= r.MaxY; y++)
                 drv_dma_clean((uint8_t *)to->bm_BaseAddr + (uint64_t)y * to->bm_BytesPerRow +
-                                  (uint64_t)r.MinX * 4,
-                              (uint64_t)(r.MaxX - r.MinX + 1) * 4);
+                                  (uint64_t)r.MinX * 4, w);
         }
 }
 
@@ -630,7 +630,7 @@ static void frame(void)
         return;
     }
     if (e != 0) {
-        say("intuition: display refused a frame");
+        KLog("intuition: display refused a frame");
         ExitProcess(e == ERR_TIMEOUT ? 3 : 4);
     }
     it.pointer_moved = false;
@@ -1179,7 +1179,7 @@ static void size_end(void)
     outline_off();
     it.sizing = nullptr;
     if (!resize(w, it.size_w, it.size_h))
-        say("intuition: no memory for a resized window's chrome: left as it was");
+        KLog("intuition: no memory for a resized window's chrome: left as it was");
 }
 
 /* --- The screen bar and its clock (V8 step 4). --- */
@@ -1287,12 +1287,12 @@ static void bar_up(void)
     it.sans = it.gfx->OpenTextFont(&sans);
     it.bold = it.gfx->OpenTextFont(&bold);
     if (!it.sans || !it.bold)
-        say("intuition: System Sans wouldn't open: the chrome in the 8x8 font");
+        KLog("intuition: System Sans wouldn't open: the chrome in the 8x8 font");
     it.fonts = (struct chrome_fonts){ it.sans, it.bold };
     it.menu_title = -1;
     system_menu();
     if (!(it.bar_bm = it.gfx->AllocBitMap(it.width, INTUI_SCREENBAR, PIXFMT_XRGB8888, 0, nullptr))) {
-        say("intuition: no memory for the screen bar");
+        KLog("intuition: no memory for the screen bar");
         return;
     }
     it.bar = (struct bar){ .width = it.width, .fonts = &it.fonts, .open = -1 };
@@ -1667,22 +1667,13 @@ static int64_t requested(unsigned c, struct IntuiMsg *m, const struct IntuiMsg *
 /* A request of hwdb's, on a connection made for it: 0 or why not. */
 static int64_t hwdb_call(uint32_t op, uint64_t conn)
 {
-    struct MsgPort mp;
-    struct HwdbMsg *m;
-    int64_t e = ERR_NOMEM;
+    static struct HwdbMsg m;        /* 4 KiB: not on the stack; the main task's alone */
 
-    if ((e = ConnectPort(&mp, "hwdb", SIG_CALL, 2, 2 * sizeof *m)) != 0)
-        return e;
-    if ((m = AllocMsg(&mp, sizeof *m))) {
-        memset(m, 0, sizeof *m);
-        m->hm_Msg.mn_Length = sizeof *m;
-        m->hm_Op = op;
-        m->hm_Conn = conn;
-        if ((e = DoMsgUntil(&mp, &m->hm_Msg, CurrentTime() + CALL_DEADLINE)) == 0)
-            e = m->hm_Msg.mn_Error;
-    }
-    ClosePort(&mp);
-    return e;
+    memset(&m, 0, sizeof m);
+    m.hm_Msg.mn_Length = sizeof m;
+    m.hm_Op = op;
+    m.hm_Conn = conn;
+    return CallPort("hwdb", SIG_CALL, &m.hm_Msg, CurrentTime() + CALL_DEADLINE);
 }
 
 /* The system menu's Shell: hwdb starts a console window (V8 step 5). */
@@ -1701,7 +1692,7 @@ static bool kill_client(unsigned c)
     int64_t e = hwdb_call(HWDB_KILL_CLIENT, (uint64_t)it.mp[c].mp_Conn);
 
     if (e == 0)
-        say("intuition: a client not answering, ended by hwdb as asked");
+        KLog("intuition: a client not answering, ended by hwdb as asked");
     else
         KPrintF("intuition: hwdb wouldn't end a client not answering (%ld)", e);
     return e == 0;
@@ -1798,10 +1789,10 @@ static void prefs_up(void)
 
     if (OpenDosUntil(&dos, SIG_CALL, 0) == 0) {
         if (prefs_read(&dos, &it.prefs))
-            say("intuition: the saved settings taken");
+            KLog("intuition: the saved settings taken");
         CloseDos(&dos);
     } else if (CreateTask(loader, 0) < 0) {
-        say("intuition: no task to read the saved settings: the defaults kept");
+        KLog("intuition: no task to read the saved settings: the defaults kept");
     }
 }
 
@@ -1813,7 +1804,7 @@ static void prefs_loaded(void)
     if (it.prefs_set)
         return;
     prefs_take(&saved.prefs);
-    say("intuition: the saved settings taken");
+    KLog("intuition: the saved settings taken");
 }
 
 /* INFO's places on the screen, for tests that click them. */
@@ -2005,22 +1996,22 @@ static void input_up(uint64_t deadline)
         nap(50);
     if (e == 0) {
         if (it.input_opens > 1)
-            say("intuition: input is back: its ring opened again, the pointer where it was");
+            KLog("intuition: input is back: its ring opened again, the pointer where it was");
         return;
     }
     if (e == ERR_BUSY) {
-        say("intuition: input's ring is another's: no pointer or keys");
+        KLog("intuition: input's ring is another's: no pointer or keys");
         return;
     }
     if (it.input_opens == 0 && deadline)
-        say("intuition: no input: no pointer or keys until it comes");
+        KLog("intuition: no input: no pointer or keys until it comes");
     await(&input_a);
 }
 
 /* input went: nothing is held down any more. */
 static void input_lost(void)
 {
-    say("intuition: input went: its ring opened again when it's back");
+    KLog("intuition: input went: its ring opened again when it's back");
     watch_set(&input_w, nullptr);
     ReleaseArea(it.ring);
     ClosePort(&it.ip);
@@ -2358,7 +2349,7 @@ static void costs(void)
     bool ok = true;
 
     if (!(src = it.gfx->AllocBitMap(it.width, it.height, PIXFMT_XRGB8888, 0, nullptr))) {
-        say("intuition: costs: no bitmap");
+        KLog("intuition: costs: no bitmap");
         return;
     }
     it.gfx->InitRastPort(&rp, src);
@@ -2404,7 +2395,7 @@ static void costs(void)
             WaitAddr(&it.ds->ds_Disp, it.ds->ds_Disp, CurrentTime() + 100 * MS);
     }
     if (!ok) {
-        say("intuition: costs: display wouldn't give the other kind of buffer, or a commit");
+        KLog("intuition: costs: display wouldn't give the other kind of buffer, or a commit");
         return;
     }
     KPrintF("intuition: costs, %lu frames each: the whole screen %lu us into NC, %lu us into cached and "
@@ -2421,16 +2412,16 @@ int main(uint64_t arg)
 
     it.task = FindTask(nullptr);
     if (!lib || !(it.gfx = (const struct GfxIFace *)IExec->GetInterface(lib, "main", 1))) {
-        say("intuition: no gfx.library");
+        KLog("intuition: no gfx.library");
         return 1;
     }
     if (CreateTask(watcher, (uint64_t)&latch_w) < 0 || CreateTask(watcher, (uint64_t)&input_w) < 0 ||
         CreateTask(awaiter, (uint64_t)&display_a) < 0 || CreateTask(awaiter, (uint64_t)&input_a) < 0) {
-        say("intuition: no tasks");
+        KLog("intuition: no tasks");
         return 1;
     }
     if ((h = screen_up(CurrentTime() + 5000 * MS)) != 0) {
-        say(h == ERR_NOSYS ? "intuition: display has no overlay and pointer planes to compose on"
+        KLog(h == ERR_NOSYS ? "intuition: display has no overlay and pointer planes to compose on"
                            : "intuition: no screen from display");
         return 2;
     }
@@ -2440,7 +2431,7 @@ int main(uint64_t arg)
     if (arg & INTUITION_COSTS)
         costs();
     if ((h = CreatePort("intuition", SIG_ACCEPT)) < 0) {
-        say("intuition: \"intuition\" couldn't be published");
+        KLog("intuition: \"intuition\" couldn't be published");
         return 1;
     }
     it.port = (Handle)h;

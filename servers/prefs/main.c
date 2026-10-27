@@ -43,31 +43,40 @@ static struct {
     char display[48], power[48];
 } pf;
 
-static void say(const char *s)
-{
-    KLog(s);
-}
+/* --- input, on a connection kept, and made again if input restarts. --- */
 
-/* --- input, on a connection made for each call. --- */
+static struct {
+    bool up;
+    struct MsgPort mp;
+    struct InputMsg *m;
+} ic;
 
 static int64_t input_call(uint32_t op, struct InputPrefs *p)
 {
-    struct MsgPort mp;
-    struct InputMsg *m;
-    int64_t e;
+    int64_t e = ERR_PORT_DIED;
 
-    if ((e = ConnectPort(&mp, "input", SIG_INPUT, 2, 2 * sizeof *m)) != 0)
-        return e;
-    e = ERR_NOMEM;
-    if ((m = AllocMsg(&mp, sizeof *m))) {
-        memset(m, 0, sizeof *m);
-        m->im_Msg.mn_Length = sizeof *m;
-        m->im_Op = op;
-        m->im_Prefs = *p;
-        if ((e = DoMsgUntil(&mp, &m->im_Msg, CurrentTime() + SECOND)) == 0 && (e = m->im_Msg.mn_Error) == 0)
-            *p = m->im_Prefs;
+    for (unsigned tries = 0; tries < 2 && e == ERR_PORT_DIED; tries++) {
+        if (!ic.up) {
+            if ((e = ConnectPort(&ic.mp, "input", SIG_INPUT, 2, 2 * sizeof *ic.m)) != 0)
+                return e;
+            if (!(ic.m = AllocMsg(&ic.mp, sizeof *ic.m))) {
+                ClosePort(&ic.mp);
+                return ERR_NOMEM;
+            }
+            ic.up = true;
+        }
+        memset(ic.m, 0, sizeof *ic.m);
+        ic.m->im_Msg.mn_Length = sizeof *ic.m;
+        ic.m->im_Op = op;
+        ic.m->im_Prefs = *p;
+        if ((e = DoMsgUntil(&ic.mp, &ic.m->im_Msg, CurrentTime() + SECOND)) == 0) {
+            if ((e = ic.m->im_Msg.mn_Error) == 0)
+                *p = ic.m->im_Prefs;
+            return e;
+        }
+        ClosePort(&ic.mp);          /* dead, or late: its message may still be out */
+        ic.up = false;
     }
-    ClosePort(&mp);
     return e;
 }
 
@@ -207,7 +216,7 @@ static bool change(const struct UIChange *c)
             pf.intuition->EasyRequest(&pf.in, &pf.w, &es);
             return true;
         }
-        say("prefs: the settings saved to SYS:Prefs/Env-Archive");
+        KLog("prefs: the settings saved to SYS:Prefs/Env-Archive");
         return false;
     default:
         break;
@@ -238,7 +247,7 @@ int main(uint64_t)
     int64_t e;
 
     if (!open_libs()) {
-        say("prefs: no gfx.library, intuition.library 8.7 or ui.library");
+        KLog("prefs: no gfx.library, intuition.library 8.7 or ui.library");
         return 1;
     }
     if ((e = pf.intuition->OpenIntuition(&pf.in, CurrentTime() + 5 * SECOND)) != 0) {
@@ -254,7 +263,7 @@ int main(uint64_t)
     said();
     if (!(pf.bm = pf.gfx->AllocBitMap(PW_WIDTH, PW_HEIGHT, PIXFMT_XRGB8888, 0, nullptr)) ||
         pf.iui->InitUI(&pf.ui, pf.gfx) != 0 || !pw_build(pf.iui, &pf.ui, &pf.ip, &pf.np, pf.display, pf.power)) {
-        say("prefs: no memory for its window");
+        KLog("prefs: no memory for its window");
         return 1;
     }
     e = OpenWindowTags(pf.intuition, &pf.in, &pf.w, { WA_Left, PW_LEFT }, { WA_Top, PW_TOP },
@@ -276,7 +285,7 @@ int main(uint64_t)
     while (going) {
         if ((e = pf.intuition->WaitIntuiEvent(&pf.in, CurrentTime() + SECOND)) == ERR_PORT_DIED ||
             PortGone(&pf.in.in_Port)) {
-            say("prefs: intuition went: ending");
+            KLog("prefs: intuition went: ending");
             return 3;
         }
         while (going && pf.intuition->GetIntuiEvent(&pf.in, &ev)) {

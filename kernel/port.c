@@ -375,6 +375,15 @@ static int64_t open_once(const char *name, int64_t sigbit, uint64_t slots, uint6
     if (!arch_copy_to_user(arena_out, &va, sizeof va))
         return ERR_BADADDR;
 
+    /* No such port: said before the arena's made, so that a wait for a
+     * name, or a client looking for a server that isn't there, costs no
+     * allocation. Looked for again below, where it counts. */
+    was = spin_lock_irqsave(&lock);
+    pt = find_port(name);
+    spin_unlock_irqrestore(&lock, was);
+    if (!pt)
+        return ERR_NOTFOUND;
+
     hdr = (struct ConnArena){ .ca_Magic = CONN_MAGIC, .ca_Version = CONN_VERSION,
                               .ca_Slots = (uint32_t)slots, .ca_Request = sizeof hdr };
     hdr.ca_Reply = hdr.ca_Request + ring_bytes((uint32_t)slots);

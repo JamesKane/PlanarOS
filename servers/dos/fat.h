@@ -43,6 +43,11 @@ struct fat_vol {
     uint32_t clusters;              /* data clusters: 2 to clusters + 1 */
     uint32_t root;                  /* the root directory's first cluster */
     uint32_t next_free;             /* where to look first for a free cluster */
+    uint32_t free;                  /* free clusters; UINT32_MAX until counted */
+    /* The last cluster a chain was followed to, where the next walk of
+     * it starts if it's further on: so reading a file or a directory in
+     * order doesn't walk its chain from the start each time. */
+    struct { uint32_t first, k, c; } walked;
     uint32_t fsinfo;                /* its sector; 0 if none */
     bool fsinfo_stale;              /* its free count marked unknown */
     char label[12];

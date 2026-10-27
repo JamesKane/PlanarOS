@@ -132,9 +132,13 @@ DISK_FILES = $(BUILD)/user/hello.elf:C/hello \
 	$(foreach f,$(wildcard cmd/scripts/*),$(f):S/$(notdir $(f)))
 DISK_DEPS = tools/mkdisk.py $(BUILD)/user/hello.elf $(CMD_ELFS) $(wildcard cmd/scripts/*)
 
-$(BUILD)/disk.img $(BUILD)/sd.img: $$(DISK_DEPS)
+$(BUILD)/disk.img: $$(DISK_DEPS)
 	@mkdir -p $(dir $@)
 	python3 -I tools/mkdisk.py $@ $(foreach f,$(DISK_FILES),--file $(subst :,:EFI/planar/,$(f)))
+
+# The SD card's is the same image (mkdisk's is fixed: GUIDs, serials, dates).
+$(BUILD)/sd.img: $(BUILD)/disk.img
+	cp $< $@
 
 SRCS := $(PORTABLE_SRCS) $(ARCH_SRCS) $(PLAT_SRCS)
 OBJS := $(patsubst %,$(BUILD)/%.o,$(SRCS)) $(ARCH_GEN_OBJS)
