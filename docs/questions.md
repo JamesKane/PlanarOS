@@ -295,6 +295,50 @@ Can we get usable vendor sources for the BXE-2-32? Is the 2 TOPS really in-core 
 
 Raised in §1.1 and §5.3.
 
+## Debugging
+
+**VQ46 Hold or dump on fault?**
+
+When a process faults with no debugger attached, should Planar keep killing it at once (today), hold it for a debugger to attach, or write a crash dump (registers, stacks, its Areas) to disk? *Leaning:* kill at once by default. Hold only processes marked hold-on-fault (`DBGF_HOLD`) or with a debugger attached. Crash dumps wait until post-mortem from the log alone proves too little.
+
+Raised in [§19.6](19-debugging.md#196-the-debug-port).
+
+**VQ47 Who may debug a process?**
+
+*Leaning:* whoever holds the process's handle with `RIGHT_DEBUG`. The creator gets that right, and `init` grants the Shell's `Debug` command a lease to debug any process except core servers. Debugging `hwdb`, `power` or `dos` needs the serial transport, since stopping them can stop the Shell.
+
+Raised in [§19.6](19-debugging.md#196-the-debug-port).
+
+**VQ48 Breakpoints in the shared library region.**
+
+Every process maps the library region, and a private copy of a page can't live at the same address (VA = PA). Should software breakpoints there be filtered by the kernel, with displaced instructions run out of line (uprobes-style), or should library code only take hardware breakpoints (typically 6 on Cortex-A cores, and often fewer triggers on RISC-V)? *Leaning:* out of line, since hardware breakpoints are too few once watchpoints compete for them.
+
+Raised in [§19.7](19-debugging.md#197-breakpoints-stepping-and-watchpoints).
+
+**VQ49 Where debug files live.**
+
+Should the debug tables be appended to the image, or kept in separate files found by build-id? *Leaning:* separate files under a `DEBUG:` assign, named by build-id. The image carries only its build-id and the unwind table, so crash backtraces work without the files.
+
+Raised in [§19.5](19-debugging.md#195-crash-records) and [§19.8](19-debugging.md#198-the-debugger-and-its-transports).
+
+**VQ50 planar-c on Planar.**
+
+On-board expression evaluation needs planar-c's parser, sema and lowering running on Planar. Port its library core (an `arena_planar.c` over `AllocArea`, plus a `dos.library` file layer), or evaluate expressions only from the host? *Leaning:* port it. The same port is also the first step towards compiling on the board.
+
+Raised in [§19.8](19-debugging.md#198-the-debugger-and-its-transports).
+
+**VQ51 Record and replay.**
+
+Is a trace mode for rings and lent Areas, which would make per-process replay possible, worth its copies? *Leaning:* not before the debugger's steps 1 to 4 are done. Revisit with measurements of ring traffic.
+
+Raised in [§19.10](19-debugging.md#1910-not-now-record-and-replay).
+
+**VQ52 Unwinding through assembly.**
+
+Should `.S` functions follow the frame-record convention through `FUNC_FRAME` and `FUNC_LEAF` macros, or carry hand-written unwind entries? *Leaning:* the macros. Assembly that can do neither (the trap entry, context switch) is marked a stopping point for the unwinder, and its registers come from the trap frame.
+
+Raised in [§19.7](19-debugging.md#197-breakpoints-stepping-and-watchpoints).
+
 ## Plan
 
 *(VQ19 decided; see the table above.)*

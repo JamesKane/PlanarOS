@@ -100,7 +100,8 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
 16. [RTG for modern DPUs and GPUs](docs/16-rtg-display-gpu.md): updating Commodore's original V36–V40 RTG and AAA/Hombre display architecture (`AllocBitMap`, `MonitorSpec`, `View`/`ViewPort`/`MrgCop`/`LoadView`, `ChangeScreenBuffer`) for multi-plane DPUs and user-mode GPU queue leases (proposed).
 17. [C23 runtime, `libc`, and Commodore V36–V40 libraries](docs/17-c-runtime-and-libraries.md): scaling up `exec.library` (`CreatePool`, `AllocVec`, `RawDoFmt`), `utility.library` (`TagItem`, `Hook`, 64-bit `Span`/`Str` slices), and `dos.library` (`ReadArgs`) to replace PDP-11 `libc` assumptions, with opt-in `lib/clib` and vendored `compiler-rt` 128-bit builtins (proposed).
 18. [PlanarBASIC](docs/18-planar-basic.md): interactive Workbench scripting and a system FFI, after AmigaBASIC (proposed).
-19. Phase plans, each with what was built and measured:
+19. [Debugging](docs/19-debugging.md): crash records with build-ids and backtraces, the debug port, breakpoints in a single address space, and one debugger on the board and over serial, on planar-c's own debug tables (proposed).
+20. Phase plans, each with what was built and measured:
     - [V1](docs/v1-plan.md): the SAS core, and the kernel's upper-half decision.
     - [V2](docs/v2-plan.md): IPC.
     - [V3](docs/v3-plan.md): the CIX P1, ACPI, core classes.
@@ -109,9 +110,9 @@ Each design decision is marked **decided**, **proposed** or **open**, as in Plan
     - [V6](docs/v6-plan.md): libraries, interfaces, supervision.
     - [V7](docs/v7-plan.md): windows.
     - [V8](docs/v8-plan.md): type and the desktop.
-20. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
-21. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
-22. [Open questions](docs/questions.md): the question register.
+21. [VQ3 results](docs/vq3-results.md): identity vs. global-VA, measured on QEMU, the RV2 and the CIX.
+22. [Code review](docs/10-code-review.md): the adversarial review after V2, and its fixes (V2.5).
+23. [Open questions](docs/questions.md): the question register.
 
 ## Status
 
