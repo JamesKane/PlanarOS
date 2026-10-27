@@ -14,20 +14,17 @@
  * Names, keys and property values are read in place, so the blob must
  * stay where it is while the graph is used.
  */
+#include <planar/endian.h>
+
 #include "hwdb.h"
 
 enum : uint32_t { FDT_MAGIC = 0xd00dfeed, BEGIN_NODE = 1, END_NODE = 2, PROP = 3, NOP = 4, END = 9 };
 
 constexpr unsigned MAX_DEPTH = 32;
 
-static uint32_t be32(const uint8_t *p)
-{
-    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
-}
-
 static uint32_t tok(const struct hw_graph *g, uint32_t off)
 {
-    return off <= g->fdt_struct_size - 4 ? be32(g->fdt + g->fdt_struct + off) : END;
+    return off <= g->fdt_struct_size - 4 ? get_be32(g->fdt + g->fdt_struct + off) : END;
 }
 
 /* A NUL-terminated string at 'off' in the structure block, or nullptr. */
@@ -101,7 +98,7 @@ static uint32_t prop_u32(const struct hw_graph *g, hw_id node, const char *name,
     uint32_t len;
     const uint8_t *p = hw_fdt_prop(g, node, name, &len);
 
-    return p && len == 4 ? be32(p) : fallback;
+    return p && len == 4 ? get_be32(p) : fallback;
 }
 
 static hw_id by_phandle(const struct hw_graph *g, uint32_t ph)
@@ -149,7 +146,7 @@ static void read_node_props(struct hw_graph *g, hw_id id, uint32_t off)
 
             n->enabled = hw_streq(s, "okay") || hw_streq(s, "ok");
         } else if ((hw_streq(name, "phandle") || hw_streq(name, "linux,phandle")) && len == 4) {
-            n->phandle = be32(v);
+            n->phandle = get_be32(v);
         }
     }
 }
@@ -245,7 +242,7 @@ static uint64_t cells_value(const uint8_t *p, uint32_t cells)
     uint64_t v = 0;
 
     for (uint32_t i = 0; i < cells; i++)
-        v = v << 32 | be32(p + 4 * i);
+        v = v << 32 | get_be32(p + 4 * i);
     return v;
 }
 
@@ -303,7 +300,7 @@ static void read_dma(struct hw_graph *g, hw_id id)
     uint64_t limit = 0;
 
     if (r && len >= 4)
-        bus = by_phandle(g, be32(r));
+        bus = by_phandle(g, get_be32(r));
     for (hw_id b = g->nodes[id].parent; bus == HW_NONE && b != HW_NONE; b = g->nodes[b].parent)
         if (hw_fdt_prop(g, b, "dma-ranges", &len))
             bus = b;
@@ -378,13 +375,13 @@ static void read_pci_host(struct hw_graph *g, hw_id id)
     n->res[0].cells[1] = 0;
     n->res[0].cells[2] = (uint32_t)((n->res[0].size >> 20) - 1);
     if ((p = hw_fdt_prop(g, id, "bus-range", &len)) && len == 8) {
-        n->res[0].cells[1] = be32(p);
-        n->res[0].cells[2] = be32(p + 4);
+        n->res[0].cells[1] = get_be32(p);
+        n->res[0].cells[2] = get_be32(p + 4);
     }
     if (!(p = hw_fdt_prop(g, id, "ranges", &len)) || pac > 2 || sc > 2)
         return;
     for (uint32_t o = 0; o + entry <= len; o += entry) {
-        uint32_t space = be32(p + o) >> 24 & 3;     /* 1 I/O, 2 32-bit memory, 3 64-bit */
+        uint32_t space = get_be32(p + o) >> 24 & 3;     /* 1 I/O, 2 32-bit memory, 3 64-bit */
         uint64_t bus = cells_value(p + o + 4, 2), cpu = cells_value(p + o + 12, pac);
         struct hw_res *r;
 
@@ -395,7 +392,7 @@ static void read_pci_host(struct hw_graph *g, hw_id id)
         r->size = cells_value(p + o + 12 + 4 * pac, sc);
         r->ncells = 3;
         r->cells[0] = (space >= 2 ? HW_WIN_MEM : 0) | (space == 3 ? HW_WIN_64 : 0) |
-                      (be32(p + o) & 1u << 30 ? HW_WIN_PREFETCH : 0);
+                      (get_be32(p + o) & 1u << 30 ? HW_WIN_PREFETCH : 0);
         r->cells[1] = (uint32_t)(bus >> 32);
         r->cells[2] = (uint32_t)bus;
         if (!translate(g, n->parent, &r->base))
@@ -451,7 +448,7 @@ static void add_irq(struct hw_graph *g, hw_id id, hw_id ctlr, const uint8_t *p, 
     r->ctlr = ctlr;
     r->ncells = (uint8_t)(ncells < HW_CELLS ? ncells : HW_CELLS);
     for (uint32_t i = 0; i < r->ncells; i++)
-        r->cells[i] = be32(p + 4 * i);
+        r->cells[i] = get_be32(p + 4 * i);
     r->base = irq_line(&g->nodes[ctlr], r->cells, r->ncells);
 }
 
@@ -477,7 +474,7 @@ static void read_interrupts(struct hw_graph *g, hw_id id)
 
     if ((p = hw_fdt_prop(g, id, "interrupts-extended", &len))) {
         for (uint32_t o = 0; o + 4 <= len; o += 4 * (cells + 1)) {
-            ph = be32(p + o);
+            ph = get_be32(p + o);
             ctlr = by_phandle(g, ph);
             if (ctlr == HW_NONE) {
                 irq_ref(g, id, HW_NONE, ph, "interrupts-extended");
@@ -487,7 +484,7 @@ static void read_interrupts(struct hw_graph *g, hw_id id)
             if (o + 4 * (cells + 1) > len)
                 return;
             /* A PLIC context no hart takes (M-mode's, under OpenSBI). */
-            if (cells == 1 && be32(p + o + 4) == UINT32_MAX)
+            if (cells == 1 && get_be32(p + o + 4) == UINT32_MAX)
                 continue;
             add_irq(g, id, ctlr, p + o + 4, cells, "interrupts-extended");
         }
@@ -510,7 +507,7 @@ static void read_interrupts(struct hw_graph *g, hw_id id)
 
         for (uint32_t o = 0; o + 4 * (cac + cic + 1) <= len;) {
             o += 4 * (cac + cic);
-            ph = be32(p + o);
+            ph = get_be32(p + o);
             ctlr = by_phandle(g, ph);
             irq_ref(g, id, ctlr, ph, "interrupt-map");
             if (ctlr == HW_NONE)
@@ -536,7 +533,7 @@ static void phandle_list(struct hw_graph *g, hw_id id, const char *prop, const u
                          uint32_t len, enum hw_ref_kind kind, const char *cells, bool required)
 {
     for (uint32_t o = 0; o + 4 <= len;) {
-        uint32_t ph = be32(p + o), n;
+        uint32_t ph = get_be32(p + o), n;
         hw_id t = by_phandle(g, ph);
         struct hw_ref *r;
 
@@ -557,7 +554,7 @@ static void phandle_list(struct hw_graph *g, hw_id id, const char *prop, const u
         }
         r->ncells = (uint8_t)(n < HW_CELLS ? n : HW_CELLS);
         for (uint32_t i = 0; i < r->ncells; i++)
-            r->cells[i] = be32(p + o + 4 * i);
+            r->cells[i] = get_be32(p + o + 4 * i);
         o += 4 * n;
     }
 }
@@ -585,17 +582,17 @@ static void id_map(struct hw_graph *g, hw_id id, const char *prop, const uint8_t
                    enum hw_ref_kind kind)
 {
     for (uint32_t o = 0; o + 16 <= len; o += 16) {
-        uint32_t ph = be32(p + o + 4);
+        uint32_t ph = get_be32(p + o + 4);
         bool seen = false;
         struct hw_ref *r;
         struct hw_res *m;
 
         if (kind == HW_REF_MSI && (m = hw_res_add(g, id))) {
             m->kind = HW_MSIMAP;
-            m->base = be32(p + o);
-            m->size = be32(p + o + 12);
+            m->base = get_be32(p + o);
+            m->size = get_be32(p + o + 12);
             m->ncells = 1;
-            m->cells[0] = be32(p + o + 8);
+            m->cells[0] = get_be32(p + o + 8);
             m->ctlr = by_phandle(g, ph);
         }
 
@@ -720,14 +717,14 @@ bool hw_from_fdt(struct hw_graph *g, const void *blob, uint32_t size)
     const uint8_t *b = blob;
     uint32_t total, version;
 
-    if (size < 40 || be32(b) != FDT_MAGIC)
+    if (size < 40 || get_be32(b) != FDT_MAGIC)
         return false;
-    total = be32(b + 4);
-    version = be32(b + 20);
-    g->fdt_struct = be32(b + 8);
-    g->fdt_strings = be32(b + 12);
-    g->fdt_strings_size = be32(b + 32);
-    g->fdt_struct_size = be32(b + 36);
+    total = get_be32(b + 4);
+    version = get_be32(b + 20);
+    g->fdt_struct = get_be32(b + 8);
+    g->fdt_strings = get_be32(b + 12);
+    g->fdt_strings_size = get_be32(b + 32);
+    g->fdt_struct_size = get_be32(b + 36);
     if (total > size || version < 17 || g->fdt_struct > total ||
         g->fdt_struct_size > total - g->fdt_struct || g->fdt_struct_size < 4 ||
         g->fdt_strings > total || g->fdt_strings_size > total - g->fdt_strings)

@@ -25,6 +25,13 @@ static inline uint64_t get_be64(const void *p)
     return (uint64_t)get_be32(b) << 32 | get_be32(b + 4);
 }
 
+static inline uint32_t get_le16(const void *p)
+{
+    const uint8_t *b = p;
+
+    return (uint32_t)b[1] << 8 | b[0];
+}
+
 static inline uint32_t get_le32(const void *p)
 {
     const uint8_t *b = p;

@@ -26,6 +26,7 @@
  * own registers, and step 5's.
  */
 #include <planar/syscalls.h>
+#include <planar/utility.h>
 
 #include "power.h"
 #include "smt.h"
@@ -149,13 +150,6 @@ static int64_t call(struct chan *c, uint32_t proto, uint32_t msg, const uint32_t
     return 0;
 }
 
-static bool is(const char *a, const char *b)
-{
-    while (*a && *a == *b)
-        a++, b++;
-    return *a == *b;
-}
-
 static void say_version(const char *what, int64_t e, uint32_t v)
 {
     char line[96];
@@ -187,9 +181,9 @@ static bool init(void)
     for (unsigned i = 0; i < pw_ndev; i++) {
         if (pw_dev[i].be != &pw_scmi || !pw_dev[i].regs)
             continue;
-        if (is(pw_dev[i].key, "CIXHA004"))
+        if (StrEqual(pw_dev[i].key, "CIXHA004"))
             mbox.shm = pw_dev[i].regs;
-        else if (is(pw_dev[i].key, "CIXHA001") && pw_dev[i].size > DB)
+        else if (StrEqual(pw_dev[i].key, "CIXHA001") && pw_dev[i].size > DB)
             mbox.doorbell = (volatile uint32_t *)(pw_dev[i].regs + DB);
     }
     if (mbox.shm && mbox.doorbell) {

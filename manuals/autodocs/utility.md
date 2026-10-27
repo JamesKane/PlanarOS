@@ -298,6 +298,37 @@ None known.
 
 ---
 
+## utility/StrEqual
+
+**NAME**
+StrEqual -- two C strings the same
+
+**SYNOPSIS**
+```c
+#include <planar/utility.h>
+bool StrEqual(const char *a, const char *b);
+```
+
+**FUNCTION**
+True if `a` and `b` hold the same bytes up to and including their NULs. Inline in the header, so a shared library or a driver can use it without linking `libutility.a`.
+
+**INPUTS**
+- `a`, `b` -- NUL-ended strings.
+
+**RESULT**
+`true` if they're the same, byte for byte; `Stricmp` is the case-blind comparison.
+
+**NOTES**
+- **Differs from Exec:** Commodore's had no such call; C's is `strcmp(a, b) == 0`.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[Stricmp](#utilitystricmp)
+
+---
+
 ## utility/StrFromC
 
 **NAME**

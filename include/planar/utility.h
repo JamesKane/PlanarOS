@@ -70,6 +70,14 @@ int Strnicmp(const char *s1, const char *s2, uint64_t n);
 int64_t VSNPrintf(char *buffer, uint64_t bufferSize, const char *fmt, va_list args);
 int64_t SNPrintf(char *buffer, uint64_t bufferSize, const char *fmt, ...);
 
+/* Two C strings the same, byte for byte. */
+static inline bool StrEqual(const char *a, const char *b)
+{
+    while (*a && *a == *b)
+        a++, b++;
+    return *a == *b;
+}
+
 /* --- Span and Str --- */
 
 /* Bytes by their length: often a view into a read-only Area. */

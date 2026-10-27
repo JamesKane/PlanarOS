@@ -17,6 +17,7 @@
  * in them; hwdb is idle while this runs. Exit 0 if every read was right.
  */
 #include <planar/blk.h>
+#include <planar/endian.h>
 #include <planar/syscalls.h>
 
 constexpr int64_t SIG_BLK = 16;
@@ -98,15 +99,6 @@ static void put_frac(struct line *l, uint64_t num, uint64_t den)
     put_dec(l, h % 10);
 }
 
-static uint64_t le64(const uint8_t *p)
-{
-    uint64_t v = 0;
-
-    for (unsigned i = 0; i < 8; i++)
-        v |= (uint64_t)p[i] << 8 * i;
-    return v;
-}
-
 struct io {
     struct BlkMsg *m;
     uint8_t *buf;
@@ -149,7 +141,7 @@ int main(uint64_t unit)
     if (blk_partition(&b, 2) == 0 && b.block_size <= BYTES) {
         uint8_t *first = blk_alloc(&b, b.block_size);
 
-        check = first && blk_read(&b, 0, 1, first) == 0 && le64(first) == b.first;
+        check = first && blk_read(&b, 0, 1, first) == 0 && get_le64(first) == b.first;
     }
     if (!check) {
         b.first = 0;
@@ -205,7 +197,7 @@ int main(uint64_t unit)
             if (m->bm_Msg.mn_Error || m->bm_Req[0].br_Error)
                 wrong++;
             for (uint32_t k = 0; k < per && check; k++)
-                wrong += le64(io[i].buf + k * b.block_size) != b.first + io[i].block + k;
+                wrong += get_le64(io[i].buf + k * b.block_size) != b.first + io[i].block + k;
             lat[done] = CurrentTime() - io[i].at;
             sum += lat[done];
             done++;

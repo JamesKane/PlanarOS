@@ -15,6 +15,7 @@
  * wastes power and breaks nothing.
  */
 #include <planar/syscalls.h>
+#include <planar/utility.h>
 
 #include "power.h"
 
@@ -33,13 +34,6 @@ struct vote {
 
 static struct vote votes[PW_VOTES];
 
-static bool streq(const char *a, const char *b)
-{
-    while (*a && *a == *b)
-        a++, b++;
-    return *a == *b;
-}
-
 int pw_add(const struct pw_backend *be, const char *name, uint8_t kind, uint32_t a, uint32_t b,
            uint32_t c)
 {
@@ -52,7 +46,7 @@ int pw_add(const struct pw_backend *be, const char *name, uint8_t kind, uint32_t
 int pw_find(const char *name)
 {
     for (unsigned i = 0; i < pw_nres; i++)
-        if (streq(pw_res[i].name, name))
+        if (StrEqual(pw_res[i].name, name))
             return (int)i;
     return -1;
 }
@@ -69,7 +63,7 @@ void pw_device(const char *key, volatile uint8_t *regs, uint64_t base, uint64_t 
     *d = (struct pw_dev){ .key = key, .regs = regs, .base = base, .size = size };
     for (unsigned b = 0; b < sizeof backends / sizeof backends[0] && !d->be; b++)
         for (const char *const *k = backends[b]->keys; *k; k++)
-            if (streq(*k, key))
+            if (StrEqual(*k, key))
                 d->be = backends[b];
 }
 
@@ -174,7 +168,7 @@ static int64_t resolve(const struct PowerMsg *m, uint16_t *out, uint32_t *untouc
             for (unsigned i = 0; i < pw_ndev; i++)
                 live |= pw_dev[i].be == backends[b];
             for (const char *const *const *s = backends[b]->sets; live && s && *s; s++)
-                if (streq((*s)[0], m->pm_Name))
+                if (StrEqual((*s)[0], m->pm_Name))
                     set = *s + 1;
         }
         if (!set)

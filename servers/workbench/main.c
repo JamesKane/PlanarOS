@@ -118,11 +118,6 @@ static struct {
     Handle child[CHILDREN];
 } wb = { .click_icon = -1 };
 
-static void say(const char *s)
-{
-    KLog(s);
-}
-
 /* --- Drawing. --- */
 
 static void present(struct Window *w, struct UI *ui)
@@ -232,22 +227,12 @@ static void hud_tick(void)
 
 static int64_t hwdb_call(uint32_t op)
 {
-    struct MsgPort mp;
-    struct HwdbMsg *m;
-    int64_t e;
+    static struct HwdbMsg m;        /* 4 KiB: not on the stack */
 
-    if ((e = ConnectPort(&mp, "hwdb", SIG_CALL, 2, 2 * sizeof *m)) != 0)
-        return e;
-    e = ERR_NOMEM;
-    if ((m = AllocMsg(&mp, sizeof *m))) {
-        memset(m, 0, sizeof *m);
-        m->hm_Msg.mn_Length = sizeof *m;
-        m->hm_Op = op;
-        if ((e = DoMsgUntil(&mp, &m->hm_Msg, CurrentTime() + DRV_HWDB_MS * MS)) == 0)
-            e = m->hm_Msg.mn_Error;
-    }
-    ClosePort(&mp);
-    return e;
+    memset(&m, 0, sizeof m);
+    m.hm_Msg.mn_Length = sizeof m;
+    m.hm_Op = op;
+    return CallPort("hwdb", SIG_CALL, &m.hm_Msg, CurrentTime() + DRV_HWDB_MS * MS);
 }
 
 static void tell(struct Window *w, const char *title, const char *body)
@@ -728,7 +713,7 @@ int main(uint64_t)
 
     wb.task = FindTask(nullptr);
     if (!open_libs()) {
-        say("workbench: no gfx.library, intuition.library 8.7, ui.library or System Sans");
+        KLog("workbench: no gfx.library, intuition.library 8.7, ui.library or System Sans");
         return 1;
     }
     if ((e = OpenDosUntil(&wb.dos, SIG_DOS, CurrentTime() + 10000 * MS)) != 0) {
@@ -751,7 +736,7 @@ int main(uint64_t)
 
         e = wb.intuition->WaitIntuiEvent(&wb.in, until);
         if (e == ERR_PORT_DIED || PortGone(&wb.in.in_Port)) {
-            say("workbench: intuition went: ending, for hwdb to start again");
+            KLog("workbench: intuition went: ending, for hwdb to start again");
             return 3;
         }
         if (!events())
@@ -764,6 +749,6 @@ int main(uint64_t)
             drawer_close(&wb.dr[i]);
     exec_close();
     wb.intuition->CloseWindow(&wb.back);
-    say("workbench: quit");
+    KLog("workbench: quit");
     return 0;
 }

@@ -127,6 +127,51 @@ None known.
 
 ---
 
+## exec/CallPort
+
+**NAME**
+CallPort -- one request of a server, on a connection made for it
+
+**SYNOPSIS**
+```c
+#include <planar/msg.h>
+int64_t CallPort(const char *name, int64_t sigbit, struct Message *m, uint64_t deadline);
+```
+
+**FUNCTION**
+Connects to the port `name` (`ConnectPort`, two slots and room for two messages of `m->mn_Length` bytes), copies `m` into the connection's heap, sends it with `DoMsgUntil`, copies the reply back over `m`, and closes the connection. For a call made now and then, where a connection kept would cost more than it saves: settings asked for or set, a request of hwdb's.
+
+**INPUTS**
+- `name` -- the server's port.
+- `sigbit` -- the signal the connection uses while the call waits.
+- `m` -- the request, anywhere in the caller's memory, with `mn_Length` set to its whole size.
+- `deadline` -- `DoMsgUntil`'s.
+
+**RESULT**
+`ConnectPort`'s error, `ERR_NOMEM`, or `DoMsgUntil`'s; else the reply's `mn_Error`. `m` holds the reply only if `DoMsgUntil` returned 0.
+
+**EXAMPLE**
+From `conformance/window.c`:
+```c
+static struct InputMsg m;
+
+m = (struct InputMsg){ .im_Msg.mn_Length = sizeof m, .im_Op = op, .im_Prefs = *p };
+if ((e = CallPort("input", SIG_INPUT, &m.im_Msg, CurrentTime() + 1000 * MS)) == 0)
+    *p = m.im_Prefs;
+```
+
+**NOTES**
+- A connection costs the kernel an arena, mapped on both sides, and the server an accept: a client that calls often keeps one (`servers/prefs` keeps input's).
+- A big message (a `struct HwdbMsg` is 4 KiB) is better static than on a 16 KiB stack.
+
+**BUGS**
+None known.
+
+**SEE ALSO**
+[ConnectPort](#execconnectport), [DoMsgUntil](#execdomsguntil)
+
+---
+
 ## exec/ClosePort
 
 **NAME**

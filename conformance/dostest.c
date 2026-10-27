@@ -12,6 +12,7 @@
 
 #include <planar/dos.h>
 #include <planar/syscalls.h>
+#include <planar/utility.h>
 
 constexpr int64_t SIG_DOS = 16;
 constexpr int64_t SIG_CHILD = 17;
@@ -58,13 +59,6 @@ static void check(bool ok, const char *what)
     failures++;
 }
 
-static bool same(const char *a, const char *b)
-{
-    while (*a && *a == *b)
-        a++, b++;
-    return *a == *b;
-}
-
 static void nap(uint64_t ms)
 {
     ArmTimer(CurrentTime() + ms * MS, SIG_NAP);
@@ -109,7 +103,7 @@ int main(void)
             put(&l, e.de_Name);
             if (e.de_Dir)
                 put(&l, "/");
-            test_disk |= same(e.de_Name, "hello.txt");
+            test_disk |= StrEqual(e.de_Name, "hello.txt");
         }
         CloseFile(&d, (uint32_t)f);
     }
@@ -123,7 +117,7 @@ int main(void)
         check(r == 30 && text[0] == 'H' && text[29] == '\n', "hello.txt reads wrong");
         CloseFile(&d, (uint32_t)f);
         check(ExaminePath(&d, "SYS:efi/planar/a file with a long name.txt", &e) == 0 &&
-                  same(e.de_Name, "A file with a long name.txt"),
+                  StrEqual(e.de_Name, "A file with a long name.txt"),
               "the long name isn't found");
     }
 

@@ -21,6 +21,7 @@
  */
 #include <planar/font.h>
 #include <planar/syscalls.h>
+#include <planar/utility.h>
 
 #include "rows.h"
 
@@ -80,13 +81,6 @@ static const struct FontIFace *font_iface(void)
 }
 #endif
 
-static bool same(const char *a, const char *b)
-{
-    while (*a && *a == *b)
-        a++, b++;
-    return *a == *b;
-}
-
 /* a / b rounded down, b > 0. */
 static int64_t floor_div(int64_t a, int64_t b)
 {
@@ -122,9 +116,9 @@ struct TextFont *OpenTextFont(const struct TextAttr *ta)
 
     if (!ta || !f || ta->ta_YSize < 1 || ta->ta_YSize > 255)
         return nullptr;
-    if (!ta->ta_Name || same(ta->ta_Name, "System Sans"))
+    if (!ta->ta_Name || StrEqual(ta->ta_Name, "System Sans"))
         which = FONT_SANS;
-    else if (same(ta->ta_Name, "System Mono"))
+    else if (StrEqual(ta->ta_Name, "System Mono"))
         which = FONT_MONO;
     else
         return nullptr;

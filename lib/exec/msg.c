@@ -296,6 +296,27 @@ static void stash(struct MsgPort *mp, struct Message *m)
     mp->mp_StashCount++;
 }
 
+int64_t CallPort(const char *name, int64_t sigbit, struct Message *m, uint64_t deadline)
+{
+    struct MsgPort mp;
+    struct Message *at;
+    int64_t e;
+
+    if ((e = ConnectPort(&mp, name, sigbit, 2, 2 * m->mn_Length)) != 0)
+        return e;
+    if (!(at = AllocMsg(&mp, m->mn_Length))) {
+        e = ERR_NOMEM;
+    } else {
+        memcpy(at, m, m->mn_Length);
+        if ((e = DoMsgUntil(&mp, at, deadline)) == 0) {
+            memcpy(m, at, m->mn_Length);
+            e = m->mn_Error;
+        }
+    }
+    ClosePort(&mp);
+    return e;
+}
+
 int64_t DoMsg(struct MsgPort *mp, struct Message *m)
 {
     return DoMsgUntil(mp, m, DEADLINE_NONE);

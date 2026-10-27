@@ -24,6 +24,7 @@
 
 #include <planar/devices/input.h>
 #include <planar/syscalls.h>
+#include <planar/utility.h>
 
 #include "xhci.h"
 
@@ -79,13 +80,6 @@ void xsay(struct xhc *c, struct xline *l)
 void xlog(struct xhc *c, const char *text)
 {
     drv_log(the, c->drv, text);
-}
-
-static bool streq(const char *a, const char *b)
-{
-    while (*a && *a == *b)
-        a++, b++;
-    return *a == *b;
 }
 
 /* --- input. --- */
@@ -260,7 +254,7 @@ static int bind(struct drv *d, struct drv_dev *dev)
     if (info->dd_Size < 0x1000)
         return DRV_DECLINE;
     c->cap = dev->regs;
-    if (streq(info->dd_Key, "ky,x1-dwc3") && !dwc3_host(d, c)) {
+    if (StrEqual(info->dd_Key, "ky,x1-dwc3") && !dwc3_host(d, c)) {
         c->cap = nullptr;
         return DRV_DECLINE;
     }

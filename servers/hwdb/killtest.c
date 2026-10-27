@@ -43,6 +43,7 @@
 
 #include <planar/blk.h>
 #include <planar/dos.h>
+#include <planar/endian.h>
 #include <planar/syscalls.h>
 
 #include "server.h"
@@ -124,15 +125,6 @@ static bool plausible(const struct client *c, const struct DrvRequest *r)
  * shows as a reconnect, and a recovery as a good read after one. */
 static uint8_t blocks[CLIENTS][8 * 4096];
 
-static uint64_t le64(const uint8_t *p)
-{
-    uint64_t v = 0;
-
-    for (unsigned i = 0; i < 8; i++)
-        v |= (uint64_t)p[i] << 8 * i;
-    return v;
-}
-
 static void block_client(struct client *c, uint8_t *buf)
 {
     struct blk b;
@@ -153,7 +145,7 @@ static void block_client(struct client *c, uint8_t *buf)
             if (p == ERR_PORT_DIED)
                 e = p;
             else if (p == 0 && (e = blk_read(&b, 0, 1, buf)) == 0)
-                check = le64(buf) == b.first;
+                check = get_le64(buf) == b.first;
             if (e == 0 && !check) {
                 b.first = 0;
                 b.blocks = b.dev_blocks;
@@ -192,7 +184,7 @@ static void block_client(struct client *c, uint8_t *buf)
         }
         good = true;
         for (uint32_t k = 0; k < n && check; k++)
-            good &= le64(buf + k * b.block_size) == b.first + at + k;
+            good &= get_le64(buf + k * b.block_size) == b.first + at + k;
         if (b.reconnects != seen) {
             c->deaths += b.reconnects - seen;
             lost += b.reconnects - seen;

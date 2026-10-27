@@ -48,6 +48,7 @@
 | BltBitMap | [gfx](gfx.md#gfxbltbitmap) | library, through `IGfx` |
 | BltMask | [gfx](gfx.md#gfxbltmask) | library, through `IGfx` |
 | CallHookPkt | [utility](utility.md#utilitycallhookpkt) | library |
+| CallPort | [msg](msg.md#execcallport) | library |
 | ChangeWindowBuffers | [intuition](intuition.md#intuitionchangewindowbuffers) | library, through `IIntuition` |
 | ClearMenuStrip | [intuition](intuition.md#intuitionclearmenustrip) | library, through `IIntuition` |
 | CloseConn | [exec](exec.md#execcloseconn) | kernel |
@@ -181,6 +182,7 @@
 | SpanSlice | [utility](utility.md#utilityspanslice) | library |
 | SplitArgs | [dos](dos.md#dossplitargs) | library |
 | StartProcess | [exec](exec.md#execstartprocess) | kernel |
+| StrEqual | [utility](utility.md#utilitystrequal) | library |
 | StrFromC | [utility](utility.md#utilitystrfromc) | library |
 | StrHasPrefix | [utility](utility.md#utilitystrhasprefix) | library |
 | Stricmp, Strnicmp | [utility](utility.md#utilitystricmp) | library |

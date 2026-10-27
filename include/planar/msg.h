@@ -122,6 +122,14 @@ int64_t DoMsg(struct MsgPort *mp, struct Message *m);
 int64_t DoMsgUntil(struct MsgPort *mp, struct Message *m, uint64_t deadline);
 
 /*
+ * One request of the server at 'name', on a connection made for it and
+ * closed after: 'm' (m->mn_Length bytes) copied to the connection's
+ * heap, sent with DoMsgUntil, and its reply copied back to 'm'. The
+ * connection's error, or else the reply's mn_Error.
+ */
+int64_t CallPort(const char *name, int64_t sigbit, struct Message *m, uint64_t deadline);
+
+/*
  * Tell the supervisor, hwdb, that the server at port 'portName' missed a
  * deadline (lib/exec/report.c): it restarts it, once a second at most.
  * 0, or why it couldn't be told. It waits a second at most for hwdb, on

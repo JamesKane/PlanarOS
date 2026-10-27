@@ -79,11 +79,6 @@ static struct {
     bool timer;
 } cw;
 
-static void say(const char *text)
-{
-    KLog(text);
-}
-
 /* --- The watcher: intuition's page, to a signal. --- */
 
 static struct {
@@ -182,7 +177,7 @@ static void intuition_gone(void)
 {
     if (!cw.up)
         return;
-    say(cw.open ? "conwin: intuition went: the window's opened again when it's back" : "conwin: intuition went");
+    KLog(cw.open ? "conwin: intuition went: the window's opened again when it's back" : "conwin: intuition went");
     watch_stop();
     if (cw.open) {
         cw.left = cw.win.w_Sync->is_LeftEdge;   /* where it was dragged to */
@@ -440,11 +435,11 @@ int main(uint64_t)
 
     cw.task = FindTask(nullptr);
     if (!open_libs()) {
-        say("conwin: no gfx.library, intuition.library or System Mono");
+        KLog("conwin: no gfx.library, intuition.library or System Mono");
         return 1;
     }
     if (!(cells = AllocVec(TERM_LINES * TERM_COLS * sizeof *cells, AREAF_CLEAR))) {
-        say("conwin: no memory for the scrollback");
+        KLog("conwin: no memory for the scrollback");
         return 1;
     }
     term_init(&cw.t, cells, CONWIN_COLS, CONWIN_ROWS);
@@ -454,7 +449,7 @@ int main(uint64_t)
             break;
     }
     if (cw.n > CONWIN_MAX) {
-        say("conwin: con.1 to con.8 are all taken");
+        KLog("conwin: con.1 to con.8 are all taken");
         return 1;
     }
     cw.port = (Handle)e;
@@ -462,7 +457,7 @@ int main(uint64_t)
     cw.left = CONWIN_LEFT + CONWIN_STEP * (int32_t)(cw.n - 1);
     cw.top = CONWIN_TOP + CONWIN_STEP * (int32_t)(cw.n - 1);
     if (CreateTask(watcher, 0) < 0) {
-        say("conwin: no task to watch for intuition's events");
+        KLog("conwin: no task to watch for intuition's events");
         return 1;
     }
     if ((e = open_window(CurrentTime() + 5000 * MS)) != 0) {

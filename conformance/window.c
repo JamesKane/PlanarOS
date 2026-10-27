@@ -351,6 +351,9 @@ static uint32_t screen_px(int32_t x, int32_t y)
 
 /* The checksum DISPLAY_READ would give; false if the rectangle holds
  * chrome, which the model doesn't know (a test's mistake). */
+static uint32_t crc_step(uint32_t crc, uint32_t px);
+static void nap(uint64_t ms);
+
 static bool expect(int32_t x0, int32_t y0, uint32_t w, uint32_t h, uint32_t *sum)
 {
     uint32_t crc = ~0u;
@@ -361,13 +364,7 @@ static bool expect(int32_t x0, int32_t y0, uint32_t w, uint32_t h, uint32_t *sum
 
             if (px == CHROME)
                 return false;
-            px &= 0xffffff;
-
-            for (unsigned k = 0; k < 32; k += 8) {
-                crc ^= px >> k & 0xff;
-                for (unsigned i = 0; i < 8; i++)
-                    crc = crc >> 1 ^ (0xedb88320u & -(crc & 1));
-            }
+            crc = crc_step(crc, px);
         }
     *sum = ~crc;
     return true;
@@ -387,6 +384,8 @@ static bool screen_is(bool readable, int32_t x, int32_t y, uint32_t w, uint32_t 
     do
         if (read_screen(x, y, w, h, &got) == 0 && got == want)
             return true;
+        else
+            nap(5);                     /* leave the CPU to what's to draw it */
     while (CurrentTime() < until);
     KPrintF("window: the screen at (%ld, %ld), %lux%lu, the pointer at (%ld, %ld): %08lx, not %08lx",
             (int64_t)x, (int64_t)y, (uint64_t)w, (uint64_t)h, (int64_t)ptr_x, (int64_t)ptr_y,
@@ -1641,10 +1640,10 @@ static int ui_half(bool readable)
 /* --- 6d: the Workbench and Prefs (V8 step 7). --- */
 
 /* The checksum DISPLAY_READ gives of w by h of a bitmap at (x, y). */
-static uint32_t crc_rect(const struct BitMap *bm, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h)
+/* DISPLAY_READ's CRC-32, a pixel's three bytes and a zero at a time. */
+static uint32_t crc_step(uint32_t crc, uint32_t px)
 {
     static uint32_t table[256];
-    uint32_t crc = ~0u;
 
     if (!table[1])
         for (uint32_t i = 0; i < 256; i++) {
@@ -1654,15 +1653,21 @@ static uint32_t crc_rect(const struct BitMap *bm, uint32_t x0, uint32_t y0, uint
                 c = c >> 1 ^ (0xedb88320u & -(c & 1));
             table[i] = c;
         }
+    px &= 0xffffff;
+    for (unsigned k = 0; k < 32; k += 8)
+        crc = crc >> 8 ^ table[(crc ^ px >> k) & 0xff];
+    return crc;
+}
+
+static uint32_t crc_rect(const struct BitMap *bm, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h)
+{
+    uint32_t crc = ~0u;
+
     for (uint32_t y = y0; y < y0 + h; y++) {
         const uint32_t *row = (const uint32_t *)((const uint8_t *)bm->bm_BaseAddr + (uint64_t)y * bm->bm_BytesPerRow);
 
-        for (uint32_t x = x0; x < x0 + w; x++) {
-            uint32_t px = row[x] & 0xffffff;
-
-            for (unsigned k = 0; k < 32; k += 8)
-                crc = crc >> 8 ^ table[(crc ^ px >> k) & 0xff];
-        }
+        for (uint32_t x = x0; x < x0 + w; x++)
+            crc = crc_step(crc, row[x]);
     }
     return ~crc;
 }
@@ -1672,22 +1677,12 @@ static struct Dos wdos;
 /* input's settings: INPUT_GET or INPUT_SET, on a connection made for it. */
 static int64_t input_prefs(uint32_t op, struct InputPrefs *p)
 {
-    struct MsgPort mp;
-    struct InputMsg *m;
+    static struct InputMsg m;
     int64_t e;
 
-    if ((e = ConnectPort(&mp, "input", SIG_INPUT, 2, 2 * sizeof *m)) != 0)
-        return e;
-    e = ERR_NOMEM;
-    if ((m = AllocMsg(&mp, sizeof *m))) {
-        memset(m, 0, sizeof *m);
-        m->im_Msg.mn_Length = sizeof *m;
-        m->im_Op = op;
-        m->im_Prefs = *p;
-        if ((e = DoMsgUntil(&mp, &m->im_Msg, CurrentTime() + 1000 * MS)) == 0 && (e = m->im_Msg.mn_Error) == 0)
-            *p = m->im_Prefs;
-    }
-    ClosePort(&mp);
+    m = (struct InputMsg){ .im_Msg.mn_Length = sizeof m, .im_Op = op, .im_Prefs = *p };
+    if ((e = CallPort("input", SIG_INPUT, &m.im_Msg, CurrentTime() + 1000 * MS)) == 0)
+        *p = m.im_Prefs;
     return e;
 }
 
@@ -2269,23 +2264,13 @@ static int survive(bool mouse)
 
 static int64_t hwdb_ask(uint32_t op, uint32_t token)
 {
-    struct MsgPort mp;
-    struct HwdbMsg *m;
-    int64_t e;
+    static struct HwdbMsg m;        /* 4 KiB: not on the stack */
 
-    if ((e = ConnectPort(&mp, "hwdb", SIG_HWDB, 2, 2 * sizeof *m)) != 0)
-        return e;
-    e = ERR_NOMEM;
-    if ((m = AllocMsg(&mp, sizeof *m))) {
-        memset(m, 0, sizeof *m);
-        m->hm_Msg.mn_Length = sizeof *m;
-        m->hm_Op = op;
-        m->hm_Token = token;
-        if ((e = DoMsgUntil(&mp, &m->hm_Msg, CurrentTime() + DRV_HWDB_MS * MS)) == 0)
-            e = m->hm_Msg.mn_Error;
-    }
-    ClosePort(&mp);
-    return e;
+    memset(&m, 0, sizeof m);
+    m.hm_Msg.mn_Length = sizeof m;
+    m.hm_Op = op;
+    m.hm_Token = token;
+    return CallPort("hwdb", SIG_HWDB, &m.hm_Msg, CurrentTime() + DRV_HWDB_MS * MS);
 }
 
 static uint32_t black;              /* the whole screen's CRC, were it black */

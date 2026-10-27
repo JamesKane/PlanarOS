@@ -74,11 +74,6 @@ static struct device {
     uint8_t last[8];                    /* the last report taken */
 } dev[DEVICES];
 
-static void say(const char *s)
-{
-    KLog(s);
-}
-
 /* --- The ring. --- */
 
 static void post(uint16_t cls, uint16_t code, uint16_t flags, uint16_t qual, uint32_t ch, int32_t x,
@@ -341,7 +336,7 @@ static void message(unsigned c, struct InputMsg *m)
             break;
         }
         dev[d] = (struct device){ .used = true, .conn = c, .id = q.im_Device, .kind = q.im_Kind };
-        say(q.im_Kind == INPUT_KEYBOARD ? "input: a keyboard" : "input: a mouse");
+        KLog(q.im_Kind == INPUT_KEYBOARD ? "input: a keyboard" : "input: a mouse");
         break;
     case INPUT_DETACH:
         if ((d = find(c, q.im_Device)) < 0) {
@@ -396,19 +391,19 @@ int main(uint64_t)
     void *at;
 
     if ((h = AllocArea(sizeof *in.ring, AREAF_CLEAR, &at)) < 0) {
-        say("input: no memory for the ring");
+        KLog("input: no memory for the ring");
         return 1;
     }
     in.ring_area = (Handle)h;
     in.ring = at;
     if ((h = CreatePort("input", SIG_ACCEPT)) < 0) {
-        say("input: \"input\" couldn't be published");
+        KLog("input: \"input\" couldn't be published");
         return 1;
     }
     in.port = (Handle)h;
     in.task = FindTask(nullptr);
     if (CreateTask(loader, 0) < 0)
-        say("input: no task to read the saved settings: the defaults kept");
+        KLog("input: no task to read the saved settings: the defaults kept");
     for (;;) {
         uint64_t before = in.events;
         uint64_t now, mask = 1ULL << SIG_ACCEPT | 1ULL << SIG_CONN | 1ULL << SIG_PREFS;
@@ -423,7 +418,7 @@ int main(uint64_t)
         if (__atomic_load_n(&saved.done, __ATOMIC_ACQUIRE) == 2) {
             if (!in.set) {
                 prefs_take(&saved.prefs);
-                say("input: the saved settings taken");
+                KLog("input: the saved settings taken");
             }
             saved.done = 1;
         }
